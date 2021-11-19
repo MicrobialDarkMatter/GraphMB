@@ -1,0 +1,17 @@
+*.edges
+*_out/
+bins/
+data/
+*_logs/
+embeddings/
+graphs/
+*.ckpt
+.vscode/
+venv/
+*.tsv
+*.csv
+*.html
+*.txt
+*.gfa
+*.pkl
+dist/

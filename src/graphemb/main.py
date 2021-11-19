@@ -9,6 +9,7 @@ import numpy as np
 import sys
 import copy
 import pickle
+import shutil
 import pdb
 import dgl
 import torch
@@ -30,10 +31,11 @@ from graph_functions import (
     draw_nx_graph,
     set_seed,
 )
-#from vamb import run
+from vamb.vamb_run import run as run_vamb
 
 SEED = 0
 BACTERIA_MARKERS = "data/Bacteria.ms"
+
 
 def main():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
@@ -45,7 +47,9 @@ def main():
         "--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)", default=0
     )
     parser.add_argument("--depth", type=str, help="Depth file from jgi", default=None)
-    parser.add_argument("--features", type=str, help="Features file mapping contig name to features", default=None)
+    parser.add_argument(
+        "--features", type=str, help="Features file mapping contig name to features", default="vamb_out/embs.tsv"
+    )
     parser.add_argument("--labels", type=str, help="File mapping contig to label", default=None)
     parser.add_argument("--markers", type=str, help="File mapping nodes to SCG counts", default=None)
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
@@ -87,6 +91,7 @@ def main():
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
+    parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
     args = parser.parse_args()
 
     set_seed()
@@ -102,8 +107,9 @@ def main():
     logger.info(args)
     logger.addHandler(stdout_handler)
     logging.getLogger("matplotlib.font_manager").disabled = True
-
+    logging.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
+
     # specify data properties for caching
     name = "contigs_graph"
     name += "_min" + str(args.mincontig) + "_kmer" + str(args.kmer)
@@ -121,6 +127,7 @@ def main():
         markers=args.markers,
     )
     dataset.assembly = args.assembly
+
     if args.randomize:
         random_graph = dgl.rand_graph(len(dataset.node_names), len(dataset.edges_src))
         random_graph = dgl.add_self_loop(random_graph)
@@ -140,7 +147,7 @@ def main():
     if args.depth is not None:
         dataset.depth = args.depth
         dataset.nodes_depths = []
-        dataset.read_depths(args.assembly + "/" + args.depth)
+        dataset.read_depths(os.path.join(args.assembly, args.depth))
         logging.debug("Abundance dim: {}".format(len(dataset.nodes_depths[0])))
         dataset.nodes_depths = torch.tensor(dataset.nodes_depths)
         if len(dataset.nodes_depths[0]) > 1:  # normalize depths
@@ -148,10 +155,51 @@ def main():
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
 
+    if args.vamb:
+        vamb_outdir = os.path.join(args.assembly, "vamb_out/")  # use vamb defaults
+        vamb_logpath = os.path.join(vamb_outdir, "log.txt")
+        # TODO embsize based on graph size
+        # TODO also adjust batch size and batch steps
+        if os.path.exists(vamb_outdir) and os.path.isdir(vamb_outdir):
+            shutil.rmtree(vamb_outdir)
+        os.mkdir(vamb_outdir)
+        with open(vamb_logpath, "w") as vamb_logfile:
+            print("running VAMB...")
+            batchsteps = []
+            vamb_epochs = 500
+            vamb_bs = 128
+            nhiddens = [512, 512]
+            # while len(dataset.contig_names) > vamb_bs* 2**len(batchsteps) and (len(batchsteps) == 0 or batchsteps[-1] < vamb_epochs):
+            #    if len(batchsteps) == 0:
+            #        batchsteps.append(50)
+            #    else:
+            #        batchsteps.append(batchsteps[-1] + batchsteps[-1]*2)
+            #    print(batchsteps)
+            # batchsteps = batchsteps[:-1]
+            batchsteps = [25, 75, 150, 300]
+            # reduce batchsteps if dataset is too small
+            while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
+                batchsteps = batchsteps[:-1]
+            print("using these batchsteps:", batchsteps)
+            run_vamb(
+                outdir=vamb_outdir,
+                fastapath=os.path.join(args.assembly, args.assembly_name),
+                jgipath=os.path.join(args.assembly, args.depth),
+                logfile=vamb_logfile,
+                cuda=args.cuda,
+                batchsteps=batchsteps,
+                batchsize=vamb_bs,
+                nepochs=vamb_epochs,
+                mincontiglength=100,
+                nhiddens=nhiddens,
+            )
+            print("VAMB output saved to {}".format(vamb_outdir))
+        args.features = "vamb_out/" + "embs.tsv"
+
     # Read other features/embs from file in tsv format
     if args.features is not None:
         node_embs = {}
-        with open(args.features, "r") as ffile:
+        with open(os.path.join(args.assembly, args.features), "r") as ffile:
             for line in ffile:
                 values = line.strip().split()
                 node_embs[values[0]] = [float(x) for x in values[1:]]
@@ -165,8 +213,8 @@ def main():
     dataset.nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
     if args.usekmer:
         dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer), dim=1)
-    if args.depth is not None:
-        dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
+    # if args.depth is not None:
+    #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
     if args.features is not None:
         dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_embs), dim=1)
     dataset.graph.ndata["feat"] = dataset.nodes_data
@@ -185,7 +233,6 @@ def main():
     graph = dataset[0]
     logger.info(graph)
     graph = graph.to(device)
-    
 
     # k can be user defined or dependent on the dataset
     k = len(dataset.species)
@@ -294,10 +341,11 @@ def main():
                 clusteringalgo=args.clusteringalgo,
                 print_interval=args.print,
                 loss_weights=args.loss_weights,
+                sample_weights=args.sample_weights,
                 logger=logger,
                 device=device,
             )
-    
+
     else:
         if args.embs is not None:
             emb_file = args.embs
@@ -334,7 +382,6 @@ def main():
             # len(dataset.connected),
             k,
             device=device,
-            contig_markers=dataset.markers,
         )
         # run for best epoch only
         if args.checkm_eval is not None:
@@ -414,6 +461,7 @@ def main():
     # plot tsne embs
     if "tsne" in args.post:
         from sklearn.manifold import TSNE
+
         print("running tSNE")
         # filter only good clusters
         tsne = TSNE(n_components=2, random_state=SEED)

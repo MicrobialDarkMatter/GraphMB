@@ -90,7 +90,6 @@ class CrossEntropyLoss(nn.Module):
         return loss
 
 
-
 class SAGE(nn.Module):
     def __init__(self, in_feats, n_hidden, n_classes, n_layers, activation, dropout, agg="mean"):
         super().__init__()
@@ -189,7 +188,8 @@ def train_graphsage(
     clusteringalgo="kmeans",
     k=1,
     logger=None,
-    loss_weights=False
+    loss_weights=False,
+    sample_weights=False,
 ):
 
     nfeat = dataset.graph.ndata.pop("feat")
@@ -198,8 +198,10 @@ def train_graphsage(
     n_edges = dataset.graph.num_edges()
     train_seeds = torch.arange(n_edges)
     set_seed()
-    neg_sampler = NegativeSampler(dataset.graph, num_negs, neg_share)
-    # neg_sampler = NegativeSamplerWeight(dataset.graph, num_negs, neg_share)
+    if not sample_weights:
+        neg_sampler = NegativeSampler(dataset.graph, num_negs, neg_share)
+    else:
+        neg_sampler = NegativeSamplerWeight(dataset.graph, num_negs, neg_share)
 
     # Create sampler
     sampler = dgl.dataloading.MultiLayerNeighborSampler([int(fanout) for fanout in fan_out.split(",")])
@@ -304,7 +306,7 @@ def train_graphsage(
         if epoch >= 5:
             avg += toc - tic
         encoded = encoded.cpu().detach().numpy()
-    
+
     last_train_embs = encoded
     last_model = model
     logger.info("saving last model")
