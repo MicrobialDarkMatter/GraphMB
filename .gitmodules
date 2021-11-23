@@ -1,0 +1,3 @@
+[submodule "vamb"]
+	path = vamb
+	url = https://github.com/AndreLamurias/vamb
