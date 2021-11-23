@@ -15,3 +15,5 @@ venv/
 *.gfa
 *.pkl
 dist/
+build/
+*/__pycache__/
