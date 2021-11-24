@@ -225,6 +225,7 @@ def train_graphsage(
     logger=None,
     loss_weights=False,
     sample_weights=False,
+    epsilon=0.1,
 ):
 
     nfeat = dataset.graph.ndata.pop("feat")
@@ -266,6 +267,7 @@ def train_graphsage(
     best_hq = 0
     best_hq_epoch = 0
     total_steps = 0
+    losses = []
     for epoch in range(num_epochs):
         tic = time.time()
         # Loop over the dataloader to sample the computation dependency graph as a list of
@@ -311,33 +313,48 @@ def train_graphsage(
             optimizer_sage.zero_grad()
             loss.backward()
             optimizer_sage.step()
+        losses.append(loss.item())
+        # early stopping
+        if len(losses) > 3 and (losses[-2] - losses[-1]) < epsilon and (losses[-3] - losses[-2]) < epsilon:
+            logger.info("Early stopping {}".format(str(losses[-5:])))
+            break
+
         model.eval()
         encoded = model.inference(dataset.graph, nfeat, device, batch_size, num_workers)
         if cluster_features:
             encoded = torch.cat((encoded, nfeat), axis=1)
-        best_hq, best_hq_epoch, kmeans_loss, clusters = cluster_eval(
-            model=model,
-            dataset=dataset,
-            logits=encoded,
-            clustering=clusteringalgo,
-            k=k,
-            loss=loss,
-            best_hq=best_hq,
-            best_hq_epoch=best_hq_epoch,
-            epoch=epoch,
-            device=device,
-            clusteringloss=False,
-            logger=logger,
-        )
+        if dataset.ref_marker_sets is not None:
+            best_hq, best_hq_epoch, kmeans_loss, clusters = cluster_eval(
+                model=model,
+                dataset=dataset,
+                logits=encoded,
+                clustering=clusteringalgo,
+                k=k,
+                loss=loss,
+                best_hq=best_hq,
+                best_hq_epoch=best_hq_epoch,
+                epoch=epoch,
+                device=device,
+                clusteringloss=False,
+                logger=logger,
+            )
 
-        # compare clusters
-        new_assignments = np.zeros(len(dataset.node_names))
-        for i, cluster in enumerate(clusters):
-            for contig in clusters[cluster]:
-                new_assignments[dataset.contig_names.index(contig)] = i
+            # compare clusters
+            new_assignments = np.zeros(len(dataset.node_names))
+            for i, cluster in enumerate(clusters):
+                for contig in clusters[cluster]:
+                    new_assignments[dataset.contig_names.index(contig)] = i
 
-        old_assignments = new_assignments.copy()
-
+            old_assignments = new_assignments.copy()
+        else:
+            logger.info(
+                "Epoch {:05d} | Best HQ: {} | Best epoch {} | Total loss {:.4f}".format(
+                    epoch,
+                    best_hq,
+                    best_hq_epoch,
+                    loss.detach(),
+                )
+            )
         toc = time.time()
         if epoch >= 5:
             avg += toc - tic
