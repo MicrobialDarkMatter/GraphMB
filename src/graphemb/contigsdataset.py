@@ -89,17 +89,12 @@ class ContigsDataset(DGLDataset):
             self.read_markers()  # TODO
 
         self.node_names = self.contig_names[:]
-       
 
         print("creating DGL graph")
         self.graph = dgl.graph((self.edges_src, self.edges_dst), num_nodes=len(self.nodes_data))
         self.graph.edata["weight"] = torch.tensor(self.edges_weight)
-        self.graph = dgl.remove_self_loop(self.graph)
-
 
         print("done")
-
- 
 
         contig_to_species = {c: {"NA": 1} for c in self.contig_names}
         for c in self.contig_names:
@@ -125,7 +120,7 @@ class ContigsDataset(DGLDataset):
         #    )
 
         assert len([c for comp in self.connected for c in comp]) <= len(self.node_names)
-      
+
         self.set_node_mask()
 
     def filter_edges(self, weight=0):
@@ -141,8 +136,6 @@ class ContigsDataset(DGLDataset):
         self.edges_dst = [self.edges_dst[i] for i in keep_idx]
         # self.graph.edata["weight"] = self.graph.edata["weight"][keep_idx]
         self.graph.remove_edges(idx_to_remove)
-        self.graph = dgl.remove_self_loop(self.graph)
-        self.graph = dgl.add_self_loop(self.graph)
 
     def filter_contigs(self):
         # remove disconnected
@@ -179,8 +172,6 @@ class ContigsDataset(DGLDataset):
         """Set contig nodes"""
         self.graph.ndata["contigs"] = torch.zeros(len(self.node_names), dtype=torch.bool)
         self.graph.ndata["contigs"][: len(self.contig_names)] = True
-
-  
 
     def read_seqs(self):
         """Read sequences from fasta file"""
@@ -271,8 +262,6 @@ class ContigsDataset(DGLDataset):
                 # reads_count = int(values[0])
             # contig_to_species[values[1]][speciesname] = reads_count
         return contig_to_species, read_to_species
-
-    
 
     def save(self):
         # save graphs and labels
