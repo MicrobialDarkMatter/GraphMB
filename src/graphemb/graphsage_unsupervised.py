@@ -20,11 +20,10 @@ from graph_functions import cluster_eval, set_seed
 class MultiLayerNeighborWeightedSampler(dgl.dataloading.MultiLayerNeighborSampler):
     def sample_frontier(self, block_id, g, seed_nodes):
         fanout = self.fanouts[block_id]
-
         # if fanout is None:
         #    frontier = subgraph.in_subgraph(g, seed_nodes)
         # else:
-        frontier = dgl.sampling.sample_neighbors(g, seed_nodes, fanout, replace=self.replace, prob=g.edata["weight"])
+        frontier = dgl.sampling.sample_neighbors(g, seed_nodes, fanout, replace=self.replace, prob="weight")
         return frontier
 
 
@@ -65,7 +64,7 @@ class NegativeSamplerWeight(object):
         #        random_pairs[src_node.item()] = [dst_node for dst_node]]
         # weights = (g.edata["scg_weight"] + 1) / g.edata["weight"]
         # breakpoint()
-        weights = 1 / g.edata["weight"]
+        # weights = 1 / g.edata["weight"]
 
         # random.shuffle(dst)
         # add random edges
@@ -83,9 +82,10 @@ class NegativeSamplerWeight(object):
         # print("adding", len(new_src), "more edges")
         src = src.repeat_interleave(self.k)
         expand_g = dgl.remove_self_loop(dgl.add_edges(g, new_src, new_dst))
-        weights = 1 / expand_g.edata["weight"]
+        expand_g.edata["weight"] = 1 / expand_g.edata["weight"]
+
         samples_edges = dgl.sampling.sample_neighbors(
-            expand_g, src, self.k, prob=weights, replace=True, edge_dir="out"
+            expand_g, src, self.k, prob="weight", replace=True, edge_dir="out"
         )
         src = samples_edges.edges()[0]
         dst = samples_edges.edges()[1]

@@ -67,7 +67,9 @@ def main():
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="mean")
     parser.add_argument("--kclusters", help="num of clusters", default=None)
     parser.add_argument("--negatives", help="num of negatives", default=1, type=int)
-    parser.add_argument("--fanout", help="Fan out", default="10,25")
+    parser.add_argument(
+        "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
+    )
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
     parser.add_argument("--kmer", default=4)
@@ -242,7 +244,7 @@ def main():
 
     # max_weight = dataset.graph.edata["weight"].max().item()
     # dataset.graph.edata["weight"][diff_edges:] = max_weight
-
+    dataset.graph.edata["weight"] = dataset.graph.edata["weight"].float()
     graph = dataset[0]
     logger.info(graph)
     graph = graph.to(device)
