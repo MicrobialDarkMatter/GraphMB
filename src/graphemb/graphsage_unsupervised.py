@@ -115,13 +115,17 @@ class CrossEntropyLoss(nn.Module):
             pos_weights = torch.ones_like(pos_score)
         neg_label = torch.zeros_like(neg_score)
         neg_weights = torch.ones_like(neg_score)
+        label = torch.cat([pos_weights, neg_label]).long()
+        loss = F.binary_cross_entropy_with_logits(score, label.float())
 
-        # label = torch.cat([pos_label, neg_label]).long()
         # weights = torch.cat([pos_weights, neg_weights])
-        pos_loss = F.binary_cross_entropy_with_logits(pos_score, pos_label.float(), weight=pos_weights)
-        neg_loss = F.binary_cross_entropy_with_logits(neg_score, neg_label.float(), weight=neg_weights)
-        # print(pos_loss, neg_loss)
-        loss = pos_loss + neg_loss
+        # pos_loss = F.binary_cross_entropy_with_logits(pos_score, pos_label.float(), weight=pos_weights)
+        # neg_loss = F.binary_cross_entropy_with_logits(neg_score, neg_label.float(), weight=neg_weights)
+        # print(pos_loss.item(), neg_loss.item())
+        # loss = pos_loss + neg_loss
+        # loss = neg_loss
+        # loss = -torch.sum(pos_score * pos_weights) - torch.sum(neg_score)
+        # return loss / len(pos_score)
         return loss
 
 
@@ -155,14 +159,15 @@ class SAGE(nn.Module):
         for il, (layer, block) in enumerate(zip(self.layers, blocks)):
             # weights = F.softmax(block.edata["weight"])
             weights = block.edata["weight"] / max(block.edata["weight"])
-            h = layer(block, h, edge_weight=weights)
+            # h = layer(block, h, edge_weight=weights)
+            h = layer(block, h)
             if il != len(self.layers) - 1:
                 # h = self.batchnorm(h)
                 h = self.activation(h)
                 # h = self.dropout(h)
         return h
 
-    def inference(self, g, x, device, batch_size, num_workers):
+    def inference(self, g, x, device, batch_size, num_workers, use_weights=False):
         """
         Inference with the GraphSAGE model on full neighbors (i.e. without neighbor sampling).
         g : the entire graph.
@@ -184,7 +189,7 @@ class SAGE(nn.Module):
                 torch.arange(g.num_nodes()).to(g.device),
                 sampler,
                 batch_size=batch_size,
-                shuffle=True,
+                shuffle=False,
                 drop_last=False,
                 num_workers=num_workers,
             )
@@ -194,9 +199,12 @@ class SAGE(nn.Module):
 
                 block = block.int().to(device)
                 h = x[input_nodes].to(device)
-                weights = block.edata["weight"] / max(block.edata["weight"])
-                # h = layer(block, h, edge_weight=None)
-                h = layer(block, h, edge_weight=weights)
+
+                if use_weights:
+                    weights = block.edata["weight"] / max(block.edata["weight"])
+                    h = layer(block, h, edge_weight=weights)
+                else:
+                    h = layer(block, h)
                 if il != len(self.layers) - 1:
                     h = self.activation(h)
                     h = self.dropout(h)
@@ -234,14 +242,15 @@ def train_graphsage(
     n_edges = dataset.graph.num_edges()
     train_seeds = torch.arange(n_edges)
     set_seed()
+
+    # Create samplers
     if not sample_weights:
         neg_sampler = NegativeSampler(dataset.graph, num_negs, neg_share)
+        sampler = dgl.dataloading.MultiLayerNeighborSampler([int(fanout) for fanout in fan_out.split(",")])
     else:
         neg_sampler = NegativeSamplerWeight(dataset.graph, num_negs, neg_share)
+        sampler = MultiLayerNeighborWeightedSampler([int(fanout) for fanout in fan_out.split(",")])
 
-    # Create sampler
-    # sampler = dgl.dataloading.MultiLayerNeighborSampler([int(fanout) for fanout in fan_out.split(",")])
-    sampler = MultiLayerNeighborWeightedSampler([int(fanout) for fanout in fan_out.split(",")])
     dataloader = dgl.dataloading.EdgeDataLoader(
         dataset.graph,
         train_seeds,
@@ -285,6 +294,10 @@ def train_graphsage(
             batch_pred = model(blocks, batch_inputs)
             loss = loss_fcn(batch_pred, pos_graph, neg_graph, weights=loss_weights)
 
+            optimizer_sage.zero_grad()
+            loss.backward()
+            optimizer_sage.step()
+
             t = time.time()
             pos_edges = pos_graph.num_edges()
             neg_edges = neg_graph.num_edges()
@@ -310,17 +323,20 @@ def train_graphsage(
             tic_step = time.time()
             total_steps += 1
 
-            optimizer_sage.zero_grad()
-            loss.backward()
-            optimizer_sage.step()
         losses.append(loss.item())
         # early stopping
-        if len(losses) > 3 and (losses[-2] - losses[-1]) < epsilon and (losses[-3] - losses[-2]) < epsilon:
+        if (
+            epsilon is not None
+            and len(losses) > 3
+            and (losses[-2] - losses[-1]) < epsilon
+            and (losses[-3] - losses[-2]) < epsilon
+        ):
             logger.info("Early stopping {}".format(str(losses[-5:])))
             break
 
         model.eval()
         encoded = model.inference(dataset.graph, nfeat, device, batch_size, num_workers)
+
         if cluster_features:
             encoded = torch.cat((encoded, nfeat), axis=1)
         if dataset.ref_marker_sets is not None:
