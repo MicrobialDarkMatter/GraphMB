@@ -44,12 +44,10 @@ def main():
     parser.add_argument("--assembly_name", type=str, help="File name with contigs", default="edges.fasta")
     parser.add_argument("--graph_file", type=str, help="File name with graph", default="assembly_graph.gfa")
     parser.add_argument(
-        "--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)", default=0
+        "--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)", default=None
     )
     parser.add_argument("--depth", type=str, help="Depth file from jgi", default=None)
-    parser.add_argument(
-        "--features", type=str, help="Features file mapping contig name to features", default="vamb_out/embs.tsv"
-    )
+    parser.add_argument("--features", type=str, help="Features file mapping contig name to features", default=None)
     parser.add_argument("--labels", type=str, help="File mapping contig to label", default=None)
     parser.add_argument("--markers", type=str, help="File mapping nodes to SCG counts", default=None)
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
@@ -92,6 +90,7 @@ def main():
     parser.add_argument("--outname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
+    parser.add_argument("--vambdim", help="VAMB latent dim", default=32)
     args = parser.parse_args()
 
     set_seed()
@@ -129,10 +128,12 @@ def main():
     dataset.assembly = args.assembly
 
     if args.randomize:
+        logger.info("generating a random graph")
         random_graph = dgl.rand_graph(len(dataset.node_names), len(dataset.edges_src))
-        random_graph = dgl.add_self_loop(random_graph)
+        # random_graph = dgl.add_self_loop(random_graph)
         for k in dataset.graph.ndata:
             random_graph.ndata[k] = dataset.graph.ndata[k]
+        random_graph.edata["weight"] = torch.ones(len(dataset.edges_src))
         dataset.graph = random_graph
 
     # filter graph by components
@@ -156,7 +157,7 @@ def main():
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
 
     if args.vamb:
-        vamb_outdir = os.path.join(args.assembly, "vamb_out/")  # use vamb defaults
+        vamb_outdir = os.path.join(args.assembly, "vamb_out{}/".format(args.vambdim))  # use vamb defaults
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
         # TODO embsize based on graph size
         # TODO also adjust batch size and batch steps
@@ -181,6 +182,9 @@ def main():
             while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
                 batchsteps = batchsteps[:-1]
             print("using these batchsteps:", batchsteps)
+            if len(batchsteps) < 4:  # auto adjust vamb dim (32 for smaller datasets)
+                # or len(dataset.nodes_depths[0])) < 2
+                args.vambdim = 32
             run_vamb(
                 outdir=vamb_outdir,
                 fastapath=os.path.join(args.assembly, args.assembly_name),
@@ -192,22 +196,26 @@ def main():
                 nepochs=vamb_epochs,
                 mincontiglength=100,
                 nhiddens=nhiddens,
+                nlatent=int(args.vambdim),
             )
             print("VAMB output saved to {}".format(vamb_outdir))
-        args.features = "vamb_out/" + "embs.tsv"
+        args.features = "vamb_out{}/".format(args.vambdim) + "embs.tsv"
 
-    # Read other features/embs from file in tsv format
-    if args.features is not None:
-        node_embs = {}
-        with open(os.path.join(args.assembly, args.features), "r") as ffile:
-            for line in ffile:
-                values = line.strip().split()
-                node_embs[values[0]] = [float(x) for x in values[1:]]
+    if args.features is None:
+        args.features = "vamb_out{}/embs.tsv".format(args.vambdim)
 
-        dataset.nodes_embs = [
-            node_embs.get(n, np.random.uniform(10e-5, 1.0, len(values[1:]))) for n in dataset.node_names
-        ]  # deal with missing embs
-        dataset.nodes_embs = torch.FloatTensor(dataset.nodes_embs)
+    # Read  features/embs from file in tsv format
+    node_embs = {}
+    print("loading features from", os.path.join(args.assembly, args.features))
+    with open(os.path.join(args.assembly, args.features), "r") as ffile:
+        for line in ffile:
+            values = line.strip().split()
+            node_embs[values[0]] = [float(x) for x in values[1:]]
+
+    dataset.nodes_embs = [
+        node_embs.get(n, np.random.uniform(10e-5, 1.0, len(values[1:]))) for n in dataset.node_names
+    ]  # deal with missing embs
+    dataset.nodes_embs = torch.FloatTensor(dataset.nodes_embs)
 
     # initialize empty features vector
     dataset.nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
@@ -224,11 +232,16 @@ def main():
     if args.no_edges:
         dataset.filter_edges(10e6)
     # elif args.read_edges or args.depth:
-    dataset.filter_edges(args.edge_threshold)
+    if args.edge_threshold is not None:
+        dataset.filter_edges(int(args.edge_threshold))
 
     # All nodes have a self loop
-    dataset.graph = dgl.add_self_loop(dgl.remove_self_loop(dataset.graph))
-    dataset.graph.edata["weight"] = dataset.graph.edata["weight"].type(torch.FloatTensor)
+    # dataset.graph = dgl.remove_self_loop(dataset.graph)
+    # diff_edges = len(dataset.graph.edata["weight"])
+    # dataset.graph = dgl.add_self_loop(dataset.graph)
+
+    # max_weight = dataset.graph.edata["weight"].max().item()
+    # dataset.graph.edata["weight"][diff_edges:] = max_weight
 
     graph = dataset[0]
     logger.info(graph)
