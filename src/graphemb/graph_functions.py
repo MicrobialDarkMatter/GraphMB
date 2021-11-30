@@ -392,24 +392,32 @@ def cluster_embs(
     device="cpu",
     node_lens=None,
 ):
-    
+
     if clusteringalgo == "vamb":
-        print("cuda", (device == "cuda:0"), device)
         it = vamb_cluster(
             node_embeddings, node_ids, cuda=(device == "cuda:0")
         )  # , seeds=seeds)  # contig_lens=node_lens)  #
         cluster_to_contig = {i: c for (i, (n, c)) in enumerate(it)}
-    
+
         # get embs to clusters (cluster to contig has only contig names, not index)
         """cluster_to_embs = {
             c: np.array([node_embeddings[i] for i, n in enumerate(node_ids) if n in cluster_to_contig[c]])
             for c in cluster_to_contig
         }
         cluster_centroids = np.array([cluster_to_embs[c].mean(0) for c in cluster_to_contig])"""
-        cluster_centroids = None # not necessary for now
+        cluster_centroids = None  # not necessary for now
     else:
-        from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering, MiniBatchKMeans, SpectralClustering, Birch, OPTICS
+        from sklearn.cluster import (
+            KMeans,
+            DBSCAN,
+            AgglomerativeClustering,
+            MiniBatchKMeans,
+            SpectralClustering,
+            Birch,
+            OPTICS,
+        )
         from sklearn.mixture import GaussianMixture
+
         if clusteringalgo == "kmeans":
             clustering = KMeans(n_clusters=kclusters, random_state=SEED)
             cluster_labels = clustering.fit_predict(node_embeddings)
@@ -644,7 +652,7 @@ def cluster_eval(
         clustering,
         # len(dataset.connected),
         k,
-        device=device
+        device=device,
     )
     if dataset.species is not None and len(dataset.species) > 1:
         evaluate_binning(

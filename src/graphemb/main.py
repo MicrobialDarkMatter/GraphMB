@@ -93,6 +93,7 @@ def main():
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
     parser.add_argument("--vambdim", help="VAMB latent dim", default=32)
+    parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     args = parser.parse_args()
 
     set_seed()
@@ -110,7 +111,8 @@ def main():
     logging.getLogger("matplotlib.font_manager").disabled = True
     logging.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
-
+    print("cuda available:", (device == "cuda:0"), ", using ", device)
+    torch.set_num_threads(args.numcores)
     # specify data properties for caching
     name = "contigs_graph"
     name += "_min" + str(args.mincontig) + "_kmer" + str(args.kmer)
