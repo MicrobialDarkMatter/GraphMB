@@ -115,9 +115,10 @@ class CrossEntropyLoss(nn.Module):
             pos_weights = torch.ones_like(pos_score)
         neg_label = torch.zeros_like(neg_score)
         neg_weights = torch.ones_like(neg_score)
-        label = torch.cat([pos_weights, neg_label]).long()
-        loss = F.binary_cross_entropy_with_logits(score, label.float())
-
+        all_weights = torch.cat([pos_weights, neg_weights])
+        label = torch.cat([pos_label, neg_label]).long()
+        # loss = F.binary_cross_entropy_with_logits(score, label.float())
+        loss = F.binary_cross_entropy_with_logits(score, label.float(), weight=all_weights)
         # weights = torch.cat([pos_weights, neg_weights])
         # pos_loss = F.binary_cross_entropy_with_logits(pos_score, pos_label.float(), weight=pos_weights)
         # neg_loss = F.binary_cross_entropy_with_logits(neg_score, neg_label.float(), weight=neg_weights)
