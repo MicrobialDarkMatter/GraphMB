@@ -167,7 +167,9 @@ def main():
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
 
-    if args.vamb:
+    vamb_embs_dir = os.path.join(args.assembly, "vamb_out{}/embs.tsv".format(args.vambdim))  # use vamb defaults
+    vamb_emb_exists = os.path.exists(vamb_embs_dir)
+    if args.vamb or not vamb_emb_exists:
         vamb_outdir = os.path.join(args.assembly, "vamb_out{}/".format(args.vambdim))  # use vamb defaults
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
         # TODO embsize based on graph size
