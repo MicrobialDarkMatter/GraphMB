@@ -70,6 +70,7 @@ def main():
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
     )
+    #
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
     parser.add_argument("--kmer", default=4)
@@ -77,6 +78,12 @@ def main():
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
     parser.add_argument("--loss_weights", action="store_true", help="Using edge weights for loss (positive only)")
     parser.add_argument("--sample_weights", action="store_true", help="Using edge weights to sample negatives")
+    parser.add_argument(
+        "--early_stopping",
+        type=float,
+        help="Stop training if delta between last two losses is less than this",
+        default="0.1",
+    )
     # data processing
     parser.add_argument("--mincontig", type=int, help="Minimum size of input contigs", default=1000)
     parser.add_argument("--minbin", type=int, help="Minimum size of clusters in bp", default=200000)
@@ -361,6 +368,7 @@ def main():
                 sample_weights=args.sample_weights,
                 logger=logger,
                 device=device,
+                epsilon=args.early_stopping,
             )
 
     else:
