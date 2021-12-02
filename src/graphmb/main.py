@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--batchsize", type=int, help="", default=10000)
     parser.add_argument("--dropout", type=float, help="", default=0.0)
     parser.add_argument("--lr", type=float, help="", default=0.0001)
-    parser.add_argument("--clusteringalgo", help="clustering algorithm", default=False)
+    parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="mean")
     parser.add_argument("--kclusters", help="num of clusters", default=None)
     parser.add_argument("--negatives", help="num of negatives", default=1, type=int)
