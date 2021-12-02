@@ -252,6 +252,9 @@ def train_graphsage(
         neg_sampler = NegativeSamplerWeight(dataset.graph, num_negs, neg_share)
         sampler = MultiLayerNeighborWeightedSampler([int(fanout) for fanout in fan_out.split(",")])
 
+    if batch_size == 0:
+        batch_size = len(train_seeds) - 100  # TODO fix this
+
     dataloader = dgl.dataloading.EdgeDataLoader(
         dataset.graph,
         train_seeds,

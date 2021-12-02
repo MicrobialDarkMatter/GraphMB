@@ -60,7 +60,7 @@ def main():
     parser.add_argument("--layers", type=int, help="", default=1)
     parser.add_argument("--hidden", type=int, help="", default=512)
     parser.add_argument("--embsize", type=int, help="", default=256)
-    parser.add_argument("--batchsize", type=int, help="", default=10000)
+    parser.add_argument("--batchsize", type=int, help="", default=0)
     parser.add_argument("--dropout", type=float, help="", default=0.0)
     parser.add_argument("--lr", type=float, help="", default=0.0001)
     parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
@@ -335,9 +335,6 @@ def main():
             model = model.to(device)
 
         logging.info(model)
-        if args.batchsize == 0:  # set 100 batches if batchsize is not given
-            args.batchsize = len(graph.edges()[0]) // 100
-            print("using {} batchsize".format(args.batchsize))
         if args.clusteringalgo is not None and not args.skip_preclustering:
             # cluster using only input features
             print("pre train clustering:")
