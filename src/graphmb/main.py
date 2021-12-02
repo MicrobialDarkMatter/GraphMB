@@ -57,12 +57,12 @@ def main():
     parser.add_argument(
         "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
     )
-    parser.add_argument("--layers", type=int, help="", default=1)
+    parser.add_argument("--layers", type=int, help="", default=3)
     parser.add_argument("--hidden", type=int, help="", default=512)
-    parser.add_argument("--embsize", type=int, help="", default=256)
+    parser.add_argument("--embsize", type=int, help="", default=32)
     parser.add_argument("--batchsize", type=int, help="", default=0)
     parser.add_argument("--dropout", type=float, help="", default=0.0)
-    parser.add_argument("--lr", type=float, help="", default=0.0001)
+    parser.add_argument("--lr", type=float, help="", default=0.00005)
     parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="mean")
     parser.add_argument("--kclusters", help="num of clusters", default=None)
