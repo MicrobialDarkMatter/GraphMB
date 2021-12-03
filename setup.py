@@ -6,14 +6,14 @@ import subprocess
 
 setup(
     name="graphmb",
-    version="0.1.0",
+    version="0.1.1",
     packages=["graphmb"],
     package_dir={"": "src"},
-    # cmdclass={"install": InstallLocalPackage},
+    setup_requires=["setuptools~=58.0", "wheel"],
     install_requires=[
         "wheel",
         "requests",
-        'importlib; python_version == "3.7"',
+        "setuptools>57.5.0" 'importlib; python_version == "3.7"',
         "vamb @ git+https://github.com/AndreLamurias/vamb",
         "networkx==2.6.2",
         # torch==1.7.1

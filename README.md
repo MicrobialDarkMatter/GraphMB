@@ -1,13 +1,13 @@
-# GraphEmb
+# GraphMB
 
 # Introduction
 
-GraphEmb is a metagenomics binner developed for long-read assemblies, that takes advantage of graph machine learning 
+GraphMB is a metagenomics binner developed for long-read assemblies, that takes advantage of graph machine learning 
 algorithms and the assembly graph generated during assembly. It has been tested on (meta)flye assemblies.
 
 ## Dependencies
 
-GraphEmb was developed with Python 3.7, Pytorch and DGL.
+GraphMB was developed with Python 3.7, Pytorch and DGL.
 It depends on VAMB to generate initial embeddings and  clustering, and CheckM to guide the training process and evaluate the output.
 VAMB, Pytorch and DGL are installed automatically. 
 
@@ -18,7 +18,7 @@ Clone this repository, and then:
 ```bash
 cd GraphMB
 python -m venv venv; source venv/bin/activate # optional
-pip install -e
+pip install .
 ```
 
 
@@ -49,5 +49,5 @@ This assumes the existence of a edges.fasta, assembly_graph.gfa and marker_gene_
 
 TODO: preprocessing flye assembly
 
-We have only tested GraphEmb on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
+We have only tested GraphMB on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
 Depending on your setup, you need to either use the edges as contigs.

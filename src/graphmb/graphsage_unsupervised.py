@@ -16,13 +16,12 @@ import sklearn
 
 from graph_functions import cluster_eval, set_seed
 
+# Based on this implemention: https://github.com/dmlc/dgl/blob/master/examples/pytorch/graphsage/train_sampling_unsupervised.py
+
 
 class MultiLayerNeighborWeightedSampler(dgl.dataloading.MultiLayerNeighborSampler):
     def sample_frontier(self, block_id, g, seed_nodes):
         fanout = self.fanouts[block_id]
-        # if fanout is None:
-        #    frontier = subgraph.in_subgraph(g, seed_nodes)
-        # else:
         frontier = dgl.sampling.sample_neighbors(g, seed_nodes, fanout, replace=self.replace, prob="weight")
         return frontier
 
@@ -30,55 +29,35 @@ class MultiLayerNeighborWeightedSampler(dgl.dataloading.MultiLayerNeighborSample
 class NegativeSampler(object):
     def __init__(self, g, k, neg_share=False):
         self.weights = g.in_degrees().float() ** 0.75
-        # self.weights = g.edata["weight"] / max(g.edata["weight"])
         self.k = k
         self.neg_share = neg_share
 
     def __call__(self, g, eids):
-        # breakpoint()
         src, _ = g.find_edges(eids)
         n = len(src)
         if self.neg_share and n % self.k == 0:
             dst = self.weights.multinomial(n, replacement=True)
             dst = dst.view(-1, 1, self.k).expand(-1, self.k, -1).flatten()
         else:
-            # breakpoint()
             dst = self.weights.multinomial(n * self.k, replacement=True)
         src = src.repeat_interleave(self.k)
         return src, dst
 
 
 class NegativeSamplerWeight(object):
+    """Samples negatives according to the inverse of edge weight"""
+
     def __init__(self, g, k, neg_share=False):
-        # self.weights = g.edata["weight"] / max(g.edata["weight"])
-        # self.g = g
         self.k = k
         self.neg_share = neg_share
 
     def __call__(self, g, eids):
-        # breakpoint()
         src, dst = g.find_edges(eids)
-        # random_pairs = {node.item(): [] for node in src}
-        # for src_node in src:
-        #    if len(g.out_edges(src_node)[1]) < 2:
-        #        random_pairs[src_node.item()] = [dst_node for dst_node]]
-        # weights = (g.edata["scg_weight"] + 1) / g.edata["weight"]
-        # breakpoint()
-        # weights = 1 / g.edata["weight"]
-
-        # random.shuffle(dst)
-        # add random edges
         new_dst = []
         new_src = []
-        # breakpoint()
         possible_dst = set(dst)
-        # for src_node in src:
-        #    if len(g.out_edges(src_node)[1]) < 2:
-        #        new_src.append(src_node)
-        # new_dst.append(random.sample(possible, 1)[0])
         new_src = [src_node for src_node in src if len(g.out_edges(src_node)[1]) < 2]
         new_dst = random.sample(possible_dst, k=len(new_src))
-        # pdb.set_trace()
         # print("adding", len(new_src), "more edges")
         src = src.repeat_interleave(self.k)
         expand_g = dgl.remove_self_loop(dgl.add_edges(g, new_src, new_dst))
@@ -99,12 +78,10 @@ class CrossEntropyLoss(nn.Module):
             pos_graph.ndata["h"] = block_outputs
             pos_graph.apply_edges(fn.u_dot_v("h", "h", "score"))
             pos_score = pos_graph.edata["score"]
-            # pos_score = torch.nn.functional.logsigmoid(pos_score)  # log sigmoid
         with neg_graph.local_scope():
             neg_graph.ndata["h"] = block_outputs
             neg_graph.apply_edges(fn.u_dot_v("h", "h", "score"))
             neg_score = neg_graph.edata["score"]
-            # neg_score = torch.nn.functional.logsigmoid(-neg_score)
 
         score = torch.cat([pos_score, neg_score])
         pos_label = torch.ones_like(pos_score)
@@ -117,16 +94,7 @@ class CrossEntropyLoss(nn.Module):
         neg_weights = torch.ones_like(neg_score)
         all_weights = torch.cat([pos_weights, neg_weights])
         label = torch.cat([pos_label, neg_label]).long()
-        # loss = F.binary_cross_entropy_with_logits(score, label.float())
         loss = F.binary_cross_entropy_with_logits(score, label.float(), weight=all_weights)
-        # weights = torch.cat([pos_weights, neg_weights])
-        # pos_loss = F.binary_cross_entropy_with_logits(pos_score, pos_label.float(), weight=pos_weights)
-        # neg_loss = F.binary_cross_entropy_with_logits(neg_score, neg_label.float(), weight=neg_weights)
-        # print(pos_loss.item(), neg_loss.item())
-        # loss = pos_loss + neg_loss
-        # loss = neg_loss
-        # loss = -torch.sum(pos_score * pos_weights) - torch.sum(neg_score)
-        # return loss / len(pos_score)
         return loss
 
 
@@ -159,13 +127,11 @@ class SAGE(nn.Module):
         h = x
         for il, (layer, block) in enumerate(zip(self.layers, blocks)):
             # weights = F.softmax(block.edata["weight"])
-            weights = block.edata["weight"] / max(block.edata["weight"])
+            # weights = block.edata["weight"] / max(block.edata["weight"])
             # h = layer(block, h, edge_weight=weights)
             h = layer(block, h)
             if il != len(self.layers) - 1:
-                # h = self.batchnorm(h)
                 h = self.activation(h)
-                # h = self.dropout(h)
         return h
 
     def inference(self, g, x, device, batch_size, num_workers, use_weights=False):
@@ -253,7 +219,7 @@ def train_graphsage(
         sampler = MultiLayerNeighborWeightedSampler([int(fanout) for fanout in fan_out.split(",")])
 
     if batch_size == 0:
-        batch_size = len(train_seeds) - 100  # TODO fix this
+        batch_size = len(train_seeds)
 
     dataloader = dgl.dataloading.EdgeDataLoader(
         dataset.graph,
