@@ -40,13 +40,13 @@ BACTERIA_MARKERS = "data/Bacteria.ms"
 def main():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
     # input files
-    parser.add_argument("--assembly", type=str, help="Assembly base path")
+    parser.add_argument("--assembly", type=str, help="Assembly base path", required=True)
     parser.add_argument("--assembly_name", type=str, help="File name with contigs", default="edges.fasta")
     parser.add_argument("--graph_file", type=str, help="File name with graph", default="assembly_graph.gfa")
     parser.add_argument(
         "--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)", default=None
     )
-    parser.add_argument("--depth", type=str, help="Depth file from jgi", default=None)
+    parser.add_argument("--depth", type=str, help="Depth file from jgi", default="edges_depth.txt")
     parser.add_argument("--features", type=str, help="Features file mapping contig name to features", default=None)
     parser.add_argument("--labels", type=str, help="File mapping contig to label", default=None)
     parser.add_argument("--markers", type=str, help="File mapping nodes to SCG counts", default=None)
@@ -57,27 +57,28 @@ def main():
     parser.add_argument(
         "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
     )
-    parser.add_argument("--layers", type=int, help="", default=3)
-    parser.add_argument("--hidden", type=int, help="", default=512)
-    parser.add_argument("--embsize", type=int, help="", default=32)
-    parser.add_argument("--batchsize", type=int, help="", default=0)
-    parser.add_argument("--dropout", type=float, help="", default=0.0)
-    parser.add_argument("--lr", type=float, help="", default=0.00005)
+    parser.add_argument("--layers", type=int, help="Number of layers of the GNN", default=3)
+    parser.add_argument("--hidden", type=int, help="Dimension of hidden layers of GNN", default=512)
+    parser.add_argument("--embsize", type=int, help="Output embedding dimension of GNN", default=64)
+    parser.add_argument("--batchsize", type=int, help="batchsize to train the GNN", default=0)
+    parser.add_argument("--dropout", type=float, help="dropout of the GNN", default=0.0)
+    parser.add_argument("--lr", type=float, help="learning rate", default=0.00005)
     parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
+    parser.add_argument("--kclusters", help="Number of clusters (only for some clustering methods)", default=None)
+    # GraphSAGE params
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="mean")
-    parser.add_argument("--kclusters", help="num of clusters", default=None)
-    parser.add_argument("--negatives", help="num of negatives", default=1, type=int)
+    parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=1, type=int)
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
     )
-    #
+    # other training params
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--usekmer", help="Use kmer features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
-    parser.add_argument("--loss_weights", action="store_true", help="Using edge weights for loss (positive only)")
-    parser.add_argument("--sample_weights", action="store_true", help="Using edge weights to sample negatives")
+    parser.add_argument("--no_loss_weights", action="store_false", help="Using edge weights for loss (positive only)")
+    parser.add_argument("--no_sample_weights", action="store_false", help="Using edge weights to sample negatives")
     parser.add_argument(
         "--early_stopping",
         type=float,
@@ -94,12 +95,12 @@ def main():
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
     parser.add_argument("--checkm_eval", help="File with precomputed checkm results to eval")
-    parser.add_argument("--post", help="what to do after training encoder", default="")
+    parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
-    parser.add_argument("--vambdim", help="VAMB latent dim", default=32)
+    parser.add_argument("--vambdim", help="VAE latent dim", default=64)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     args = parser.parse_args()
 
@@ -363,8 +364,8 @@ def main():
                 k=k,
                 clusteringalgo=args.clusteringalgo,
                 print_interval=args.print,
-                loss_weights=args.loss_weights,
-                sample_weights=args.sample_weights,
+                loss_weights=(not args.no_loss_weights),
+                sample_weights=(not args.no_sample_weights),
                 logger=logger,
                 device=device,
                 epsilon=args.early_stopping,

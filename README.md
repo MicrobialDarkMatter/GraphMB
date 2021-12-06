@@ -21,6 +21,10 @@ python -m venv venv; source venv/bin/activate # optional
 pip install .
 ```
 
+### Option 2 - From anaconda
+```bash
+conda install -c andrelamurias graphmb
+```
 
 ## Input files
 
@@ -30,10 +34,10 @@ contigs. Also, for better results, CheckM is run on each contig using the genera
 though, you can just run the model for a number of epochs and pick the last model. 
 By default, it runs with with early stopping.
 
-In summary, you need:
-- assembly.fasta
+In summary, you need to have a directory with these files:
+- edges.fasta
 - assembly_graph.fasta
-- output of `jgi_summarize_bam_contig_depths`
+- edges_depth.txt (output of `jgi_summarize_bam_contig_depths`)
 - marker_gene_stats.csv (optional)
 
 You can get an example of these files [here](https://drive.google.com/drive/folders/1m6uTgTPUghk_q9GxfX1UNEOfn8jnIdt5?usp=sharing).
@@ -41,13 +45,24 @@ Download from this link and extract to data/strong100.
 
 
 ## How to run
-For example:
+If you have your assembly in some directory, with the files mentioned above:
+```bash
+python src/graphmb/main.py  --assembly data/strong100/ --checkm_eval marker_gene_stats.tsv
+```
+
+You can specify the filenames:
+
 ```bash
 python src/graphmb/main.py  --assembly data/strong100/ --assembly_name edges.fasta --graph_file assembly_graph.gfa --depth edges_depth.txt --checkm_eval marker_gene_stats.tsv
 ```
-This assumes the existence of a edges.fasta, assembly_graph.gfa and marker_gene_stats.tsv and edges_depth.txt files on ./data/strong100.
 
 TODO: preprocessing flye assembly
 
 We have only tested GraphMB on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
 Depending on your setup, you need to either use the edges as contigs.
+
+TODO: postprocessing
+
+
+## Full list of parameters
+
