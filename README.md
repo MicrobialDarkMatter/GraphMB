@@ -11,6 +11,10 @@ GraphMB was developed with Python 3.7, Pytorch and DGL.
 It depends on VAMB to generate initial embeddings and  clustering, and CheckM to guide the training process and evaluate the output.
 VAMB, Pytorch and DGL are installed automatically. 
 
+## Documentation
+
+Can be found here: https://graphmb.readthedocs.io/en/latest/
+
 ## Installation
 
 ### Option 1 - From wheel
