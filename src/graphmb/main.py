@@ -18,12 +18,12 @@ import networkx as nx
 
 
 import os
-from contigsdataset import ContigsDataset
+from graphmb.contigsdataset import ContigsDataset
 from pathlib import Path
 import scipy.stats as stats
-from evaluate import read_marker_gene_sets, read_contig_genes, evaluate_contig_sets, get_markers_to_contigs
-from graphsage_unsupervised import train_graphsage, SAGE
-from graph_functions import (
+from graphmb.evaluate import read_marker_gene_sets, read_contig_genes, evaluate_contig_sets, get_markers_to_contigs
+from graphmb.graphsage_unsupervised import train_graphsage, SAGE
+from graphmb.graph_functions import (
     plot_embs,
     cluster_embs,
     evaluate_binning,

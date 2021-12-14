@@ -12,7 +12,7 @@ from vamb.cluster import cluster as vamb_cluster
 import dgl
 import random
 
-from evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets
+from graphmb.evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets
 import torch
 
 SEED = 0

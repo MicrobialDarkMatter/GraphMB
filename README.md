@@ -1,8 +1,8 @@
-# GraphMB
+# GraphMB: Assembly Graph Metagenomic Binner
 
 # Introduction
 
-GraphMB is a metagenomics binner developed for long-read assemblies, that takes advantage of graph machine learning 
+GraphMB is a Metagenomic Binner developed for long-read assemblies, that takes advantage of graph machine learning 
 algorithms and the assembly graph generated during assembly. It has been tested on (meta)flye assemblies.
 
 ## Dependencies
@@ -75,6 +75,8 @@ You can also run on CPU and limit the number of threads to use:
 ```bash
 python src/graphmb/main.py  --assembly data/strong100/ --numcores 4
 ```
+
+If installed with pip, you can also use `graphmb` instead of `python src/graphmb/main.py`.
 
 ## Typical workflow
 Our workflows are available [here](https://github.com/AndreLamurias/binning_workflows).

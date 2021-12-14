@@ -8,7 +8,7 @@ import numpy as np
 import networkx as nx
 from dgl.data import DGLDataset
 from dgl.data.utils import makedirs, save_info, load_info
-from graph_functions import read_reads_mapping_sam, count_kmers, get_kmer_to_id
+from graphmb.graph_functions import read_reads_mapping_sam, count_kmers, get_kmer_to_id
 
 
 class ContigsDataset(DGLDataset):
