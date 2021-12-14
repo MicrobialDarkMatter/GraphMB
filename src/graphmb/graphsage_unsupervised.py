@@ -353,15 +353,19 @@ def train_graphsage(
     logger.info("Avg epoch time: {}".format(avg / (epoch - 4)))
     model.eval()
     logger.info(f"Best HQ {best_hq} epoch, {best_hq_epoch}")
-    if total_steps > 0 and dataset.ref_marker_sets is not None:
+    if total_steps == 0:
+        print("No training was done")
+    elif dataset.ref_marker_sets is not None:
         logger.info("loading best model")
         best_model = copy.deepcopy(model)
         try:
             best_model.load_state_dict(torch.load(os.path.join(dataset.assembly, "best_model_hq.pkl")))
         except RuntimeError:
             pdb.set_trace()
+    else:
+        best_model = last_model
     set_seed()
-    print("running best model again")
+    print("running best or last model again")
     best_train_embs = best_model.inference(dataset.graph, nfeat, device, batch_size, num_workers)
     best_train_embs = best_train_embs.detach()
     if cluster_features:
