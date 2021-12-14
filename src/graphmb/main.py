@@ -168,6 +168,19 @@ def main():
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
 
+    print("running VAMB...")
+    batchsteps = []
+    vamb_epochs = 500
+    vamb_bs = 128
+    nhiddens = [512, 512]
+    batchsteps = [25, 75, 150, 300]
+    # reduce batchsteps if dataset is too small
+    while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
+        batchsteps = batchsteps[:-1]
+    print("using these batchsteps:", batchsteps)
+    if len(batchsteps) < 4:  # auto adjust vamb dim (32 for smaller datasets)
+        # or len(dataset.nodes_depths[0])) < 2
+        args.vambdim = 32
     vamb_embs_dir = os.path.join(args.assembly, "vamb_out{}/embs.tsv".format(args.vambdim))  # use vamb defaults
     vamb_emb_exists = os.path.exists(vamb_embs_dir)
     if args.vamb or not vamb_emb_exists:
@@ -179,11 +192,7 @@ def main():
             shutil.rmtree(vamb_outdir)
         os.mkdir(vamb_outdir)
         with open(vamb_logpath, "w") as vamb_logfile:
-            print("running VAMB...")
-            batchsteps = []
-            vamb_epochs = 500
-            vamb_bs = 128
-            nhiddens = [512, 512]
+
             # while len(dataset.contig_names) > vamb_bs* 2**len(batchsteps) and (len(batchsteps) == 0 or batchsteps[-1] < vamb_epochs):
             #    if len(batchsteps) == 0:
             #        batchsteps.append(50)
@@ -191,14 +200,7 @@ def main():
             #        batchsteps.append(batchsteps[-1] + batchsteps[-1]*2)
             #    print(batchsteps)
             # batchsteps = batchsteps[:-1]
-            batchsteps = [25, 75, 150, 300]
-            # reduce batchsteps if dataset is too small
-            while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
-                batchsteps = batchsteps[:-1]
-            print("using these batchsteps:", batchsteps)
-            if len(batchsteps) < 4:  # auto adjust vamb dim (32 for smaller datasets)
-                # or len(dataset.nodes_depths[0])) < 2
-                args.vambdim = 32
+
             run_vamb(
                 outdir=vamb_outdir,
                 fastapath=os.path.join(args.assembly, args.assembly_name),
@@ -212,8 +214,8 @@ def main():
                 nhiddens=nhiddens,
                 nlatent=int(args.vambdim),
             )
+            args.features = "vamb_out{}/".format(args.vambdim) + "embs.tsv"
             print("VAMB output saved to {}".format(vamb_outdir))
-        args.features = "vamb_out{}/".format(args.vambdim) + "embs.tsv"
 
     if args.features is None:
         args.features = "vamb_out{}/embs.tsv".format(args.vambdim)

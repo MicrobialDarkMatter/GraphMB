@@ -353,7 +353,7 @@ def train_graphsage(
     logger.info("Avg epoch time: {}".format(avg / (epoch - 4)))
     model.eval()
     logger.info(f"Best HQ {best_hq} epoch, {best_hq_epoch}")
-    if total_steps > 0:
+    if total_steps > 0 and dataset.ref_marker_sets is not None:
         logger.info("loading best model")
         best_model = copy.deepcopy(model)
         try:
