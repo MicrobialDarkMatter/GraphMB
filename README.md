@@ -13,7 +13,12 @@ VAMB, Pytorch and DGL are installed automatically.
 
 ## Installation
 
-### Option 1 - From github
+### Option 1 - From wheel
+```bash
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.2/graphmb-0.1.2-py3-none-any.whl
+```
+
+### Option 2 - From source
 Clone this repository, and then:
 ```bash
 cd GraphMB
@@ -21,7 +26,7 @@ python -m venv venv; source venv/bin/activate # optional
 pip install .
 ```
 
-### Option 2 - From anaconda
+### Option 3 - From anaconda
 ```bash
 conda install -c andrelamurias graphmb
 ```
