@@ -57,16 +57,19 @@ Download from this link and extract to data/strong100.
 If you have your assembly in some directory, with the files mentioned above:
 
 ```bash
-python src/graphmb/main.py  --assembly data/strong100/ --checkm_eval marker_gene_stats.tsv
+python src/graphmb/main.py  --assembly data/strong100/ --markers marker_gene_stats.tsv
 ```
 
 You can specify the filenames:
 
 ```bash
-python src/graphmb/main.py  --assembly data/strong100/ --assembly_name edges.fasta --graph_file assembly_graph.gfa --depth edges_depth.txt --checkm_eval marker_gene_stats.tsv
+python src/graphmb/main.py  --assembly data/strong100/ --assembly_name edges.fasta --graph_file assembly_graph.gfa --depth edges_depth.txt --markers marker_gene_stats.tsv
 ```
 
-To prevent GraphMB to run clustering after each epoch, do not provide the checkm_eval param.
+By default GraphMB saves a TSV file mapping each contig to a bin to the assembly directory, as well as the weights and output embeddings of the best model.
+The output directory can be changed with the `--outdir` argument.
+
+To prevent GraphMB from run clustering after each epoch, do not provide the markers param.
 This will make it run faster but the results might not be optimal.
 
 ```bash
@@ -90,6 +93,8 @@ If installed with pip, you can also use `graphmb` instead of `python src/graphmb
 ## Typical workflow
 Our workflows are available [here](https://github.com/AndreLamurias/binning_workflows).
 On this section we present an overview of how to get your data ready for GraphMB.
+
+### Pre-processing
 
 1. Assembly your reads with metaflye: ```flye -nano-raw <reads_file> -o <output> --meta```
 2. Filter and polish assembly if necessary (or extract edge sequences and polish edge sequences instead)
@@ -115,14 +120,27 @@ jgi_summarize_bam_contig_depths --outputDepth asseembly_depth.txt assembly.bam
 We have only tested GraphMB on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
 Depending on your setup, you need to either use the edges as contigs.
 
-TODO: postprocessing
+### Post-processing
+To evaluate the binning output, we run checkM with the `--reduced-tree` option and count HQ bins (>90 completeness 
+and <5 contamination).
+The bins will be written to fasta files if `writebins` is included in the `--post` argument.
+Alternatively, the `--post contig2bin` option can be used (on by default) and the bins from that file can be written 
+to fasta with `src/write_fasta_bins.py`.
+Then you can run checkM on the bins directory:
+```bash
+checkm lineage_wf -x fa --reduced_tree -t 4 --tab_table bins_dir/ outputdir/ -f outputdir/checkm.tsv
+```
+We also provide a script to filter the checkM output and get the number of HQ bins:
+```bash
+python src/process_checkm_results_expanded.py outputdir/checkm.tsv 90 5
+```
 
 
 ## Full list of parameters
-```bash
+```
 usage: main.py [-h] --assembly ASSEMBLY [--assembly_name ASSEMBLY_NAME] [--graph_file GRAPH_FILE] [--edge_threshold EDGE_THRESHOLD] [--depth DEPTH] [--features FEATURES] [--labels LABELS] [--markers MARKERS] [--embs EMBS] [--model MODEL] [--activation ACTIVATION]
                [--layers LAYERS] [--hidden HIDDEN] [--embsize EMBSIZE] [--batchsize BATCHSIZE] [--dropout DROPOUT] [--lr LR] [--clusteringalgo CLUSTERINGALGO] [--kclusters KCLUSTERS] [--aggtype AGGTYPE] [--negatives NEGATIVES] [--fanout FANOUT] [--epoch EPOCH] [--print PRINT]
-               [--kmer KMER] [--usekmer] [--clusteringloss] [--no_loss_weights] [--no_sample_weights] [--early_stopping EARLY_STOPPING] [--mincontig MINCONTIG] [--minbin MINBIN] [--mincomp MINCOMP] [--randomize] [--no_edges] [--read_embs] [--reload] [--checkm_eval CHECKM_EVAL]
+               [--kmer KMER] [--usekmer] [--clusteringloss] [--no_loss_weights] [--no_sample_weights] [--early_stopping EARLY_STOPPING] [--mincontig MINCONTIG] [--minbin MINBIN] [--mincomp MINCOMP] [--randomize] [--no_edges] [--read_embs] [--reload] 
                [--post POST] [--skip_preclustering] [--outname OUTNAME] [--cuda] [--vamb] [--vambdim VAMBDIM] [--numcores NUMCORES]
 
 Train graph embedding model
@@ -176,8 +194,6 @@ optional arguments:
   --no_edges            Add only self edges
   --read_embs           Read embeddings from file
   --reload              Reload data
-  --checkm_eval CHECKM_EVAL
-                        File with precomputed checkm results to eval
   --post POST           Output options
   --skip_preclustering  Use precomputed checkm results to eval
   --outname OUTNAME     Output (experiment) name

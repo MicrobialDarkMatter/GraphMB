@@ -102,14 +102,19 @@ def main():
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
     parser.add_argument("--vambdim", help="VAE latent dim", default=64)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
+    parser.add_argument("--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
+
     args = parser.parse_args()
+
+    if args.outdir is None:
+        args.outdir = args.assembly
 
     set_seed()
     # set up logging
     now = datetime.now()
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
-    logfile = os.path.join(args.assembly, now.strftime("%Y%m%d-%H%M%S") + "{}_output.log".format(args.outname))
+    logfile = os.path.join(args.outdir, now.strftime("%Y%m%d-%H%M%S") + "{}_output.log".format(args.outname))
     output_file_handler = logging.FileHandler(logfile)
     print("logging to {}".format(logfile))
     stdout_handler = logging.StreamHandler(sys.stdout)
@@ -181,10 +186,10 @@ def main():
     if len(batchsteps) < 4:  # auto adjust vamb dim (32 for smaller datasets)
         # or len(dataset.nodes_depths[0])) < 2
         args.vambdim = 32
-    vamb_embs_dir = os.path.join(args.assembly, "vamb_out{}/embs.tsv".format(args.vambdim))  # use vamb defaults
+    vamb_embs_dir = os.path.join(args.outdir, "vamb_out{}/embs.tsv".format(args.vambdim))  # use vamb defaults
     vamb_emb_exists = os.path.exists(vamb_embs_dir)
     if args.vamb or not vamb_emb_exists:
-        vamb_outdir = os.path.join(args.assembly, "vamb_out{}/".format(args.vambdim))  # use vamb defaults
+        vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))  # use vamb defaults
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
         # TODO embsize based on graph size
         # TODO also adjust batch size and batch steps
@@ -222,8 +227,8 @@ def main():
 
     # Read  features/embs from file in tsv format
     node_embs = {}
-    print("loading features from", os.path.join(args.assembly, args.features))
-    with open(os.path.join(args.assembly, args.features), "r") as ffile:
+    print("loading features from", os.path.join(args.outdir, args.features))
+    with open(os.path.join(args.outdir, args.features), "r") as ffile:
         for line in ffile:
             values = line.strip().split()
             node_embs[values[0]] = [float(x) for x in values[1:]]
@@ -376,7 +381,7 @@ def main():
         if args.embs is not None:
             emb_file = args.embs
         else:
-            emb_file = args.assembly + f"/{args.outname}_train_embs.pickle"
+            emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
         with open(emb_file, "rb") as embsf:
             best_embs_dict = pickle.load(embsf)
             best_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
@@ -430,7 +435,7 @@ def main():
         if "writebins" in args.post:
             print("writing bins to ", args.assembly + "/graphemb_{}c/bins/".format(args.clusteringalgo))
             # breakpoint()
-            bin_dir = Path(args.assembly + "/graphemb_{}c/bins/".format(args.clusteringalgo))
+            bin_dir = Path(args.outdir + "/graphemb_{}c/bins/".format(args.clusteringalgo))
             bin_dir.mkdir(parents=True, exist_ok=True)
             [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
             clustered_contigs = set()
@@ -468,19 +473,19 @@ def main():
             print("wrote", single_clusters, "clusters", multi_contig_clusters, ">= #contig", args.mincomp)
         if "contig2bin" in args.post:
             # invert cluster_to_contig
-            logging.info("Writing contig2bin to {}/{}".format(args.assembly, args.outname))
+            logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
             best_contig_to_bin = {}
             for bin in best_cluster_to_contig:
                 for contig in best_cluster_to_contig[bin]:
                     best_contig_to_bin[contig] = bin
-            with open(args.assembly + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
+            with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
                 for c in best_contig_to_bin:
                     f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
             last_contig_to_bin = {}
             for bin in last_cluster_to_contig:
                 for contig in last_cluster_to_contig[bin]:
                     last_contig_to_bin[contig] = bin
-            with open(args.assembly + f"/{args.outname}_last_contig2bin.tsv", "w") as f:
+            with open(args.outdir + f"/{args.outname}_last_contig2bin.tsv", "w") as f:
                 for c in last_contig_to_bin:
                     f.write(f"{str(c)}\t{str(last_contig_to_bin[c])}\n")
 
@@ -511,7 +516,7 @@ def main():
             centroids=centroids_2dim,
             hq_centroids=hq_bins,
             node_sizes=None,
-            outputname=args.assembly + args.outname + "_tsne_clusters.png",
+            outputname=args.outdir + args.outname + "_tsne_clusters.png",
         )
         # node_sizes=[dataset.nodes_len[i][0] * 100 for i in range(len(dataset.contig_names))],
     if "draw" in args.post:
@@ -550,13 +555,13 @@ def main():
                 nx_graph,
                 nodeid_to_label,
                 label_to_node,
-                args.assembly + args.outname + "_" + str(i),
+                args.outdir + args.outname + "_" + str(i),
                 contig_sizes=contig_lens,
                 node_titles=nodes_titles,
             )
     if "edges" in args.post:
-        print("writing edges to", args.assembly + args.outname + "_edges")
-        with open(args.assembly + args.outname + "_edges", "w") as graphf:
+        print("writing edges to", args.outdir + args.outname + "_edges")
+        with open(args.outdir + args.outname + "_edges", "w") as graphf:
             for e in zip(graph.edges()[0], graph.edges()[1]):
                 graphf.write(str(e[0].item()) + "\t" + str(e[1].item()) + "\n")
 
@@ -570,11 +575,11 @@ def main():
         logger.info("writing best and last embs")
         best_train_embs = best_train_embs.cpu().detach().numpy()
         best_train_embs_dict = {dataset.node_names[i]: best_train_embs[i] for i in range(len(best_train_embs))}
-        with open(args.assembly + f"/{args.outname}_best_embs.pickle", "wb") as f:
+        with open(os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"), "wb") as f:
             pickle.dump(best_train_embs_dict, f)
         # last_train_embs = last_train_embs
         last_train_embs_dict = {dataset.node_names[i]: last_train_embs[i] for i in range(len(last_train_embs))}
-        with open(args.assembly + f"/{args.outname}_last_embs.pickle", "wb") as f:
+        with open(os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"), "wb") as f:
             pickle.dump(last_train_embs_dict, f)
 
 
