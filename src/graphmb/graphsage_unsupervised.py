@@ -370,18 +370,4 @@ def train_graphsage(
     best_train_embs = best_train_embs.detach()
     if cluster_features:
         best_train_embs = torch.cat((best_train_embs, nfeat), axis=1).detach()
-    best_hq, best_hq_epoch, kmeans_loss, clusters = cluster_eval(
-        model=best_model,
-        dataset=dataset,
-        logits=best_train_embs,
-        clustering=clusteringalgo,
-        k=k,
-        loss=loss,
-        best_hq=best_hq,
-        best_hq_epoch=best_hq_epoch,
-        epoch=epoch,
-        device=device,
-        clusteringloss=False,
-        logger=logger,
-    )
     return best_train_embs, best_model, last_train_embs, last_model
