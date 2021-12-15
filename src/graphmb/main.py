@@ -49,7 +49,6 @@ def main():
     parser.add_argument("--depth", type=str, help="Depth file from jgi", default="edges_depth.txt")
     parser.add_argument("--features", type=str, help="Features file mapping contig name to features", default=None)
     parser.add_argument("--labels", type=str, help="File mapping contig to label", default=None)
-    parser.add_argument("--markers", type=str, help="File mapping nodes to SCG counts", default=None)
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
 
     # model specification
@@ -66,7 +65,7 @@ def main():
     parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
     parser.add_argument("--kclusters", help="Number of clusters (only for some clustering methods)", default=None)
     # GraphSAGE params
-    parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="mean")
+    parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="lstm")
     parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=1, type=int)
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
@@ -74,6 +73,7 @@ def main():
     # other training params
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
+    parser.add_argument("--evalepoch", type=int, help="Epoch interval to run eval", default=1)
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--usekmer", help="Use kmer features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
@@ -94,7 +94,7 @@ def main():
     parser.add_argument("--read_embs", help="Read embeddings from file", action="store_true")
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
-    parser.add_argument("--checkm_eval", help="File with precomputed checkm results to eval")
+    parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval", default=None)
     parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", help="Output (experiment) name", default="")
@@ -298,10 +298,10 @@ def main():
             label_to_node[s].append(n)
 
     # Load contig marker genes (Bacteria list)
-    if args.checkm_eval is not None:
+    if args.markers is not None:
         logging.info("loading checkm results")
         ref_sets = read_marker_gene_sets(BACTERIA_MARKERS)
-        contig_markers = read_contig_genes(os.path.join(args.assembly, args.checkm_eval))
+        contig_markers = read_contig_genes(os.path.join(args.assembly, args.markers))
         dataset.ref_marker_sets = ref_sets
         dataset.contig_markers = contig_markers
         marker_counts = get_markers_to_contigs(ref_sets, contig_markers)
@@ -338,7 +338,7 @@ def main():
             model = model.to(device)
 
         logging.info(model)
-        if args.clusteringalgo is not None and not args.skip_preclustering:
+        if dataset.ref_marker_sets is not None and args.clusteringalgo is not None and not args.skip_preclustering:
             # cluster using only input features
             print("pre train clustering:")
             cluster_to_contig, centroids = cluster_embs(
@@ -349,9 +349,8 @@ def main():
                 device=device,
                 node_lens=np.array([c[0] for c in dataset.nodes_len]),
             )
-            if dataset.ref_marker_sets is not None:
-                results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
-                calculate_bin_metrics(results, logger=logger)
+            results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
+            calculate_bin_metrics(results, logger=logger)
 
         if args.model == "sage":
             best_train_embs, best_model, last_train_embs, last_model = train_graphsage(
@@ -411,7 +410,7 @@ def main():
             device=device,
         )
         # run for best epoch only
-        if args.checkm_eval is not None:
+        if args.markers is not None:
             total_hq = 0
             results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, best_cluster_to_contig)
             hq_bins = set()
