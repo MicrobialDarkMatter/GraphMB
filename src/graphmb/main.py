@@ -32,6 +32,7 @@ from graphmb.graph_functions import (
     set_seed,
 )
 from vamb.vamb_run import run as run_vamb
+from vae import run_vae
 
 SEED = 0
 BACTERIA_MARKERS = "data/Bacteria.ms"
@@ -173,7 +174,7 @@ def main():
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
 
-    print("running VAMB...")
+    print("running VAE...")
     batchsteps = []
     vamb_epochs = 500
     vamb_bs = 128
@@ -197,7 +198,19 @@ def main():
             shutil.rmtree(vamb_outdir)
         os.mkdir(vamb_outdir)
         with open(vamb_logpath, "w") as vamb_logfile:
-
+            run_vae(
+                outdir=vamb_outdir,
+                kmers=dataset.nodes_kmer,
+                abundance=dataset.nodes_depths,
+                logfile=vamb_logpath,
+                cuda=args.cuda,
+                batchsteps=batchsteps,
+                batchsize=vamb_bs,
+                nepochs=vamb_epochs,
+                nhidden=nhiddens,
+                nlatent=args.vambdim,
+                lr=0.001,
+            )
             # while len(dataset.contig_names) > vamb_bs* 2**len(batchsteps) and (len(batchsteps) == 0 or batchsteps[-1] < vamb_epochs):
             #    if len(batchsteps) == 0:
             #        batchsteps.append(50)
@@ -206,20 +219,7 @@ def main():
             #    print(batchsteps)
             # batchsteps = batchsteps[:-1]
 
-            run_vamb(
-                outdir=vamb_outdir,
-                fastapath=os.path.join(args.assembly, args.assembly_name),
-                jgipath=os.path.join(args.assembly, args.depth),
-                logfile=vamb_logfile,
-                cuda=args.cuda,
-                batchsteps=batchsteps,
-                batchsize=vamb_bs,
-                nepochs=vamb_epochs,
-                mincontiglength=100,
-                nhiddens=nhiddens,
-                nlatent=int(args.vambdim),
-            )
-            args.features = "vamb_out{}/".format(args.vambdim) + "embs.tsv"
+            args.features = "vae_out{}/".format(args.vambdim) + "embs.tsv"
             print("VAMB output saved to {}".format(vamb_outdir))
 
     if args.features is None:
