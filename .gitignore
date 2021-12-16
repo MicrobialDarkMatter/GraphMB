@@ -16,4 +16,5 @@ venv/
 *.pkl
 dist/
 build/
-*/__pycache__/
+src/graphmb/__pycache__/
+.eggs/
