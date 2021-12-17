@@ -173,7 +173,6 @@ def main():
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
 
-    print("running VAMB...")
     batchsteps = []
     vamb_epochs = 500
     vamb_bs = 128
@@ -183,12 +182,10 @@ def main():
     while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
         batchsteps = batchsteps[:-1]
     print("using these batchsteps:", batchsteps)
-    if len(batchsteps) < 4:  # auto adjust vamb dim (32 for smaller datasets)
-        # or len(dataset.nodes_depths[0])) < 2
-        args.vambdim = 32
     vamb_embs_dir = os.path.join(args.outdir, "vamb_out{}/embs.tsv".format(args.vambdim))  # use vamb defaults
     vamb_emb_exists = os.path.exists(vamb_embs_dir)
     if args.vamb or not vamb_emb_exists:
+        print("running VAMB...")
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))  # use vamb defaults
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
         # TODO embsize based on graph size
