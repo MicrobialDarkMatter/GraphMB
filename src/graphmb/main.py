@@ -31,6 +31,7 @@ from graphmb.graph_functions import (
     draw_nx_graph,
     set_seed,
 )
+import graphmb.laf_models as laf_models
 from vamb.vamb_run import run as run_vamb
 
 SEED = 0
@@ -325,15 +326,28 @@ def main():
 
     model = None
     if args.embs is None and args.read_embs is False:
-        model = SAGE(
-            graph.ndata["feat"].shape[1],
-            args.hidden,
-            args.embsize,
-            args.layers,
-            activation,
-            args.dropout,
-            agg=args.aggtype,
-        )
+        if args.model == "sage":
+            model = SAGE(
+                graph.ndata["feat"].shape[1],
+                args.hidden,
+                args.embsize,
+                args.layers,
+                activation,
+                args.dropout,
+                agg=args.aggtype,
+            )
+        elif args.model == "gat":
+            breakpoint()
+            model = laf_models.GAT(
+                features=dataset.graph.ndata["feat"],
+                labels=None,
+                adj=dataset.graph.adj(),
+                n_labels=None,
+                hidden_units=args.hidden,
+                layers=args.layers,
+                conv_last=None,
+            )
+        breakpoint()
         model = model.to(device)
 
         if model is not None:
