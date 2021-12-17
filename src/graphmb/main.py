@@ -32,7 +32,7 @@ from graphmb.graph_functions import (
     set_seed,
 )
 from vamb.vamb_run import run as run_vamb
-from vae import run_vae
+from graphmb.vae import run_vae
 
 SEED = 0
 BACTERIA_MARKERS = "data/Bacteria.ms"
@@ -200,6 +200,7 @@ def main():
         with open(vamb_logpath, "w") as vamb_logfile:
             run_vae(
                 outdir=vamb_outdir,
+                contigids=dataset.node_names,
                 kmers=dataset.nodes_kmer,
                 abundance=dataset.nodes_depths,
                 logfile=vamb_logpath,
