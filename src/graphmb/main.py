@@ -430,9 +430,9 @@ def main():
         if len(dataset.species) > 1:
             evaluate_binning(cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
         if "writebins" in args.post:
-            print("writing bins to ", args.assembly + "/graphemb_{}c/bins/".format(args.clusteringalgo))
+            print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
             # breakpoint()
-            bin_dir = Path(args.outdir + "/graphemb_{}c/bins/".format(args.clusteringalgo))
+            bin_dir = Path(args.outdir + "/{}_bins/".format(args.outname))
             bin_dir.mkdir(parents=True, exist_ok=True)
             [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
             clustered_contigs = set()
@@ -449,7 +449,7 @@ def main():
                     skipped_clusters += 1
                     continue
                 multi_contig_clusters += 1
-                with open(bin_dir / f"{c}.fna", "w") as binfile:
+                with open(bin_dir / f"{c}.fa", "w") as binfile:
                     # breakpoint()
                     for contig in cluster_to_contig[c]:
                         binfile.write(">" + contig + "\n")
