@@ -15,6 +15,7 @@ import dgl
 import torch
 import torch.nn as nn
 import networkx as nx
+from tqdm import tqdm
 
 
 import os
@@ -22,7 +23,8 @@ from graphmb.contigsdataset import ContigsDataset
 from pathlib import Path
 import scipy.stats as stats
 from graphmb.evaluate import read_marker_gene_sets, read_contig_genes, evaluate_contig_sets, get_markers_to_contigs
-from graphmb.graphsage_unsupervised import train_graphsage, SAGE
+
+# from graphmb.graphsage_unsupervised import train_graphsage, SAGE
 from graphmb.graph_functions import (
     plot_embs,
     cluster_embs,
@@ -32,6 +34,7 @@ from graphmb.graph_functions import (
     set_seed,
 )
 import graphmb.laf_models as laf_models
+import tensorflow as tf
 from vamb.vamb_run import run as run_vamb
 
 SEED = 0
@@ -144,7 +147,6 @@ def main():
         markers=args.markers,
     )
     dataset.assembly = args.assembly
-
     if args.randomize:
         logger.info("generating a random graph")
         random_graph = dgl.rand_graph(len(dataset.node_names), len(dataset.edges_src))
@@ -237,14 +239,14 @@ def main():
     dataset.nodes_embs = torch.FloatTensor(dataset.nodes_embs)
 
     # initialize empty features vector
-    dataset.nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
-    if args.usekmer:
-        dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer), dim=1)
+    # dataset.nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
+    # if args.usekmer:
+    #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer), dim=1)
     # if args.depth is not None:
     #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
-    if args.features is not None:
-        dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_embs), dim=1)
-    dataset.graph.ndata["feat"] = dataset.nodes_data
+    # if args.features is not None:
+    #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_embs), dim=1)
+    dataset.graph.ndata["feat"] = tf.constant(dataset.nodes_data)
     # dataset.graph.ndata["len"] = torch.Tensor(dataset.nodes_len)
 
     # Filter edges according to weight (could be from read overlap count or depth sim)
@@ -261,10 +263,10 @@ def main():
 
     # max_weight = dataset.graph.edata["weight"].max().item()
     # dataset.graph.edata["weight"][diff_edges:] = max_weight
-    dataset.graph.edata["weight"] = dataset.graph.edata["weight"].float()
+    # dataset.graph.edata["weight"] = dataset.graph.edata["weight"].float()
     graph = dataset[0]
     logger.info(graph)
-    graph = graph.to(device)
+    # graph = graph.to(device)
 
     # k can be user defined or dependent on the dataset
     k = len(dataset.species)
@@ -279,18 +281,19 @@ def main():
         with open(args.labels, "r") as f:
             for line in f:
                 # label, node = line.strip().split()
-                node, label, bin = line.strip().split(",")
+                node, label = line.strip().split("\t")
                 if node in node_to_label:
                     node_to_label[node] = label
                     labels.add(label)
         labels = list(labels)
-        label_to_node = {s: [] for s in labels}
+        label_to_node = {s: [] for s in range(len(labels))}
         for n in node_to_label:
-            s = node_to_label[n]
+            s = labels.index(node_to_label[n])
             label_to_node[s].append(n)
-        dataset.node_to_label = {n: l for n, l in node_to_label.items()}
+        dataset.node_to_label = {n: labels.index(l) for n, l in node_to_label.items()}
         dataset.species = labels
         dataset.label_to_node = label_to_node
+        logging.info("loaded {} labels for {} nodes".format(len(labels), len(dataset.node_to_label)))
 
     else:  # use dataset own labels (by default its only NA)
         label_to_node = {s: [] for s in dataset.species}
@@ -337,23 +340,30 @@ def main():
                 agg=args.aggtype,
             )
         elif args.model == "gat":
-            breakpoint()
-            model = laf_models.GAT(
+            # from torch_geometric.nn.conv.gcn_conv import gcn_norm
+            # process adjancency matrix
+            adj_indices = np.vstack((dataset.graph.edges()[0], dataset.graph.edges()[1])).T
+            adj = tf.SparseTensor(
+                indices=adj_indices,
+                values=np.ones(len(adj_indices)),
+                dense_shape=[len(dataset.node_names), len(dataset.node_names)],
+            )
+            # normalized_adj = gcn_norm(normalized_adj, improved=False, add_self_loops=True)
+            node_labels = [dataset.node_to_label[n] for n in dataset.node_names]
+            model = laf_models.GCN(
                 features=dataset.graph.ndata["feat"],
-                labels=None,
-                adj=dataset.graph.adj(),
-                n_labels=None,
+                labels=node_labels,
+                adj=adj,
+                n_labels=len(dataset.species),
                 hidden_units=args.hidden,
                 layers=args.layers,
-                conv_last=None,
+                conv_last=True,
             )
-        breakpoint()
-        model = model.to(device)
 
-        if model is not None:
+        if model is not None and args.model != "gat":
             model = model.to(device)
 
-        logging.info(model)
+        # logging.info(model)
         if dataset.ref_marker_sets is not None and args.clusteringalgo is not None and not args.skip_preclustering:
             # cluster using only input features
             print("pre train clustering:")
@@ -387,6 +397,32 @@ def main():
                 device=device,
                 epsilon=args.early_stopping,
             )
+        elif args.model == "gat":
+            tf.config.experimental_run_functions_eagerly(True)
+            th = laf_models.TH(model, lr=args.lr)
+
+            pbar = tqdm(range(args.epoch))
+            train_idx = np.arange(len(dataset.graph.ndata["feat"]))
+            best_train_embs = None
+            current_valid_acc = 0
+            for e in pbar:
+                loss, y_hat = th.train(train_idx)
+                loss = loss.numpy()
+
+                y_preds = model(train_idx, training=False).numpy()
+                valid_acc = np.mean(y_preds.argmax(axis=1) == node_labels)
+
+                if best_train_embs is None:
+                    best_train_embs = y_hat
+                print(y_preds.argmax(axis=1))
+                if valid_acc > current_valid_acc:
+                    model.model.save_weights(os.path.join(args.outdir, "best_valid.h5"))
+                    current_valid_acc = valid_acc
+                    best_train_embs = y_hat
+
+                # pbar.set_description(f"L={loss:.3f} ")
+                pbar.set_description(f"L={loss:.3f} - VA={100*valid_acc:.2f}")
+            last_train_embs = best_train_embs
 
     else:
         if args.embs is not None:
@@ -445,7 +481,6 @@ def main():
             evaluate_binning(cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
         if "writebins" in args.post:
             print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
-            # breakpoint()
             bin_dir = Path(args.outdir + "/{}_bins/".format(args.outname))
             bin_dir.mkdir(parents=True, exist_ok=True)
             [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
@@ -464,7 +499,6 @@ def main():
                     continue
                 multi_contig_clusters += 1
                 with open(bin_dir / f"{c}.fa", "w") as binfile:
-                    # breakpoint()
                     for contig in cluster_to_contig[c]:
                         binfile.write(">" + contig + "\n")
                         binfile.write(dataset.contig_seqs[contig] + "\n")

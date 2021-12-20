@@ -3,6 +3,7 @@ import random
 import os
 import pdb
 import torch
+import tensorflow as tf
 import dgl
 import numpy as np
 import networkx as nx
@@ -92,7 +93,8 @@ class ContigsDataset(DGLDataset):
 
         print("creating DGL graph")
         self.graph = dgl.graph((self.edges_src, self.edges_dst), num_nodes=len(self.nodes_data))
-        self.graph.edata["weight"] = torch.tensor(self.edges_weight)
+        # self.graph.edata["weight"] = torch.tensor(self.edges_weight)
+        self.graph.edata["weight"] = tf.constant(self.edges_weight)
 
         print("done")
 
@@ -106,7 +108,8 @@ class ContigsDataset(DGLDataset):
                 self.node_labels.append(speciesid)
                 self.node_to_label[c] = speciesid
 
-        self.graph.ndata["label"] = torch.LongTensor(self.node_labels)
+        # self.graph.ndata["label"] = torch.LongTensor(self.node_labels)
+        self.graph.ndata["label"] = tf.constant(self.node_labels)
 
         nx_graph = self.graph.to_networkx().to_undirected()
         print("connected components...")
@@ -121,7 +124,7 @@ class ContigsDataset(DGLDataset):
 
         assert len([c for comp in self.connected for c in comp]) <= len(self.node_names)
 
-        self.set_node_mask()
+        # self.set_node_mask()
 
     def filter_edges(self, weight=0):
         """Filter edges based on weight"""
