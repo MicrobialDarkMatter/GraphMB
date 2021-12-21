@@ -37,6 +37,11 @@ import graphmb.laf_models as laf_models
 import tensorflow as tf
 from vamb.vamb_run import run as run_vamb
 
+# from torch_geometric.nn.conv.gcn_conv import gcn_norm
+# from torch_geometric.data import Data
+import dgl.function as fn
+
+
 SEED = 0
 BACTERIA_MARKERS = "data/Bacteria.ms"
 
@@ -246,7 +251,7 @@ def main():
     #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
     # if args.features is not None:
     #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_embs), dim=1)
-    dataset.graph.ndata["feat"] = tf.constant(dataset.nodes_data)
+    dataset.graph.ndata["feat"] = tf.constant(dataset.nodes_embs)
     # dataset.graph.ndata["len"] = torch.Tensor(dataset.nodes_len)
 
     # Filter edges according to weight (could be from read overlap count or depth sim)
@@ -340,17 +345,27 @@ def main():
                 agg=args.aggtype,
             )
         elif args.model == "gat":
-            # from torch_geometric.nn.conv.gcn_conv import gcn_norm
-            # process adjancency matrix
+            # breakpoint()
+            # tf.config.experimental_run_functions_eagerly(True)
             adj_indices = np.vstack((dataset.graph.edges()[0], dataset.graph.edges()[1])).T
+
+            # normalize adj matrix
+            # https://discuss.dgl.ai/t/precompute-the-normalized-adjacency-matrix-for-graph-convolution/1137
+            in_degs = tf.cast(dataset.graph.in_degrees(), dtype=float)
+            in_norm = tf.expand_dims(tf.math.pow(in_degs, -0.5), -1)
+            out_degs = tf.cast(dataset.graph.out_degrees(), dtype=float)
+            out_norm = tf.expand_dims(tf.math.pow(out_degs, -0.5), -1)
+            dataset.graph.ndata["in_norm"] = in_norm
+            dataset.graph.ndata["out_norm"] = out_norm
+            dataset.graph.apply_edges(fn.u_mul_v("in_norm", "out_norm", "adj_t"))
+
             adj = tf.SparseTensor(
                 indices=adj_indices,
-                values=np.ones(len(adj_indices)),
+                values=tf.squeeze(dataset.graph.edata["adj_t"]),
                 dense_shape=[len(dataset.node_names), len(dataset.node_names)],
             )
-            # normalized_adj = gcn_norm(normalized_adj, improved=False, add_self_loops=True)
             node_labels = [dataset.node_to_label[n] for n in dataset.node_names]
-            model = laf_models.GCN(
+            model = laf_models.SAGE(
                 features=dataset.graph.ndata["feat"],
                 labels=node_labels,
                 adj=adj,
@@ -398,7 +413,7 @@ def main():
                 epsilon=args.early_stopping,
             )
         elif args.model == "gat":
-            tf.config.experimental_run_functions_eagerly(True)
+
             th = laf_models.TH(model, lr=args.lr)
 
             pbar = tqdm(range(args.epoch))
@@ -414,7 +429,7 @@ def main():
 
                 if best_train_embs is None:
                     best_train_embs = y_hat
-                print(y_preds.argmax(axis=1))
+                # print(y_preds.argmax(axis=1))
                 if valid_acc > current_valid_acc:
                     model.model.save_weights(os.path.join(args.outdir, "best_valid.h5"))
                     current_valid_acc = valid_acc
