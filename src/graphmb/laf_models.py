@@ -18,12 +18,27 @@ class TH:
     def train(self, idx):
         with tf.GradientTape() as tape:
             y_hat = self.model(idx)
-            # get positive and negative samples using model.adj
+            # breakpoint()
+            all_sims = tf.matmul(y_hat, y_hat, transpose_b=True)
+            # positives are all edges
+            positive_dists = tf.gather_nd(all_sims, self.model.adj.indices)
+            # get negative samples using model.adj
             # adj should have weights for each edge
-            y = tf.gather(self.model.labels, idx)
+            dense_adj = tf.sparse.to_dense(self.model.adj, validate_indices=False)
+            min_neighbors = tf.math.argmin(dense_adj, axis=0)
+            negative_pairs = tf.gather_nd(
+                all_sims, tf.stack([tf.range(len(min_neighbors), dtype=tf.int64), min_neighbors], axis=1)
+            )
 
-            loss = tf.keras.losses.sparse_categorical_crossentropy(y, y_hat, from_logits=True)
-            loss = tf.reduce_mean(loss)
+            # loss = tf.keras.losses.sparse_categorical_crossentropy(y, y_hat, from_logits=True)
+            pos_labels = tf.ones_like(positive_dists)
+            neg_labels = tf.zeros_like(negative_pairs)
+            pos_loss = tf.keras.metrics.binary_crossentropy(pos_labels, positive_dists, from_logits=True)
+            pos_loss = tf.reduce_mean(pos_loss)
+
+            neg_loss = tf.keras.metrics.binary_crossentropy(neg_labels, negative_pairs, from_logits=True)
+            neg_loss = tf.reduce_mean(neg_loss)
+            loss = pos_loss + neg_loss
         tw = self.model.trainable_weights
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
