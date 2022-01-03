@@ -8,7 +8,8 @@ import networkx as nx
 import numpy as np
 from tqdm import tqdm
 import operator
-from vamb.cluster import cluster as vamb_cluster
+#from vamb.cluster import cluster as vamb_cluster
+from graphmb.vamb_clustering import cluster as vamb_cluster
 import dgl
 import random
 
