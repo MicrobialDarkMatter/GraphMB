@@ -1,4 +1,5 @@
 import os
+import math
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -86,12 +87,7 @@ class VAE(nn.Module):
         return x_hat, mean, log_var
 
 
-def loss_function(
-    x,
-    x_hat,
-    mean,
-    log_var,
-):
+def loss_function(x, x_hat, mean, log_var, nlatent, alpha, beta, nsamples=1, ntnf=136):
     # breakpoint()
     ab_reproduction_loss = nn.functional.binary_cross_entropy(x_hat[:, -1], x[:, -1], reduction="sum")
     comp_reproduction_loss = nn.functional.mse_loss(x_hat[:, :-1], x[:, :-1], reduction="mean")
@@ -103,21 +99,21 @@ def loss_function(
 
 def calc_loss(x, x_hat, mu, logsigma, nlatent, alpha, beta, nsamples=1, ntnf=136):
     # from VAMB
-    # If multiple samples, use cross entropy, else use SSE for abundance
-    # if self.nsamples > 1:
-    #    # Add 1e-9 to depths_out to avoid numerical instability.
-    #    ce = -((depths_out + 1e-9).log() * depths_in).sum(dim=1).mean()
-    #    ce_weight = (1 - self.alpha) / _log(self.nsamples)
-    # else:
-    # breakpoint()
+
     depths_in = x.narrow(1, 0, nsamples)
     tnf_in = x.narrow(1, nsamples, ntnf)
     depths_out = x_hat.narrow(1, 0, nsamples)
     tnf_out = x_hat.narrow(1, nsamples, ntnf)
-    depth_loss = (depths_out - depths_in).pow(2).sum(dim=1).mean()
-    depth_weight = 1 - alpha
 
-    tnf_loss = (tnf_out - tnf_in).pow(2).sum(dim=1).mean()
+    # If multiple samples, use cross entropy, else use SSE for abundance
+    if nsamples > 1:
+        # Add 1e-9 to depths_out to avoid numerical instability.
+        depth_loss = -((depths_out + 1e-9).log() * depths_in).sum(dim=1).mean()
+        depth_weight = (1 - alpha) / math.log(nsamples)
+    else:
+        depth_loss = nn.functional.mse_loss(depths_out, depths_in, reduction="mean")
+        depth_weight = 1 - alpha
+    tnf_loss = nn.functional.mse_loss(tnf_out, tnf_in, reduction="none").sum(dim=1).mean()
     kld = -0.5 * (1 + logsigma - mu.pow(2) - logsigma.exp()).sum(dim=1).mean()
     tnf_weight = alpha / x[:, :-1].shape[0]
     kld_weight = 1 / (nlatent * beta)
@@ -139,8 +135,8 @@ class ContigDataset(Dataset):
         return self.features[idx]
 
 
-def train_vae(x_dim, train_loader, model, batch_size, lr, epochs, device, alpha=0.5, beta=200):
-    print("Start training VAE...")
+def train_vae(logger, train_loader, model, lr, epochs, device, alpha=0.5, beta=200):
+    logger.info("Start training VAE...")
     model.train()
     optimizer = Adam(model.parameters(), lr=lr)
     for epoch in range(epochs):
@@ -159,9 +155,9 @@ def train_vae(x_dim, train_loader, model, batch_size, lr, epochs, device, alpha=
             optimizer.step()
             overall_loss += loss.item()
 
-        print("\tEpoch", epoch + 1, "complete!", "\tAverage Loss: ", overall_loss / len(train_loader))
+        logger.info(f"\tEpoch {epoch + 1} complete! \tAverage Loss: {overall_loss / len(train_loader)}")
 
-    print("Finish!!")
+    logger.info("Finish!!")
     return model
 
 
@@ -170,7 +166,7 @@ def run_vae(
     contigids,
     kmers,
     abundance,
-    logfile,
+    logger,
     cuda,
     batchsteps,
     batchsize,
@@ -189,17 +185,17 @@ def run_vae(
         input_dim=input_dim,
         hidden_dim=nhidden,
         latent_dim=nlatent,
-        activation=nn.ReLU(),
+        activation=nn.LeakyReLU(),
         device=cuda,
     )
     train_dataset = ContigDataset(contigids, kmers, abundance)
     kwargs = {"num_workers": 1, "pin_memory": True}
     train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=True, **kwargs)
-    final_model = train_vae(input_dim, train_loader, model, batchsize, lr, nepochs, cuda)
+    final_model = train_vae(logger, train_loader, model, lr, nepochs, cuda, alpha=alpha, beta=beta)
     # run again to get train_embs
     # breakpoint()
-    print("encoding", train_dataset.features.shape)
-    x_hat, mean, log_var = model(train_dataset.features)
+    logger.info(f"encoding {train_dataset.features.shape}")
+    x_hat, mean, log_var = final_model(train_dataset.features)
     train_embs = mean.detach().cpu().numpy()
     with open(os.path.join(outdir, "embs.tsv"), "w") as embsfile:
         for (contig, emb) in zip(contigids, train_embs):

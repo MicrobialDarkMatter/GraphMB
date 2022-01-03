@@ -580,6 +580,8 @@ def cluster(
         destroy: Save memory by destroying matrix while clustering [False]
         normalized: Matrix is already preprocessed [False]
         cuda: Accelerate clustering with GPU [False]
+        seeds: ids of contigs to be used as seeds
+        contig_lens: length of each contig
 
     Output: Generator of (medoid, {point1, point2 ...}) tuples for each cluster.
     """

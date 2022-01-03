@@ -8,7 +8,8 @@ import networkx as nx
 import numpy as np
 from tqdm import tqdm
 import operator
-#from vamb.cluster import cluster as vamb_cluster
+
+# from vamb.cluster import cluster as vamb_cluster
 from graphmb.vamb_clustering import cluster as vamb_cluster
 import dgl
 import random
@@ -385,18 +386,11 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
         plt.show()
 
 
-def cluster_embs(
-    node_embeddings,
-    node_ids,
-    clusteringalgo,
-    kclusters,
-    device="cpu",
-    node_lens=None,
-):
+def cluster_embs(node_embeddings, node_ids, clusteringalgo, kclusters, device="cpu", node_lens=None, seeds=None):
 
     if clusteringalgo == "vamb":
         it = vamb_cluster(
-            node_embeddings, node_ids, cuda=(device == "cuda:0")
+            node_embeddings, node_ids, cuda=(device == "cuda:0"), seeds=seeds
         )  # , seeds=seeds)  # contig_lens=node_lens)  #
         cluster_to_contig = {i: c for (i, (n, c)) in enumerate(it)}
 
@@ -609,6 +603,7 @@ def cluster_eval(
     device,
     clusteringloss=False,
     logger=None,
+    seeds=None,
 ):
     """Cluster contig embs and eval with markers
 
@@ -654,6 +649,7 @@ def cluster_eval(
         # len(dataset.connected),
         k,
         device=device,
+        seeds=seeds,
     )
     if dataset.species is not None and len(dataset.species) > 1:
         evaluate_binning(

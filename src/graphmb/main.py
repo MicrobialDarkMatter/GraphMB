@@ -101,12 +101,12 @@ def main():
         help="File with precomputed checkm results to eval (marker_gene_stats.tsv)",
         default=None,
     )
-    parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs")
+    parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs_writebins")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vae", help="Run vae instead of loading features file", action="store_true")
-    parser.add_argument("--vaedim", help="VAE latent dim", default=64)
+    parser.add_argument("--vaedim", help="VAE latent dim", default=None)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     parser.add_argument("--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
 
@@ -190,44 +190,36 @@ def main():
     while len(dataset.contig_names) < vae_bs * 2 ** len(batchsteps):
         batchsteps = batchsteps[:-1]
     print("using these batchsteps:", batchsteps)
-    if len(batchsteps) < 4:  # auto adjust vae dim (32 for smaller datasets)
-        # or len(dataset.nodes_depths[0])) < 2
+    if args.vaedim is None and len(dataset.nodes_depths[0]) > 1:
+        args.vaedim = 64
+    else:
         args.vaedim = 32
     vae_embs_dir = os.path.join(args.outdir, "vae_out{}/embs.tsv".format(args.vaedim))  # use defaults
     vae_emb_exists = os.path.exists(vae_embs_dir)
     if args.vae or not vae_emb_exists:
         vae_outdir = os.path.join(args.outdir, "vae_out{}/".format(args.vaedim))  # use defaults
-        vae_logpath = os.path.join(vae_outdir, "log.txt")
         # TODO embsize based on graph size
         # TODO also adjust batch size and batch steps
         if os.path.exists(vae_outdir) and os.path.isdir(vae_outdir):
             shutil.rmtree(vae_outdir)
         os.mkdir(vae_outdir)
-        with open(vae_logpath, "w") as vae_logfile:
-            run_vae(
-                outdir=vae_outdir,
-                contigids=dataset.node_names,
-                kmers=dataset.nodes_kmer,
-                abundance=dataset.nodes_depths,
-                logfile=vae_logpath,
-                cuda=args.cuda,
-                batchsteps=batchsteps,
-                batchsize=vae_bs,
-                nepochs=vae_epochs,
-                nhidden=nhiddens,
-                nlatent=args.vaedim,
-                lr=0.001,
-            )
-            # while len(dataset.contig_names) > vamb_bs* 2**len(batchsteps) and (len(batchsteps) == 0 or batchsteps[-1] < vamb_epochs):
-            #    if len(batchsteps) == 0:
-            #        batchsteps.append(50)
-            #    else:
-            #        batchsteps.append(batchsteps[-1] + batchsteps[-1]*2)
-            #    print(batchsteps)
-            # batchsteps = batchsteps[:-1]
+        run_vae(
+            outdir=vae_outdir,
+            contigids=dataset.node_names,
+            kmers=dataset.nodes_kmer,
+            abundance=dataset.nodes_depths,
+            logger=logger,
+            cuda=args.cuda,
+            batchsteps=batchsteps,
+            batchsize=vae_bs,
+            nepochs=vae_epochs,
+            nhidden=nhiddens,
+            nlatent=args.vaedim,
+            lr=0.001,
+        )
 
-            args.features = "vae_out{}/".format(args.vaedim) + "embs.tsv"
-            print("VAE output saved to {}".format(vae_outdir))
+        args.features = "vae_out{}/".format(args.vaedim) + "embs.tsv"
+        print("VAE output saved to {}".format(vae_outdir))
 
     if args.features is None:
         args.features = "vae_out{}/embs.tsv".format(args.vaedim)
@@ -318,8 +310,16 @@ def main():
         dataset.contig_markers = contig_markers
         marker_counts = get_markers_to_contigs(ref_sets, contig_markers)
         dataset.markers = marker_counts
+        max_scg = sorted(marker_counts, key=lambda k: len(marker_counts[k]), reverse=True)
+        contig_seeds = None
+        # contig_seeds = np.array(range(len(dataset.node_names)))
+        # for scg_i, scg in enumerate(max_scg):
+        #    # seeds += contig_markers[scg]
+        #    for contig in marker_counts[scg]:
+        #        contig_seeds[dataset.node_names.index(contig)] = scg_i
     else:
         dataset.ref_marker_sets = None
+        contig_seeds = None
 
     # pick activation function
     if args.activation == "prelu":
@@ -360,6 +360,7 @@ def main():
                 k,
                 device=device,
                 node_lens=np.array([c[0] for c in dataset.nodes_len]),
+                seeds=contig_seeds,
             )
             results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
             calculate_bin_metrics(results, logger=logger)
@@ -382,6 +383,7 @@ def main():
                 logger=logger,
                 device=device,
                 epsilon=args.early_stopping,
+                seeds=contig_seeds,
             )
 
     else:
@@ -412,6 +414,7 @@ def main():
             # len(dataset.connected),
             k,
             device=device,
+            seeds=contig_seeds,
         )
         last_cluster_to_contig, last_centroids = cluster_embs(
             last_train_embs,
@@ -420,6 +423,7 @@ def main():
             # len(dataset.connected),
             k,
             device=device,
+            seeds=contig_seeds,
         )
         # run for best epoch only
         if args.markers is not None:
