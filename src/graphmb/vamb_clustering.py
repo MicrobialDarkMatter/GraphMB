@@ -1,4 +1,6 @@
-__doc__ = """Iterative medoid clustering.
+__doc__ = """
+Code from https://github.com/RasmussenLab/vamb/blob/master/vamb/cluster.py
+Iterative medoid clustering.
 
 Usage:
 >>> clusters = list(ClusterIterator(matrix))
