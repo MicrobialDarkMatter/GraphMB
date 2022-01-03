@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 from tqdm import tqdm
 
-# based on https://github.com/Jackson-Kang/Pytorch-VAE-tutorial
+# based on https://github.com/Jackson-Kang/Pytorch-VAE-tutorial and VAMB
 
 
 class Encoder(nn.Module):
@@ -26,8 +26,6 @@ class Encoder(nn.Module):
         # self.LeakyReLU =nn.LeakyReLU(0.2)
         self.activation = activation
         self.softplus = nn.Softplus()
-
-        self.training = True
 
     def forward(self, x):
         # TODO generalize n layers
@@ -141,7 +139,7 @@ class ContigDataset(Dataset):
         return self.features[idx]
 
 
-def train_vae(x_dim, train_loader, model, batch_size, lr, epochs, device):
+def train_vae(x_dim, train_loader, model, batch_size, lr, epochs, device, alpha=0.5, beta=200):
     print("Start training VAE...")
     model.train()
     optimizer = Adam(model.parameters(), lr=lr)
@@ -155,7 +153,7 @@ def train_vae(x_dim, train_loader, model, batch_size, lr, epochs, device):
 
             x_hat, mean, log_var = model(x)
             # loss = loss_function(x, x_hat, mean, log_var)
-            loss, dloss, tloss, kloss = calc_loss(x, x_hat, mean, log_var, model.latent_dim, alpha=0.5, beta=200)
+            loss, dloss, tloss, kloss = calc_loss(x, x_hat, mean, log_var, model.latent_dim, alpha=alpha, beta=beta)
 
             loss.backward()
             optimizer.step()
@@ -167,7 +165,22 @@ def train_vae(x_dim, train_loader, model, batch_size, lr, epochs, device):
     return model
 
 
-def run_vae(outdir, contigids, kmers, abundance, logfile, cuda, batchsteps, batchsize, nepochs, nhidden, nlatent, lr):
+def run_vae(
+    outdir,
+    contigids,
+    kmers,
+    abundance,
+    logfile,
+    cuda,
+    batchsteps,
+    batchsize,
+    nepochs,
+    nhidden,
+    nlatent,
+    lr,
+    alpha=0.5,
+    beta=200,
+):
 
     input_dim = kmers.shape[1] + abundance.shape[1]
     if cuda is False:
