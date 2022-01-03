@@ -95,13 +95,18 @@ def main():
     parser.add_argument("--read_embs", help="Read embeddings from file", action="store_true")
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
-    parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval", default=None)
+    parser.add_argument(
+        "--markers",
+        type=str,
+        help="File with precomputed checkm results to eval (marker_gene_stats.tsv)",
+        default=None,
+    )
     parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
-    parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
-    parser.add_argument("--vambdim", help="VAE latent dim", default=64)
+    parser.add_argument("--vae", help="Run vae instead of loading features file", action="store_true")
+    parser.add_argument("--vaedim", help="VAE latent dim", default=64)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     parser.add_argument("--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
 
@@ -170,46 +175,47 @@ def main():
         logging.debug("Abundance dim: {}".format(len(dataset.nodes_depths[0])))
         dataset.nodes_depths = torch.tensor(dataset.nodes_depths)
         if len(dataset.nodes_depths[0]) > 1:  # normalize depths
-            dataset.nodes_depths = stats.zscore(dataset.nodes_depths, axis=0)
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
+        else:
+            dataset.nodes_depths = stats.zscore(dataset.nodes_depths, axis=0)
 
     print("running VAE...")
     batchsteps = []
-    vamb_epochs = 500
-    vamb_bs = 128
+    vae_epochs = 500
+    vae_bs = 128
     nhiddens = [512, 512]
     batchsteps = [25, 75, 150, 300]
     # reduce batchsteps if dataset is too small
-    while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
+    while len(dataset.contig_names) < vae_bs * 2 ** len(batchsteps):
         batchsteps = batchsteps[:-1]
     print("using these batchsteps:", batchsteps)
-    if len(batchsteps) < 4:  # auto adjust vamb dim (32 for smaller datasets)
+    if len(batchsteps) < 4:  # auto adjust vae dim (32 for smaller datasets)
         # or len(dataset.nodes_depths[0])) < 2
-        args.vambdim = 32
-    vamb_embs_dir = os.path.join(args.outdir, "vamb_out{}/embs.tsv".format(args.vambdim))  # use vamb defaults
-    vamb_emb_exists = os.path.exists(vamb_embs_dir)
-    if args.vamb or not vamb_emb_exists:
-        vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))  # use vamb defaults
-        vamb_logpath = os.path.join(vamb_outdir, "log.txt")
+        args.vaedim = 32
+    vae_embs_dir = os.path.join(args.outdir, "vae_out{}/embs.tsv".format(args.vaedim))  # use defaults
+    vae_emb_exists = os.path.exists(vae_embs_dir)
+    if args.vae or not vae_emb_exists:
+        vae_outdir = os.path.join(args.outdir, "vae_out{}/".format(args.vaedim))  # use defaults
+        vae_logpath = os.path.join(vae_outdir, "log.txt")
         # TODO embsize based on graph size
         # TODO also adjust batch size and batch steps
-        if os.path.exists(vamb_outdir) and os.path.isdir(vamb_outdir):
-            shutil.rmtree(vamb_outdir)
-        os.mkdir(vamb_outdir)
-        with open(vamb_logpath, "w") as vamb_logfile:
+        if os.path.exists(vae_outdir) and os.path.isdir(vae_outdir):
+            shutil.rmtree(vae_outdir)
+        os.mkdir(vae_outdir)
+        with open(vae_logpath, "w") as vae_logfile:
             run_vae(
-                outdir=vamb_outdir,
+                outdir=vae_outdir,
                 contigids=dataset.node_names,
                 kmers=dataset.nodes_kmer,
                 abundance=dataset.nodes_depths,
-                logfile=vamb_logpath,
+                logfile=vae_logpath,
                 cuda=args.cuda,
                 batchsteps=batchsteps,
-                batchsize=vamb_bs,
-                nepochs=vamb_epochs,
+                batchsize=vae_bs,
+                nepochs=vae_epochs,
                 nhidden=nhiddens,
-                nlatent=args.vambdim,
+                nlatent=args.vaedim,
                 lr=0.001,
             )
             # while len(dataset.contig_names) > vamb_bs* 2**len(batchsteps) and (len(batchsteps) == 0 or batchsteps[-1] < vamb_epochs):
@@ -220,11 +226,11 @@ def main():
             #    print(batchsteps)
             # batchsteps = batchsteps[:-1]
 
-            args.features = "vae_out{}/".format(args.vambdim) + "embs.tsv"
-            print("VAMB output saved to {}".format(vamb_outdir))
+            args.features = "vae_out{}/".format(args.vaedim) + "embs.tsv"
+            print("VAE output saved to {}".format(vae_outdir))
 
     if args.features is None:
-        args.features = "vamb_out{}/embs.tsv".format(args.vambdim)
+        args.features = "vae_out{}/embs.tsv".format(args.vaedim)
 
     # Read  features/embs from file in tsv format
     node_embs = {}
