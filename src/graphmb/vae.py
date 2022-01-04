@@ -55,8 +55,8 @@ class Decoder(nn.Module):
         h = self.fc1_norm(self.activation(self.fc1(x)))
         h = self.fc2_norm(self.activation(self.fc2(h)))
 
-        x_hat = torch.sigmoid(self.fc_output(h))
-        # x_hat = self.fc_output(h)
+        # x_hat = torch.sigmoid(self.fc_output(h))
+        x_hat = self.fc_output(h)
         return x_hat
 
 
