@@ -174,9 +174,13 @@ def run_vae(
     nhidden,
     nlatent,
     lr,
-    alpha=0.5,
-    beta=200,
 ):
+    # use same strategy as VAMB
+    if abundance.shape[1] > 1:
+        alpha = 0.15
+    else:
+        alpha = 0.5
+    beta = 200
 
     input_dim = kmers.shape[1] + abundance.shape[1]
     model = VAE(

@@ -190,10 +190,12 @@ def main():
     while len(dataset.contig_names) < vae_bs * 2 ** len(batchsteps):
         batchsteps = batchsteps[:-1]
     print("using these batchsteps:", batchsteps)
-    if args.vaedim is None and len(dataset.nodes_depths[0]) > 1:
+    if args.vaedim is None:
         args.vaedim = 64
-    else:
+    if len(dataset.nodes_depths[0]) == 1:
         args.vaedim = 32
+        nhiddens = [256, 256]
+
     vae_embs_dir = os.path.join(args.outdir, "vae_out{}/embs.tsv".format(args.vaedim))  # use defaults
     vae_emb_exists = os.path.exists(vae_embs_dir)
     if args.vae or not vae_emb_exists:
