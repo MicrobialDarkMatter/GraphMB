@@ -201,6 +201,7 @@ def train_graphsage(
     loss_weights=False,
     sample_weights=False,
     epsilon=0.1,
+    seeds=None,
 ):
 
     nfeat = dataset.graph.ndata.pop("feat")
@@ -323,6 +324,7 @@ def train_graphsage(
                 device=device,
                 clusteringloss=False,
                 logger=logger,
+                seeds=seeds,
             )
 
             # compare clusters
