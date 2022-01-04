@@ -209,7 +209,7 @@ def main():
             kmers=dataset.nodes_kmer,
             abundance=dataset.nodes_depths,
             logger=logger,
-            cuda=args.cuda,
+            device=device,
             batchsteps=batchsteps,
             batchsize=vae_bs,
             nepochs=vae_epochs,

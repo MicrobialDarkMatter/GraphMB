@@ -167,7 +167,7 @@ def run_vae(
     kmers,
     abundance,
     logger,
-    cuda,
+    device,
     batchsteps,
     batchsize,
     nepochs,
@@ -179,23 +179,22 @@ def run_vae(
 ):
 
     input_dim = kmers.shape[1] + abundance.shape[1]
-    if cuda is False:
-        cuda = "cpu"
     model = VAE(
         input_dim=input_dim,
         hidden_dim=nhidden,
         latent_dim=nlatent,
         activation=nn.LeakyReLU(),
-        device=cuda,
+        device=device,
     )
+    model.to(device)
     train_dataset = ContigDataset(contigids, kmers, abundance)
     kwargs = {"num_workers": 1, "pin_memory": True}
     train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=True, **kwargs)
-    final_model = train_vae(logger, train_loader, model, lr, nepochs, cuda, alpha=alpha, beta=beta)
+    final_model = train_vae(logger, train_loader, model, lr, nepochs, device, alpha=alpha, beta=beta)
     # run again to get train_embs
     # breakpoint()
     logger.info(f"encoding {train_dataset.features.shape}")
-    x_hat, mean, log_var = final_model(train_dataset.features)
+    x_hat, mean, log_var = final_model(train_dataset.features.to(device))
     train_embs = mean.detach().cpu().numpy()
     with open(os.path.join(outdir, "embs.tsv"), "w") as embsfile:
         for (contig, emb) in zip(contigids, train_embs):
