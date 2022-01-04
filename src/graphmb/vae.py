@@ -55,8 +55,8 @@ class Decoder(nn.Module):
         h = self.fc1_norm(self.activation(self.fc1(x)))
         h = self.fc2_norm(self.activation(self.fc2(h)))
 
-        # x_hat = torch.sigmoid(self.fc_output(h))
-        x_hat = self.fc_output(h)
+        x_hat = torch.sigmoid(self.fc_output(h))
+        # x_hat = self.fc_output(h)
         return x_hat
 
 
@@ -89,7 +89,7 @@ class VAE(nn.Module):
 
 def loss_function(x, x_hat, mean, log_var, nlatent, alpha, beta, nsamples=1, ntnf=136):
     # breakpoint()
-    ab_reproduction_loss = nn.functional.binary_cross_entropy(x_hat[:, -1], x[:, -1], reduction="sum")
+    ab_reproduction_loss = nn.functional.cross_entropy(x_hat[:, -1], x[:, -1], reduction="sum")
     comp_reproduction_loss = nn.functional.mse_loss(x_hat[:, :-1], x[:, :-1], reduction="mean")
     # reproduction_loss = nn.functional.binary_cross_entropy(x_hat, x, reduction="sum")
     KLD = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
@@ -100,13 +100,15 @@ def loss_function(x, x_hat, mean, log_var, nlatent, alpha, beta, nsamples=1, ntn
 def calc_loss(x, x_hat, mu, logsigma, nlatent, alpha, beta, nsamples=1, ntnf=136):
     # from VAMB
 
-    depths_in = x.narrow(1, 0, nsamples)
-    tnf_in = x.narrow(1, nsamples, ntnf)
-    depths_out = x_hat.narrow(1, 0, nsamples)
-    tnf_out = x_hat.narrow(1, nsamples, ntnf)
+    tnf_in = x.narrow(1, 0, ntnf)
+    depths_in = x.narrow(1, ntnf, nsamples)
+    tnf_out = x_hat.narrow(1, 0, ntnf)
+    depths_out = x_hat.narrow(1, ntnf, nsamples)
 
     # If multiple samples, use cross entropy, else use SSE for abundance
     if nsamples > 1:
+        # breakpoint()
+        depths_out = torch.nn.functional.softmax(depths_out, dim=1)
         # Add 1e-9 to depths_out to avoid numerical instability.
         depth_loss = -((depths_out + 1e-9).log() * depths_in).sum(dim=1).mean()
         depth_weight = (1 - alpha) / math.log(nsamples)
@@ -135,7 +137,7 @@ class ContigDataset(Dataset):
         return self.features[idx]
 
 
-def train_vae(logger, train_loader, model, lr, epochs, device, alpha=0.5, beta=200):
+def train_vae(logger, train_loader, model, lr, epochs, device, alpha=0.5, beta=200, nsamples=1):
     logger.info("Start training VAE...")
     model.train()
     optimizer = Adam(model.parameters(), lr=lr)
@@ -149,7 +151,17 @@ def train_vae(logger, train_loader, model, lr, epochs, device, alpha=0.5, beta=2
 
             x_hat, mean, log_var = model(x)
             # loss = loss_function(x, x_hat, mean, log_var)
-            loss, dloss, tloss, kloss = calc_loss(x, x_hat, mean, log_var, model.latent_dim, alpha=alpha, beta=beta)
+            loss, dloss, tloss, kloss = calc_loss(
+                x,
+                x_hat,
+                mean,
+                log_var,
+                model.latent_dim,
+                alpha=alpha,
+                beta=beta,
+                nsamples=nsamples,
+                ntnf=x.shape[1] - nsamples,
+            )
 
             loss.backward()
             optimizer.step()
@@ -181,7 +193,7 @@ def run_vae(
     else:
         alpha = 0.5
     beta = 200
-
+    logger.info(f"using alpha {alpha}, {abundance.shape[1]} samples")
     input_dim = kmers.shape[1] + abundance.shape[1]
     model = VAE(
         input_dim=input_dim,
@@ -194,7 +206,9 @@ def run_vae(
     train_dataset = ContigDataset(contigids, kmers, abundance)
     kwargs = {"num_workers": 1, "pin_memory": True}
     train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=True, **kwargs)
-    final_model = train_vae(logger, train_loader, model, lr, nepochs, device, alpha=alpha, beta=beta)
+    final_model = train_vae(
+        logger, train_loader, model, lr, nepochs, device, alpha=alpha, beta=beta, nsamples=abundance.shape[1]
+    )
     # run again to get train_embs
     # breakpoint()
     logger.info(f"encoding {train_dataset.features.shape}")
