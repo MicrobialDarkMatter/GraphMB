@@ -85,10 +85,6 @@ class ContigsDataset(DGLDataset):
         # self.filter_contigs()
         self.rename_nodes_to_index()
         self.nodes_depths = np.array(self.nodes_depths)
-
-        if self.markers is not None:
-            self.read_markers()  # TODO
-
         self.node_names = self.contig_names[:]
 
         print("creating DGL graph")

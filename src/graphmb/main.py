@@ -104,7 +104,7 @@ def main():
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
     parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval", default=None)
-    parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs")
+    parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs_writebins")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
@@ -183,9 +183,9 @@ def main():
 
     batchsteps = []
     vamb_epochs = 500
-    vamb_bs = 128
+    vamb_bs = 256
     nhiddens = [512, 512]
-    batchsteps = [25, 75, 150, 300]
+    batchsteps = [100]
     # reduce batchsteps if dataset is too small
     while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
         batchsteps = batchsteps[:-1]
