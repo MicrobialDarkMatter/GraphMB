@@ -183,7 +183,7 @@ def main():
 
     batchsteps = []
     vamb_epochs = 500
-    vamb_bs = 256
+    vamb_bs = 128
     nhiddens = [512, 512]
     batchsteps = [100]
     # reduce batchsteps if dataset is too small
@@ -383,7 +383,7 @@ def main():
             # cluster using only input features
             print("pre train clustering:")
             cluster_to_contig, centroids = cluster_embs(
-                dataset.graph.ndata["feat"].detach().cpu().numpy(),
+                dataset.graph.ndata["feat"].numpy(),
                 dataset.node_names,
                 args.clusteringalgo,
                 k,
@@ -469,7 +469,7 @@ def main():
             device=device,
         )
         last_cluster_to_contig, last_centroids = cluster_embs(
-            last_train_embs,
+            last_train_embs.numpy(),
             dataset.node_names,
             args.clusteringalgo,
             # len(dataset.connected),
@@ -633,7 +633,7 @@ def main():
     if "writeembs" in args.post:
         # write embs
         logger.info("writing best and last embs")
-        best_train_embs = best_train_embs.cpu().detach().numpy()
+        best_train_embs = best_train_embs.numpy()
         best_train_embs_dict = {dataset.node_names[i]: best_train_embs[i] for i in range(len(best_train_embs))}
         with open(os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"), "wb") as f:
             pickle.dump(best_train_embs_dict, f)
