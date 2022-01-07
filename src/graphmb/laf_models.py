@@ -20,15 +20,19 @@ class TH:
             y_hat = self.model(idx)
             # breakpoint()
             all_sims = tf.matmul(y_hat, y_hat, transpose_b=True)
-            # positives are all edges
+            # positives are all edges (adj.indices are the indices of each node - sparse format)
             positive_dists = tf.gather_nd(all_sims, self.model.adj.indices)
             # get negative samples using model.adj
             # adj should have weights for each edge
             dense_adj = tf.sparse.to_dense(self.model.adj, validate_indices=False)
-            min_neighbors = tf.math.argmin(dense_adj, axis=0)
-            negative_pairs = tf.gather_nd(
-                all_sims, tf.stack([tf.range(len(min_neighbors), dtype=tf.int64), min_neighbors], axis=1)
-            )
+            # for each edge, get min values (TODO: randomize)
+            # min_neighbors = tf.math.argmin(dense_adj, axis=0)
+            # neg_neighbors = tf.stack([tf.range(len(min_neighbors), dtype=tf.int64), min_neighbors], axis=1)
+
+            # reverse adj matrix
+            neg_adj = 1 - dense_adj
+            neg_neighbors = tf.sparse.from_dense(neg_adj).indices
+            negative_pairs = tf.gather_nd(all_sims, neg_neighbors)
 
             # loss = tf.keras.losses.sparse_categorical_crossentropy(y, y_hat, from_logits=True)
             pos_labels = tf.ones_like(positive_dists)
