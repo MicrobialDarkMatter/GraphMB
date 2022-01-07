@@ -1,5 +1,6 @@
 import itertools
 import argparse
+import shutil
 import random
 import time
 import logging
@@ -56,7 +57,9 @@ def main():
         "--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)", default=None
     )
     parser.add_argument("--depth", type=str, help="Depth file from jgi", default="edges_depth.txt")
-    parser.add_argument("--features", type=str, help="Features file mapping contig name to features", default=None)
+    parser.add_argument(
+        "--features", type=str, help="Features file mapping contig name to features", default="features.tsv"
+    )
     parser.add_argument("--labels", type=str, help="File mapping contig to label", default=None)
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
 
@@ -181,36 +184,27 @@ def main():
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
 
+    ### prepare contig features with VAE
     batchsteps = []
     vamb_epochs = 500
-    vamb_bs = 128
+    if len(dataset.nodes_depths[0]) == 1:
+        vamb_bs = 32
+        batchsteps = [25, 75, 150]
+    else:
+        vamb_bs = 64
+        batchsteps = [25, 75, 150, 300]
     nhiddens = [512, 512]
-    batchsteps = [100]
-    # reduce batchsteps if dataset is too small
-    while len(dataset.contig_names) < vamb_bs * 2 ** len(batchsteps):
-        batchsteps = batchsteps[:-1]
     print("using these batchsteps:", batchsteps)
-    vamb_embs_dir = os.path.join(args.outdir, "vamb_out{}/embs.tsv".format(args.vambdim))  # use vamb defaults
-    vamb_emb_exists = os.path.exists(vamb_embs_dir)
-    if args.vamb or not vamb_emb_exists:
+    features_dir = os.path.join(args.outdir, "features.tsv".format(args.vambdim))
+    vamb_emb_exists = os.path.exists(features_dir)
+    if args.vamb or not features_dir:
         print("running VAMB...")
-        vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))  # use vamb defaults
+        vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
-        # TODO embsize based on graph size
-        # TODO also adjust batch size and batch steps
         if os.path.exists(vamb_outdir) and os.path.isdir(vamb_outdir):
             shutil.rmtree(vamb_outdir)
         os.mkdir(vamb_outdir)
         with open(vamb_logpath, "w") as vamb_logfile:
-
-            # while len(dataset.contig_names) > vamb_bs* 2**len(batchsteps) and (len(batchsteps) == 0 or batchsteps[-1] < vamb_epochs):
-            #    if len(batchsteps) == 0:
-            #        batchsteps.append(50)
-            #    else:
-            #        batchsteps.append(batchsteps[-1] + batchsteps[-1]*2)
-            #    print(batchsteps)
-            # batchsteps = batchsteps[:-1]
-
             run_vamb(
                 outdir=vamb_outdir,
                 fastapath=os.path.join(args.assembly, args.assembly_name),
@@ -220,12 +214,13 @@ def main():
                 batchsteps=batchsteps,
                 batchsize=vamb_bs,
                 nepochs=vamb_epochs,
-                mincontiglength=100,
+                mincontiglength=args.mincontig,
                 nhiddens=nhiddens,
                 nlatent=int(args.vambdim),
             )
-            args.features = "vamb_out{}/".format(args.vambdim) + "embs.tsv"
-            print("VAMB output saved to {}".format(vamb_outdir))
+            shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv", features_dir))
+            args.features = "features.tsv"
+            print("Contig features saved to {}".format(features_dir))
 
     if args.features is None:
         args.features = "vamb_out{}/embs.tsv".format(args.vambdim)
