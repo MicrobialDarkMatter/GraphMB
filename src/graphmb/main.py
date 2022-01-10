@@ -218,7 +218,7 @@ def main():
                 nhiddens=nhiddens,
                 nlatent=int(args.vambdim),
             )
-            shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv", features_dir))
+            shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), features_dir)
             args.features = "features.tsv"
             print("Contig features saved to {}".format(features_dir))
 
@@ -341,7 +341,7 @@ def main():
             )
         elif args.model == "gat":
             # breakpoint()
-            # tf.config.experimental_run_functions_eagerly(True)
+            tf.config.experimental_run_functions_eagerly(True)
             adj_indices = np.vstack((dataset.graph.edges()[0], dataset.graph.edges()[1])).T
 
             # normalize adj matrix
@@ -364,7 +364,8 @@ def main():
                 features=dataset.graph.ndata["feat"],
                 labels=node_labels,
                 adj=adj,
-                n_labels=len(dataset.species),
+                # n_labels=len(dataset.species),
+                n_labels=args.embsize,
                 hidden_units=args.hidden,
                 layers=args.layers,
                 conv_last=True,
@@ -420,18 +421,22 @@ def main():
                 loss = loss.numpy()
 
                 y_preds = model(train_idx, training=False).numpy()
-                valid_acc = np.mean(y_preds.argmax(axis=1) == node_labels)
 
-                if best_train_embs is None:
+                # if best_train_embs is None:
+                if args.labels is not None:
+                    # print(y_preds.argmax(axis=1))
+                    valid_acc = np.mean(y_preds.argmax(axis=1) == node_labels)
+                    if valid_acc > current_valid_acc:
+                        model.model.save_weights(os.path.join(args.outdir, "best_valid.h5"))
+                        current_valid_acc = valid_acc
+                        best_train_embs = y_hat
+                    print(f"L={loss:.3f} - VA={100*valid_acc:.2f}")
+                else:
                     best_train_embs = y_hat
-                # print(y_preds.argmax(axis=1))
-                if valid_acc > current_valid_acc:
-                    model.model.save_weights(os.path.join(args.outdir, "best_valid.h5"))
-                    current_valid_acc = valid_acc
-                    best_train_embs = y_hat
-
+                    print(f"L={loss:.3f}")
                 # pbar.set_description(f"L={loss:.3f} ")
-                pbar.set_description(f"L={loss:.3f} - VA={100*valid_acc:.2f}")
+                # .set_description(f"L={loss:.3f} - VA={100*valid_acc:.2f}")
+
             last_train_embs = best_train_embs
 
     else:
@@ -446,7 +451,6 @@ def main():
     if "cluster" in args.post or "kmeans" in args.post:
         logger.info("clustering embs with {} ({})".format(args.clusteringalgo, k))
         # train_embs = last_train_embs
-
         if args.clusteringalgo is False:
             args.clusteringalgo = "kmeans"
         if model is None:
@@ -476,6 +480,8 @@ def main():
             total_hq = 0
             results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, best_cluster_to_contig)
             hq_bins = set()
+            print("binid, comp, cont, len, counts")
+            # breakpoint()
             for bin in results:
                 if results[bin]["comp"] > 90 and results[bin]["cont"] < 5:
                     logger.info(

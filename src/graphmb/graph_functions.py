@@ -497,35 +497,39 @@ def evaluate_binning(cluster_to_contig, node_to_label, label_to_node, outputclus
     if contig_sizes is None:
         contig_sizes = {c: 1 for c in node_to_label}
     for c in cluster_to_contig:
-        cluster_labels = [node_to_label.get(n) for n in cluster_to_contig[c] if n in node_to_label]
+        cluster_labels = [
+            node_to_label.get(n) for n in cluster_to_contig[c] if n in node_to_label and node_to_label.get(n) != "NA"
+        ]
         cluster_counts = {}
+        if len(cluster_labels) == 0:  # we do not have labels for any of the elements of this cluster
+            continue
         for label in set(cluster_labels):
             cluster_counts[label] = sum(
                 [contig_sizes[n] for n in cluster_to_contig[c] if node_to_label.get(n) == label]
             )
-        if len(cluster_labels) == 0:  # we do not have labels for any of the elements of this cluster
-            continue
+
         # get majority label:
         # cluster_counter = collections.Counter(cluster_labels)
         # cluster_majority = cluster_counter.most_common(1)
         cluster_majority = max(cluster_counts.items(), key=operator.itemgetter(1))
+
         # print(cluster_majority)
         # if cluster_majority[0][0] not in labels_to_plot:
         #    continue
-        if cluster_majority[0] not in label_to_node:
-            print(
-                "tie cluster",
-                f"cluster {c}, majority: {cluster_majority[0]}, cluster size {len(cluster_to_contig[c])}",
-            )
-            continue
+        # if cluster_majority[0] not in label_to_node:
+        #    print(
+        #        "tie cluster",
+        #        f"cluster {c}, majority: {cluster_majority[0]}, cluster size {len(cluster_to_contig[c])}",
+        #    )
+        #    continue
         # print(f"cluster {c}, majority: {cluster_majority}, cluster size {len(cluster_to_contig[c])}")
         # print(f" {len(label_to_node.get(cluster_majority[0], []))} contigs with this label")
         # avg_precision.append(len(cluster_to_contig) * cluster_majority[0][1]/len(cluster_to_contig[c]))
         # avg_recall.append(len(cluster_to_contig) * cluster_majority[0][1]/len(label_to_node[cluster_majority[0][0]]))
         cluster_size = sum([contig_sizes.get(n, 1) for n in cluster_to_contig[c]])
-        cluster_p = cluster_majority[1] / cluster_size
+        cluster_p = cluster_majority[0] / cluster_size
         avg_precision.append(cluster_p)
-        cluster_r = cluster_majority[1] / sum([contig_sizes.get(n, 1) for n in label_to_node[cluster_majority[0]]])
+        cluster_r = cluster_majority[0] / sum([contig_sizes.get(n, 1) for n in label_to_node[cluster_majority[0]]])
         avg_recall.append(cluster_r)
         cluster_f1 = 2 * cluster_p * cluster_r / (cluster_p + cluster_r)
         avg_f1.append(cluster_f1)
