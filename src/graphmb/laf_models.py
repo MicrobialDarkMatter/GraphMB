@@ -16,6 +16,7 @@ class TH:
 
     @tf.function
     def train(self, idx):
+        breakpoint()
         with tf.GradientTape() as tape:
             y_hat = self.model(idx)
             # breakpoint()
@@ -31,7 +32,10 @@ class TH:
 
             # reverse adj matrix
             neg_adj = 1 - dense_adj
+            # TODO OOM error
             neg_neighbors = tf.sparse.from_dense(neg_adj).indices
+            # TODO set seed
+            neg_neighbors = tf.random.shuffle(neg_neighbors)[: len(self.model.adj.indices), :]
             negative_pairs = tf.gather_nd(all_sims, neg_neighbors)
 
             # loss = tf.keras.losses.sparse_categorical_crossentropy(y, y_hat, from_logits=True)
