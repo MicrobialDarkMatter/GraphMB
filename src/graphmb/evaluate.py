@@ -1,8 +1,89 @@
 import sys
 import ast
 import numpy as np
+import scipy
 
 # code to run evaluation based on lineage.ms file (Bacteria) and marker_gene_stats.txt file
+
+# Get precicion
+def getPrecision(mat, k, s, total):
+    sum_k = 0
+    for i in range(k):
+        max_s = 0
+        for j in range(s):
+            if mat[i][j] > max_s:
+                max_s = mat[i][j]
+        sum_k += max_s
+    return sum_k / total
+
+
+# Get recall
+def getRecall(mat, k, s, total, unclassified):
+    sum_s = 0
+    for i in range(s):
+        max_k = 0
+        for j in range(k):
+            if mat[j][i] > max_k:
+                max_k = mat[j][i]
+        sum_s += max_k
+    return sum_s / (total + unclassified)
+
+
+# Get ARI
+def getARI(mat, k, s, N):
+    t1 = 0
+    for i in range(k):
+        sum_k = 0
+        for j in range(s):
+            sum_k += mat[i][j]
+        t1 += scipy.special.binom(sum_k, 2)
+    t2 = 0
+    for i in range(s):
+        sum_s = 0
+        for j in range(k):
+            sum_s += mat[j][i]
+        t2 += scipy.special.binom(sum_s, 2)
+    t3 = t1 * t2 / scipy.special.binom(N, 2)
+    t = 0
+    for i in range(k):
+        for j in range(s):
+            t += scipy.special.binom(mat[i][j], 2)
+    ari = (t - t3) / ((t1 + t2) / 2 - t3)
+    return ari
+
+
+# Get F1-score
+def getF1(prec, recall):
+    if prec == 0.0 or recall == 0.0:
+        return 0.0
+    else:
+        return 2 * prec * recall / (prec + recall)
+
+
+def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, label_to_node):
+    # calculate how many contigs are in the majority class of each cluster
+    total_binned = 0
+    # convert everything to ids
+    labels = list(label_to_node.keys())
+    clusters = list(cluster_to_contig.keys())
+    n_pred_labels = len(clusters)
+    n_true_labels = len(labels)
+    ground_truth_count = len(node_to_label)
+    bins_species = [[0 for x in range(n_true_labels)] for y in range(n_pred_labels)]
+    for i in contig_to_cluster:
+        if i in node_to_label:
+            # breakpoint()
+            total_binned += 1
+            bins_species[clusters.index(contig_to_cluster[i])][labels.index(node_to_label[i])] += 1
+
+    my_precision = getPrecision(bins_species, n_pred_labels, n_true_labels, total_binned)
+    my_recall = getRecall(
+        bins_species, n_pred_labels, n_true_labels, total_binned, (ground_truth_count - total_binned)
+    )
+    my_ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
+    my_f1 = getF1(my_precision, my_recall)
+    print("### Evaluation {} cluster/{} labels:".format(n_pred_labels, n_true_labels))
+    print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (my_precision, my_recall, my_f1, my_ari))
 
 
 def read_marker_gene_sets(lineage_file):

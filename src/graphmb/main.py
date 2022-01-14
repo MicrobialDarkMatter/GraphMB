@@ -22,7 +22,13 @@ import os
 from graphmb.contigsdataset import ContigsDataset
 from pathlib import Path
 import scipy.stats as stats
-from graphmb.evaluate import read_marker_gene_sets, read_contig_genes, evaluate_contig_sets, get_markers_to_contigs
+from graphmb.evaluate import (
+    read_marker_gene_sets,
+    read_contig_genes,
+    evaluate_contig_sets,
+    get_markers_to_contigs,
+    calculate_overall_prf,
+)
 from graphmb.graphsage_unsupervised import train_graphsage, SAGE
 from graphmb.graph_functions import (
     plot_embs,
@@ -210,7 +216,7 @@ def main():
                 nhiddens=nhiddens,
                 nlatent=int(args.vambdim),
             )
-            shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv", features_dir))
+            shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), features_dir)
             args.features = "features.tsv"
             print("Contig features saved to {}".format(features_dir))
 
@@ -273,10 +279,14 @@ def main():
         with open(args.labels, "r") as f:
             for line in f:
                 # label, node = line.strip().split()
-                node, label, bin = line.strip().split(",")
+                values = line.strip().split(",")
+                node = values[0]
+                label = values[1]
                 if node in node_to_label:
                     node_to_label[node] = label
                     labels.add(label)
+                else:
+                    print("unused label:", line.strip())
         labels = list(labels)
         label_to_node = {s: [] for s in labels}
         for n in node_to_label:
@@ -285,6 +295,23 @@ def main():
         dataset.node_to_label = {n: l for n, l in node_to_label.items()}
         dataset.species = labels
         dataset.label_to_node = label_to_node
+        # calculate homophily
+        positive_edges = 0
+        edges_without_label = 0
+        for u, v in zip(dataset.edges_src, dataset.edges_dst):
+            # breakpoint()
+            if (
+                dataset.contig_names[u] not in dataset.node_to_label
+                or dataset.contig_names[v] not in dataset.node_to_label
+            ):
+                edges_without_label += 1
+            if dataset.node_to_label[dataset.contig_names[u]] == dataset.node_to_label[dataset.contig_names[v]]:
+                positive_edges += 1
+        print(
+            "homophily:",
+            positive_edges / (len(dataset.graph.edges("eid")) - edges_without_label),
+            len(dataset.graph.edges("eid")) - edges_without_label,
+        )
 
     else:  # use dataset own labels (by default its only NA)
         label_to_node = {s: [] for s in dataset.species}
@@ -338,7 +365,7 @@ def main():
         if dataset.ref_marker_sets is not None and args.clusteringalgo is not None and not args.skip_preclustering:
             # cluster using only input features
             print("pre train clustering:")
-            cluster_to_contig, centroids = cluster_embs(
+            pre_cluster_to_contig, centroids = cluster_embs(
                 dataset.graph.ndata["feat"].detach().cpu().numpy(),
                 dataset.node_names,
                 args.clusteringalgo,
@@ -346,7 +373,7 @@ def main():
                 device=device,
                 node_lens=np.array([c[0] for c in dataset.nodes_len]),
             )
-            results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
+            results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, pre_cluster_to_contig)
             calculate_bin_metrics(results, logger=logger)
 
         if args.model == "sage":
@@ -406,24 +433,46 @@ def main():
             k,
             device=device,
         )
+        best_contig_to_bin = {}
+        for bin in best_cluster_to_contig:
+            for contig in best_cluster_to_contig[bin]:
+                best_contig_to_bin[contig] = bin
         # run for best epoch only
         if args.markers is not None:
             total_hq = 0
             results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, best_cluster_to_contig)
             hq_bins = set()
-            for bin in results:
-                if results[bin]["comp"] > 90 and results[bin]["cont"] < 5:
+            for binid in results:
+                if results[binid]["comp"] > 90 and results[binid]["cont"] < 5:
+                    contig_labels = [dataset.node_to_label.get(node, 0) for node in best_cluster_to_contig[binid]]
+                    labels_count = Counter(contig_labels)
                     logger.info(
-                        f"{bin}, {round(results[bin]['comp'],4)}, {round(results[bin]['cont'],4)}, {len(best_cluster_to_contig[bin])}, "
-                        f"{Counter([dataset.species[dataset.node_to_label.get(node, 0)] for node in best_cluster_to_contig[bin]])}"
+                        f"{binid}, {round(results[binid]['comp'],4)}, {round(results[binid]['cont'],4)}, "
+                        f"{len(best_cluster_to_contig[binid])} {labels_count}"
                     )
-                    hq_bins.add(bin)
+                    hq_bins.add(binid)
                     total_hq += 1
             logger.info("Total HQ {}".format(total_hq))
 
         contig_lens = {dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
         if len(dataset.species) > 1:
-            evaluate_binning(cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
+            evaluate_binning(best_cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
+            # calculate overall P/R/F
+            calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node)
+            calculate_overall_prf(
+                {cluster: best_cluster_to_contig[cluster] for cluster in hq_bins},
+                {
+                    contig: best_contig_to_bin[contig]
+                    for contig in best_contig_to_bin
+                    if best_contig_to_bin[contig] in hq_bins
+                },
+                node_to_label,
+                label_to_node,
+            )
+            best_contig_to_bin = {}
+            for bin in best_cluster_to_contig:
+                for contig in best_cluster_to_contig[bin]:
+                    best_contig_to_bin[contig] = bin
         if "writebins" in args.post:
             print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
             # breakpoint()
@@ -432,21 +481,21 @@ def main():
             [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
             clustered_contigs = set()
             multi_contig_clusters = 0
-            print(len(cluster_to_contig), "clusters")
+            print(len(best_cluster_to_contig), "clusters")
             short_contigs = set()
             skipped_clusters = 0
-            for c in cluster_to_contig:
-                cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in cluster_to_contig[c]])
+            for c in best_cluster_to_contig:
+                cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in best_cluster_to_contig[c]])
                 if cluster_size < args.minbin:
                     # print("skipped small cluster", len(cluster_to_contig[c]), "contig")
-                    for contig in cluster_to_contig[c]:
+                    for contig in best_cluster_to_contig[c]:
                         short_contigs.add(contig)
                     skipped_clusters += 1
                     continue
                 multi_contig_clusters += 1
                 with open(bin_dir / f"{c}.fa", "w") as binfile:
                     # breakpoint()
-                    for contig in cluster_to_contig[c]:
+                    for contig in best_cluster_to_contig[c]:
                         binfile.write(">" + contig + "\n")
                         binfile.write(dataset.contig_seqs[contig] + "\n")
                         clustered_contigs.add(contig)
@@ -466,10 +515,6 @@ def main():
         if "contig2bin" in args.post:
             # invert cluster_to_contig
             logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
-            best_contig_to_bin = {}
-            for bin in best_cluster_to_contig:
-                for contig in best_cluster_to_contig[bin]:
-                    best_contig_to_bin[contig] = bin
             with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
                 for c in best_contig_to_bin:
                     f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
