@@ -279,7 +279,12 @@ def main():
         with open(args.labels, "r") as f:
             for line in f:
                 # label, node = line.strip().split()
-                values = line.strip().split(",")
+                if args.labels.endswith(".csv"):
+                    values = line.strip().split(",")
+                elif args.labels.endswith(".tsv"): # amber format
+                    if line.startswith("@"):
+                        continue
+                    values = line.strip().split("\t")
                 node = values[0]
                 label = values[1]
                 if node in node_to_label:
