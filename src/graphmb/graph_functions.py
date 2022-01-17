@@ -12,7 +12,7 @@ from vamb.cluster import cluster as vamb_cluster
 import dgl
 import random
 
-from graphmb.evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets
+from graphmb.evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets, calculate_overall_prf
 import torch
 
 SEED = 0
@@ -542,7 +542,7 @@ def evaluate_binning(cluster_to_contig, node_to_label, label_to_node, outputclus
         round(sum(avg_recall) / len(avg_recall), 4),
         "average f1",
         round(sum(avg_f1) / len(avg_f1), 4),
-        "HQ",
+        "P>0.95 and R>0.9:",
         len([i for i in range(len(avg_recall)) if avg_recall[i] >= 0.9 and avg_precision[i] >= 0.95]),
     )
 
@@ -654,13 +654,18 @@ def cluster_eval(
         k,
         device=device,
     )
+    contig_to_cluster = {}
+    for bin in cluster_to_contig:
+        for contig in cluster_to_contig[bin]:
+            contig_to_cluster[contig] = bin
     if dataset.species is not None and len(dataset.species) > 1:
-        evaluate_binning(
-            cluster_to_contig,
-            dataset.node_to_label,
-            dataset.label_to_node,
-            contig_sizes={dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))},
-        )
+        # evaluate_binning(
+        #    cluster_to_contig,
+        #    dataset.node_to_label,
+        #    dataset.label_to_node,
+        #   contig_sizes={dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))},
+        # )
+        calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
     if dataset.ref_marker_sets is not None:
 
         results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
