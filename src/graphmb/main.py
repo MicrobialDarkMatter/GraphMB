@@ -281,7 +281,7 @@ def main():
                 # label, node = line.strip().split()
                 if args.labels.endswith(".csv"):
                     values = line.strip().split(",")
-                elif args.labels.endswith(".tsv"): # amber format
+                elif args.labels.endswith(".tsv"):  # amber format
                     if line.startswith("@"):
                         continue
                     values = line.strip().split("\t")
@@ -438,6 +438,10 @@ def main():
             k,
             device=device,
         )
+        cluster_sizes = {}
+        for c in best_cluster_to_contig:
+            cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in best_cluster_to_contig[c]])
+            cluster_sizes[c] = cluster_size
         best_contig_to_bin = {}
         for bin in best_cluster_to_contig:
             for contig in best_cluster_to_contig[bin]:
@@ -465,19 +469,19 @@ def main():
             # calculate overall P/R/F
             calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node)
             calculate_overall_prf(
-                {cluster: best_cluster_to_contig[cluster] for cluster in hq_bins},
+                {
+                    cluster: best_cluster_to_contig[cluster]
+                    for cluster in best_cluster_to_contig
+                    if cluster_sizes[cluster] > args.minbin
+                },
                 {
                     contig: best_contig_to_bin[contig]
                     for contig in best_contig_to_bin
-                    if best_contig_to_bin[contig] in hq_bins
+                    if cluster_sizes[best_contig_to_bin[contig]] > args.minbin
                 },
                 node_to_label,
                 label_to_node,
             )
-            best_contig_to_bin = {}
-            for bin in best_cluster_to_contig:
-                for contig in best_cluster_to_contig[bin]:
-                    best_contig_to_bin[contig] = bin
         if "writebins" in args.post:
             print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
             # breakpoint()
