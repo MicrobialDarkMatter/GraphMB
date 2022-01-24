@@ -25,6 +25,8 @@ class ContigsDataset(DGLDataset):
         kmer=4,
         depth=None,
         markers=None,
+        load_kmer=False,
+        assembly_type="flye",
     ):
         self.mode = "train"
         # self.save_dir = save_dir
@@ -50,9 +52,10 @@ class ContigsDataset(DGLDataset):
         self.node_to_label = {}
         self.node_labels = []
         self.kmer = kmer
-
-        # TODO: reverse complement
-        self.kmer_to_ids, self.canonical_k = get_kmer_to_id(self.kmer)
+        self.load_kmer = load_kmer
+        self.assembly_type = assembly_type
+        if self.load_kmer:
+            self.kmer_to_ids, self.canonical_k = get_kmer_to_id(self.kmer)
 
         self.connected = []
         self.min_contig_len = min_contig
@@ -176,6 +179,8 @@ class ContigsDataset(DGLDataset):
             for line in f:
                 if line.startswith(">"):
                     contig_name = line[1:].strip().split(" ")[0]
+                    if self.assembly_type == "spades":
+                        contig_name = "_".join(contig_name.split("_")[:2])
                     self.contig_seqs[contig_name] = ""
                 else:
                     self.contig_seqs[contig_name] += line.strip()
@@ -188,6 +193,8 @@ class ContigsDataset(DGLDataset):
                     values = line.strip().split()
                     contigid = values[1]
                     # use seq from fasta file
+                    if self.assembly_type == "spades":
+                        contigid = "_".join(contigid.split("_")[:2])
                     contig_seq = self.contig_seqs.get(contigid, "")  # discard missing contigs
                     contiglen = len(contig_seq)
 
@@ -197,8 +204,9 @@ class ContigsDataset(DGLDataset):
                         contiglen /= 1000000
                         self.contig_names.append(contigid)
                         self.nodes_len.append([contiglen])
-                        kmers = count_kmers(contig_seq, self.kmer, self.kmer_to_ids, self.canonical_k)
-                        self.nodes_kmer.append(kmers)
+                        if self.load_kmer:
+                            kmers = count_kmers(contig_seq, self.kmer, self.kmer_to_ids, self.canonical_k)
+                            self.nodes_kmer.append(kmers)
                         self.nodes_data.append([])
                 if line.startswith("L"):
                     values = line.strip().split()  # TAG, SRC, SIGN, DEST, SIGN, 0M, RC
@@ -209,8 +217,10 @@ class ContigsDataset(DGLDataset):
                         continue
                     self.edges_src.append(values[1])
                     self.edges_dst.append(values[3])
-
-                    rc = int(values[6].split(":")[-1])
+                    if len(values) > 6:
+                        rc = int(values[6].split(":")[-1])
+                    else:
+                        rc = 1
                     self.edges_weight.append(rc)
                     # reverse too
                     if values[1] != values[3]:
@@ -227,6 +237,8 @@ class ContigsDataset(DGLDataset):
             for line in f:
                 values = line.strip().split()
                 contigid = values[0]
+                if self.assembly_type == "spades":
+                    contigid = "_".join(contigid.split("_")[:2])
                 if contigid in self.contig_names:
                     contig_to_depths[contigid] = []
                     for i in depth_i:

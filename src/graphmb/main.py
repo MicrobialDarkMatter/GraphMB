@@ -95,7 +95,7 @@ def main():
         default="0.1",
     )
     # data processing
-    parser.add_argument("--mincontig", type=int, help="Minimum size of input contigs", default=1000)
+    parser.add_argument("--mincontig", type=int, help="Minimum size of input contigs", default=100)
     parser.add_argument("--minbin", type=int, help="Minimum size of clusters in bp", default=200000)
     parser.add_argument("--mincomp", type=int, help="Minimum size of connected components", default=1)
     parser.add_argument("--randomize", help="Randomize graph", action="store_true")
@@ -112,7 +112,7 @@ def main():
     parser.add_argument("--vambdim", help="VAE latent dim", default=64)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     parser.add_argument("--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
-
+    parser.add_argument("--assembly_type", help="flye or spades", default="flye")
     args = parser.parse_args()
 
     if args.outdir is None:
@@ -150,6 +150,8 @@ def main():
         depth=args.depth,
         kmer=int(args.kmer),
         markers=args.markers,
+        assembly_type=args.assembly_type,
+        load_kmer=True,
     )
     dataset.assembly = args.assembly
 
@@ -171,7 +173,7 @@ def main():
     dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
 
     # Read depths from JGI file
-    if args.depth is not None:
+    if args.depth is not None and os.path.isfile(args.depth):
         dataset.depth = args.depth
         dataset.nodes_depths = []
         dataset.read_depths(os.path.join(args.assembly, args.depth))
@@ -181,6 +183,8 @@ def main():
             dataset.nodes_depths = stats.zscore(dataset.nodes_depths, axis=0)
             depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
             dataset.nodes_depths /= depthssum.reshape((-1, 1))
+    else:
+        dataset.nodes_depths = torch.ones(dataset.nodes_kmer.shape[0], 1)
 
     ### prepare contig features with VAE
     batchsteps = []
@@ -215,6 +219,7 @@ def main():
                 mincontiglength=args.mincontig,
                 nhiddens=nhiddens,
                 nlatent=int(args.vambdim),
+                norefcheck=True,
             )
             shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), features_dir)
             args.features = "features.tsv"
