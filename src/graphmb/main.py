@@ -48,12 +48,12 @@ def main():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
     # input files
     parser.add_argument("--assembly", type=str, help="Assembly base path", required=True)
-    parser.add_argument("--assembly_name", type=str, help="File name with contigs", default="edges.fasta")
+    parser.add_argument("--assembly_name", type=str, help="File name with contigs", default="assembly.fasta")
     parser.add_argument("--graph_file", type=str, help="File name with graph", default="assembly_graph.gfa")
     parser.add_argument(
         "--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)", default=None
     )
-    parser.add_argument("--depth", type=str, help="Depth file from jgi", default="edges_depth.txt")
+    parser.add_argument("--depth", type=str, help="Depth file from jgi", default="assembly_depth.txt")
     parser.add_argument(
         "--features", type=str, help="Features file mapping contig name to features", default="features.tsv"
     )
@@ -82,7 +82,7 @@ def main():
     # other training params
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
-    parser.add_argument("--evalepoch", type=int, help="Epoch interval to run eval", default=1)
+    parser.add_argument("--evalepoch", type=int, help="Epoch interval to run eval", default=10)
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--usekmer", help="Use kmer features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
@@ -95,7 +95,7 @@ def main():
         default="0.1",
     )
     # data processing
-    parser.add_argument("--mincontig", type=int, help="Minimum size of input contigs", default=100)
+    parser.add_argument("--mincontig", type=int, help="Minimum size of input contigs", default=1000)
     parser.add_argument("--minbin", type=int, help="Minimum size of clusters in bp", default=200000)
     parser.add_argument("--mincomp", type=int, help="Minimum size of connected components", default=1)
     parser.add_argument("--randomize", help="Randomize graph", action="store_true")
@@ -173,7 +173,7 @@ def main():
     dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
 
     # Read depths from JGI file
-    if args.depth is not None and os.path.isfile(args.depth):
+    if args.depth is not None and os.path.isfile(os.path.join(args.assembly, args.depth)):
         dataset.depth = args.depth
         dataset.nodes_depths = []
         dataset.read_depths(os.path.join(args.assembly, args.depth))
