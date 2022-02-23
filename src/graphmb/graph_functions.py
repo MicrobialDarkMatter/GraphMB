@@ -52,11 +52,11 @@ colors = [
 ]
 
 
-def set_seed(SEED=0):
-    dgl.random.seed(SEED)
-    torch.manual_seed(SEED)
-    random.seed(SEED)
-    np.random.seed(SEED)
+def set_seed(seed=0):
+    dgl.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 class Read:
@@ -608,6 +608,7 @@ def cluster_eval(
     device,
     clusteringloss=False,
     logger=None,
+    use_marker_contigs_only=False,
 ):
     """Cluster contig embs and eval with markers
 
@@ -646,9 +647,17 @@ def cluster_eval(
         embeds = logits.detach().numpy()
     else:
         embeds = logits
+    if use_marker_contigs_only:
+        marker_mask = [n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0 for n in dataset.node_names]
+        print("clustering", sum(marker_mask), "markers", len(marker_mask))
+        cluster_embeds = embeds[marker_mask]
+        cluster_names = np.array(dataset.node_names)[marker_mask]
+    else:
+        cluster_embeds = embeds
+        cluster_names = dataset.node_names
     cluster_to_contig, centroids = cluster_embs(
-        embeds,
-        dataset.node_names,
+        cluster_embeds,
+        cluster_names,
         clustering,
         # len(dataset.connected),
         k,
