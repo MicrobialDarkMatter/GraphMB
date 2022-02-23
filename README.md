@@ -35,6 +35,19 @@ pip install .
 conda install -c andrelamurias graphmb
 ```
 
+### Option 4 - Docker
+Either build the docker image with the Dockerfile or pull from dockerhub:
+```bash
+docker pull andrelamurias/graphmb
+```
+
+Then you can GraphMB on a contain. The image includes the Strong100 dataset. 
+If you want to use other datasets, use the -v option to mount the path to your data.
+```bash
+docker run -it andrelamurias/graphmb bash
+```
+
+
 ## Input files
 
 The only files required are the contigs in fasta format, and the assembly graph in GFA format. For optimal performance,
@@ -57,13 +70,14 @@ Download from this link and extract to data/strong100.
 If you have your assembly in some directory, with the files mentioned above:
 
 ```bash
-python src/graphmb/main.py  --assembly data/strong100/ --markers marker_gene_stats.tsv
+graphmb --assembly data/strong100/ --outdir results/strong100/ --markers marker_gene_stats.tsv
 ```
 
+The outdir will be created if it does not exist.
 You can specify the filenames:
 
 ```bash
-python src/graphmb/main.py  --assembly data/strong100/ --assembly_name edges.fasta --graph_file assembly_graph.gfa --depth edges_depth.txt --markers marker_gene_stats.tsv
+graphmb --assembly data/strong100/ --outdir results/strong100/ --assembly_name edges.fasta --graph_file assembly_graph.gfa --depth edges_depth.txt --markers marker_gene_stats.tsv
 ```
 
 By default GraphMB saves a TSV file mapping each contig to a bin to the assembly directory, as well as the weights and output embeddings of the best model.
@@ -73,22 +87,22 @@ To prevent GraphMB from run clustering after each epoch, do not provide the mark
 This will make it run faster but the results might not be optimal.
 
 ```bash
-python src/graphmb/main.py  --assembly data/strong100/
+graphmb --assembly data/strong100/ --outdir results/strong100/
 ```
 
 To use GPU both for training and clustering, use the --cuda param:
 
 ```bash
-python src/graphmb/main.py  --assembly data/strong100/ --cuda
+graphmb --assembly data/strong100/ --outdir results/strong100/ --cuda
 ```
 
 
 You can also run on CPU and limit the number of threads to use:
 ```bash
-python src/graphmb/main.py  --assembly data/strong100/ --numcores 4
+graphmb --assembly data/strong100/ --outdir results/strong100/ --numcores 4
 ```
 
-If installed with pip, you can also use `graphmb` instead of `python src/graphmb/main.py`.
+If installed with pip, you can also use `graphmb` instead of `graphmb`.
 
 ## Typical workflow
 Our workflows are available [here](https://github.com/AndreLamurias/binning_workflows).
