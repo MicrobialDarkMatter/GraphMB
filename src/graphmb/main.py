@@ -117,7 +117,13 @@ def main():
     args = parser.parse_args()
 
     if args.outdir is None:
-        args.outdir = args.assembly
+        if args.assembly is None:
+            print("Please specify assembly path or outdir with --assembly or --outdir")
+            exit()
+        else:
+            args.outdir = args.assembly
+    else:
+        Path(args.outdir).mkdir(parents=True, exist_ok=True)
     print("setting seed to {}".format(args.seed))
     set_seed(args.seed)
     # set up logging

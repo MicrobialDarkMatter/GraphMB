@@ -26,7 +26,7 @@ def getRecall(mat, k, s, total, unclassified):
             if mat[j][i] > max_k:
                 max_k = mat[j][i]
         sum_s += max_k
-    return sum_s / (total + unclassified)
+    return sum_s / total  # / (total + unclassified)
 
 
 # Get ARI
@@ -75,7 +75,7 @@ def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, l
             # breakpoint()
             total_binned += 1
             bins_species[clusters.index(contig_to_cluster[i])][labels.index(node_to_label[i])] += 1
-
+    breakpoint()
     my_precision = getPrecision(bins_species, n_pred_labels, n_true_labels, total_binned)
     my_recall = getRecall(
         bins_species, n_pred_labels, n_true_labels, total_binned, (ground_truth_count - total_binned)
