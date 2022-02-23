@@ -82,7 +82,7 @@ def main():
     # other training params
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
-    parser.add_argument("--evalepoch", type=int, help="Epoch interval to run eval", default=10)
+    parser.add_argument("--evalepochs", type=int, help="Epoch interval to run eval", default=10)
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--usekmer", help="Use kmer features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
@@ -113,12 +113,13 @@ def main():
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     parser.add_argument("--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
     parser.add_argument("--assembly_type", help="flye or spades", default="flye")
+    parser.add_argument("--seed", help="Set seed", default=1, type=int)
     args = parser.parse_args()
 
     if args.outdir is None:
         args.outdir = args.assembly
-
-    set_seed()
+    print("setting seed to {}".format(args.seed))
+    set_seed(args.seed)
     # set up logging
     now = datetime.now()
     logger = logging.getLogger()
@@ -197,9 +198,9 @@ def main():
         batchsteps = [25, 75, 150, 300]
     nhiddens = [512, 512]
     print("using these batchsteps:", batchsteps)
-    features_dir = os.path.join(args.outdir, "features.tsv".format(args.vambdim))
+    features_dir = os.path.join(args.assembly, "features.tsv".format(args.vambdim))
     vamb_emb_exists = os.path.exists(features_dir)
-    if args.vamb or not features_dir:
+    if args.vamb or not vamb_emb_exists:
         print("running VAMB...")
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
@@ -230,8 +231,8 @@ def main():
 
     # Read  features/embs from file in tsv format
     node_embs = {}
-    print("loading features from", os.path.join(args.outdir, args.features))
-    with open(os.path.join(args.outdir, args.features), "r") as ffile:
+    print("loading features from", os.path.join(args.assembly, args.features))
+    with open(os.path.join(args.assembly, args.features), "r") as ffile:
         for line in ffile:
             values = line.strip().split()
             node_embs[values[0]] = [float(x) for x in values[1:]]
@@ -404,6 +405,7 @@ def main():
                 logger=logger,
                 device=device,
                 epsilon=args.early_stopping,
+                evalepochs=args.evalepochs,
             )
 
     else:
@@ -454,6 +456,7 @@ def main():
         # run for best epoch only
         if args.markers is not None:
             total_hq = 0
+            total_mq = 0
             results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, best_cluster_to_contig)
             hq_bins = set()
             for binid in results:
@@ -466,7 +469,10 @@ def main():
                     )
                     hq_bins.add(binid)
                     total_hq += 1
+                if results[binid]["comp"] > 50 and results[binid]["cont"] < 10:
+                    total_mq += 1
             logger.info("Total HQ {}".format(total_hq))
+            logger.info("Total MQ {}".format(total_mq))
 
         contig_lens = {dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
         if len(dataset.species) > 1:
