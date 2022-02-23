@@ -2,11 +2,16 @@ from setuptools import setup
 from setuptools.command.install import install
 import os
 import subprocess
+from distutils.util import convert_path
 
+main_ns = {}
+ver_path = convert_path("src/graphmb/version.py")
+with open(ver_path) as ver_file:
+    exec(ver_file.read(), main_ns)
 
 setup(
     name="graphmb",
-    version="0.1.2",
+    version=main_ns["__version__"],
     packages=["graphmb"],
     package_dir={"": "src"},
     setup_requires=["setuptools~=58.0", "wheel"],

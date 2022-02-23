@@ -38,6 +38,7 @@ from graphmb.graph_functions import (
     draw_nx_graph,
     set_seed,
 )
+from graphmb.version import __version__
 from vamb.vamb_run import run as run_vamb
 
 SEED = 0
@@ -47,7 +48,7 @@ BACTERIA_MARKERS = "data/Bacteria.ms"
 def main():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
     # input files
-    parser.add_argument("--assembly", type=str, help="Assembly base path", required=True)
+    parser.add_argument("--assembly", type=str, help="Assembly base path", required=False)
     parser.add_argument("--assembly_name", type=str, help="File name with contigs", default="assembly.fasta")
     parser.add_argument("--graph_file", type=str, help="File name with graph", default="assembly_graph.gfa")
     parser.add_argument(
@@ -106,15 +107,20 @@ def main():
     parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval", default=None)
     parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs_writebins")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
-    parser.add_argument("--outname", help="Output (experiment) name", default="")
+    parser.add_argument("--outputname", "--outname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
     parser.add_argument("--vambdim", help="VAE latent dim", default=64)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
-    parser.add_argument("--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
+    parser.add_argument("--outputdir", "--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
     parser.add_argument("--assembly_type", help="flye or spades", default="flye")
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
+    parser.add_argument("-v", "--version", help="Print version and exit", action="store_true")
     args = parser.parse_args()
+
+    if args.version:
+        print(f"GraphMB {__version__}")
+        exit(0)
 
     if args.outdir is None:
         if args.assembly is None:
@@ -133,6 +139,7 @@ def main():
     logfile = os.path.join(args.outdir, now.strftime("%Y%m%d-%H%M%S") + "{}_output.log".format(args.outname))
     output_file_handler = logging.FileHandler(logfile)
     print("logging to {}".format(logfile))
+    logger.info(f"Running GraphMB {__version__}")
     stdout_handler = logging.StreamHandler(sys.stdout)
     logger.addHandler(output_file_handler)
     logger.info(args)
