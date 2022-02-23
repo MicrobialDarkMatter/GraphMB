@@ -112,7 +112,9 @@ def main():
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
     parser.add_argument("--vambdim", help="VAE latent dim", default=64)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
-    parser.add_argument("--outputdir", "--outdir", help="Output dir (same as input assembly dir if not defined", default=None)
+    parser.add_argument(
+        "--outputdir", "--outdir", help="Output dir (same as input assembly dir if not defined", default=None
+    )
     parser.add_argument("--assembly_type", help="flye or spades", default="flye")
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
     parser.add_argument("-v", "--version", help="Print version and exit", action="store_true")
@@ -130,6 +132,18 @@ def main():
             args.outdir = args.assembly
     else:
         Path(args.outdir).mkdir(parents=True, exist_ok=True)
+
+    if args.assembly is None:
+        # check if other dirs exists
+        if not os.path.exists(args.assembly_name):
+            print(f"Assembly {args.assembly_name} not found")
+            exit()
+        if not os.path.exists(args.depth):
+            print(f"Depth file {args.depth} not found")
+            exit()
+        if not os.path.exists(args.graph_file):
+            print(f"Assembly Graph file {args.graph_file} not found")
+            exit()
     print("setting seed to {}".format(args.seed))
     set_seed(args.seed)
     # set up logging
@@ -240,7 +254,8 @@ def main():
             print("Contig features saved to {}".format(features_dir))
 
     if args.features is None:
-        args.features = "vamb_out{}/embs.tsv".format(args.vambdim)
+        # args.features = "vamb_out{}/embs.tsv".format(args.vambdim)
+        args.features = "features.tsv"
 
     # Read  features/embs from file in tsv format
     node_embs = {}
