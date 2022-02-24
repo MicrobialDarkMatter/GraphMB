@@ -107,17 +107,17 @@ def main():
     parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval", default=None)
     parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs_writebins")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
-    parser.add_argument("--outputname", "--outname", help="Output (experiment) name", default="")
+    parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
     parser.add_argument("--vambdim", help="VAE latent dim", default=64)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     parser.add_argument(
-        "--outputdir", "--outdir", help="Output dir (same as input assembly dir if not defined", default=None
+        "--outdir", "--outputdir", help="Output dir (same as input assembly dir if not defined", default=None
     )
     parser.add_argument("--assembly_type", help="flye or spades", default="flye")
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
-    parser.add_argument("-v", "--version", help="Print version and exit", action="store_true")
+    parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
     args = parser.parse_args()
 
     if args.version:
@@ -153,20 +153,35 @@ def main():
     logfile = os.path.join(args.outdir, now.strftime("%Y%m%d-%H%M%S") + "{}_output.log".format(args.outname))
     output_file_handler = logging.FileHandler(logfile)
     print("logging to {}".format(logfile))
-    logger.info(f"Running GraphMB {__version__}")
+
     stdout_handler = logging.StreamHandler(sys.stdout)
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     logger.addHandler(output_file_handler)
     logger.info(args)
     logger.addHandler(stdout_handler)
+
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+
+        logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = handle_exception
+
+    logger.info(f"Running GraphMB {__version__}")
     logging.getLogger("matplotlib.font_manager").disabled = True
+
+    # setup cuda and cpu
     logging.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
     print("cuda available:", (device == "cuda:0"), ", using ", device)
     torch.set_num_threads(args.numcores)
+
     # specify data properties for caching
     name = "contigs_graph"
     name += "_min" + str(args.mincontig) + "_kmer" + str(args.kmer)
-
+    raise Exception("TODO")
     dataset = ContigsDataset(
         name,
         args.assembly,
