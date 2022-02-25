@@ -155,9 +155,7 @@ def main():
     logfile = os.path.join(args.outdir, now.strftime("%Y%m%d-%H%M%S") + "{}_output.log".format(args.outname))
     output_file_handler = logging.FileHandler(logfile)
     print("logging to {}".format(logfile))
-
     stdout_handler = logging.StreamHandler(sys.stdout)
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     logger.addHandler(output_file_handler)
     logger.info(args)
     logger.addHandler(stdout_handler)
