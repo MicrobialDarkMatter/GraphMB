@@ -56,14 +56,18 @@ contigs. Also, for better results, CheckM is run on each contig using the genera
 though, you can just run the model for a number of epochs and pick the last model. 
 By default, it runs with with early stopping.
 
-In summary, you need to have a directory with these files:
-- edges.fasta
-- assembly_graph.fasta
-- edges_depth.txt (output of `jgi_summarize_bam_contig_depths`)
-- marker_gene_stats.csv (optional)
+In summary, you need to have a directory with these files (names can be changed with arguments):
+- assembly.fasta: contig sequences
+- assembly_graph.fasta: assembly graph. it should have the sequences of assembly.fasta as nodes.
+- assembly_depth.txt: output of `jgi_summarize_bam_contig_depths`
+- marker_gene_stats.csv (optional): output of CheckM for each contig
+
+If you do not specify this directory the `--assembly`, you have to use the full path of all files.
+Otherwise, it will assume that the files are inside the directory.
 
 You can get an example of these files [here](https://drive.google.com/drive/folders/1m6uTgTPUghk_q9GxfX1UNEOfn8jnIdt5?usp=sharing).
 Download from this link and extract to data/strong100.
+The datasets used in our experiments are available [here](https://zenodo.org/record/6122610)
 
 
 ## How to run
@@ -73,7 +77,7 @@ If you have your assembly in some directory, with the files mentioned above:
 graphmb --assembly data/strong100/ --outdir results/strong100/ --markers marker_gene_stats.tsv
 ```
 
-The outdir will be created if it does not exist.
+The outdir will be created if it does not exist. The marker file is optional. 
 You can specify the filenames:
 
 ```bash

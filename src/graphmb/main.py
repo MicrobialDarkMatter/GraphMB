@@ -110,7 +110,7 @@ def main():
     parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
-    parser.add_argument("--vambdim", help="VAE latent dim", default=64)
+    parser.add_argument("--vambdim", help="VAE latent dim", default=32)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     parser.add_argument(
         "--outdir", "--outputdir", help="Output dir (same as input assembly dir if not defined", default=None
@@ -133,17 +133,19 @@ def main():
     else:
         Path(args.outdir).mkdir(parents=True, exist_ok=True)
 
-    if args.assembly is None:
-        # check if other dirs exists
-        if not os.path.exists(args.assembly_name):
+    # check if other dirs exists
+    if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
+        print(f"Assembly Graph file {args.graph_file} not found")
+        exit()
+    if not os.path.exists(os.path.join(args.assembly, args.features)):
+        # needs assembly files to calculate features
+        if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
             print(f"Assembly {args.assembly_name} not found")
             exit()
-        if not os.path.exists(args.depth):
+        if not os.path.exists(os.path.join(args.assembly, args.depth)):
             print(f"Depth file {args.depth} not found")
             exit()
-        if not os.path.exists(args.graph_file):
-            print(f"Assembly Graph file {args.graph_file} not found")
-            exit()
+
     print("setting seed to {}".format(args.seed))
     set_seed(args.seed)
     # set up logging
@@ -181,13 +183,12 @@ def main():
     # specify data properties for caching
     name = "contigs_graph"
     name += "_min" + str(args.mincontig) + "_kmer" + str(args.kmer)
-    raise Exception("TODO")
     dataset = ContigsDataset(
         name,
         args.assembly,
         assembly_name=args.assembly_name,
         graph_file=args.graph_file,
-        save_dir=args.assembly,
+        save_dir=args.outdir,
         force_reload=args.reload,
         min_contig=args.mincontig,
         depth=args.depth,
@@ -240,7 +241,15 @@ def main():
         batchsteps = [25, 75, 150, 300]
     nhiddens = [512, 512]
     print("using these batchsteps:", batchsteps)
-    features_dir = os.path.join(args.assembly, "features.tsv".format(args.vambdim))
+
+    # features dir: if not set, use assembly dir if specified, else use outdir
+    if args.features is None:
+        if args.assembly != "":
+            features_dir = os.path.join(args.assembly, "features.tsv")
+        else:
+            features_dir = os.path.join(args.outdir, "features.tsv")
+    else:
+        features_dir = args.features
     vamb_emb_exists = os.path.exists(features_dir)
     if args.vamb or not vamb_emb_exists:
         print("running VAMB...")
@@ -264,18 +273,15 @@ def main():
                 nlatent=int(args.vambdim),
                 norefcheck=True,
             )
-            shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), features_dir)
-            args.features = "features.tsv"
+            if args.assembly != "":
+                shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), features_dir)
+            # args.features = "features.tsv"
             print("Contig features saved to {}".format(features_dir))
-
-    if args.features is None:
-        # args.features = "vamb_out{}/embs.tsv".format(args.vambdim)
-        args.features = "features.tsv"
 
     # Read  features/embs from file in tsv format
     node_embs = {}
-    print("loading features from", os.path.join(args.assembly, args.features))
-    with open(os.path.join(args.assembly, args.features), "r") as ffile:
+    print("loading features from", features_dir)
+    with open(features_dir, "r") as ffile:
         for line in ffile:
             values = line.strip().split()
             node_embs[values[0]] = [float(x) for x in values[1:]]

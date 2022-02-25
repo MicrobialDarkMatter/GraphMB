@@ -15,7 +15,7 @@ class ContigsDataset(DGLDataset):
     def __init__(
         self,
         name,
-        gfapath=None,
+        assembly_path=None,
         assembly_name="assembly.fasta",
         graph_file="assembly_graph.gfa",
         labels=None,
@@ -30,8 +30,10 @@ class ContigsDataset(DGLDataset):
     ):
         self.mode = "train"
         # self.save_dir = save_dir
-        self.assembly = gfapath
-        self.readmapping = gfapath
+        self.assembly = assembly_path
+        if self.assembly is None:
+            self.assembly = ""
+        self.readmapping = assembly_path
         self.assembly_name = assembly_name
         self.graph_file = graph_file
         self.depth = depth
@@ -81,7 +83,7 @@ class ContigsDataset(DGLDataset):
         print("processing sequences", os.path.join(self.assembly, self.assembly_name))
         self.read_seqs()
         print("read", len(self.contig_seqs), "seqs")
-        print("processing GFA file", os.path.join(self.assembly + self.graph_file))
+        print("processing GFA file", os.path.join(self.assembly, self.graph_file))
         self.read_gfa()
         print("read", len(self.edges_src), "edges")
         # self.filter_contigs()
