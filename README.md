@@ -32,7 +32,7 @@ python -m venv venv; source venv/bin/activate # optional
 pip install .
 ```
 
-### Option 3 - From anaconda
+### Option 3 - From anaconda (not working yet)
 ```bash
 conda install -c andrelamurias graphmb
 ```
@@ -43,7 +43,7 @@ Either build the docker image with the Dockerfile or pull from dockerhub:
 docker pull andrelamurias/graphmb
 ```
 
-Then you can GraphMB on a contain. The image includes the Strong100 dataset. 
+Then you can run GraphMB on a container. The image includes the Strong100 dataset. 
 If you want to use other datasets, use the -v option to mount the path to your data.
 ```bash
 docker run -it andrelamurias/graphmb bash
@@ -89,7 +89,7 @@ graphmb --assembly data/strong100/ --outdir results/strong100/ --assembly_name e
 By default GraphMB saves a TSV file mapping each contig to a bin to the assembly directory, as well as the weights and output embeddings of the best model.
 The output directory can be changed with the `--outdir` argument.
 
-To prevent GraphMB from run clustering after each epoch, do not provide the markers param.
+To prevent GraphMB from run clustering after each epoch, do not provide the markers param or set the `--evalepochs` option to a higher number (default is 10)
 This will make it run faster but the results might not be optimal.
 
 ```bash
@@ -107,8 +107,6 @@ You can also run on CPU and limit the number of threads to use:
 ```bash
 graphmb --assembly data/strong100/ --outdir results/strong100/ --numcores 4
 ```
-
-If installed with pip, you can also use `graphmb` instead of `graphmb`.
 
 ## Typical workflow
 Our workflows are available [here](https://github.com/AndreLamurias/binning_workflows).
