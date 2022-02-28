@@ -32,9 +32,11 @@ python -m venv venv; source venv/bin/activate # optional
 pip install .
 ```
 
-### Option 3 - From anaconda (not working yet)
+### Option 3 - From conda
 ```bash
-conda install -c andrelamurias graphmb
+conda create -n graphmb -c conda-forge make cmake libgcc python=3.7 pip
+conda activate graphmb
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
 ```
 
 ### Option 4 - Docker
