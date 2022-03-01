@@ -8,6 +8,7 @@ from datetime import datetime
 from collections import Counter
 import numpy as np
 import sys
+import os
 import copy
 import pickle
 import shutil
@@ -17,8 +18,7 @@ import torch
 import torch.nn as nn
 import networkx as nx
 
-
-import os
+print(os.environ["DGLBACKEND"])
 from graphmb.contigsdataset import ContigsDataset
 from pathlib import Path
 import scipy.stats as stats
@@ -43,7 +43,6 @@ from vamb.vamb_run import run as run_vamb
 
 SEED = 0
 BACTERIA_MARKERS = "data/Bacteria.ms"
-os.environ["DGLBACKEND"] = "pytorch"
 
 
 def main():
