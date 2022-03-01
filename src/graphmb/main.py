@@ -43,6 +43,7 @@ from vamb.vamb_run import run as run_vamb
 
 SEED = 0
 BACTERIA_MARKERS = "data/Bacteria.ms"
+os.environ["DGLBACKEND"] = "pytorch"
 
 
 def main():
