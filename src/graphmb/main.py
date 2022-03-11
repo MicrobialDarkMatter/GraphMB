@@ -45,6 +45,396 @@ SEED = 0
 BACTERIA_MARKERS = "data/Bacteria.ms"
 
 
+def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
+    from sklearn.manifold import TSNE
+
+    print("running tSNE")
+    # filter only good clusters
+    tsne = TSNE(n_components=2, random_state=SEED)
+    if len(dataset.species) == 1:
+        label_to_node = {c: cluster_to_contig[c] for c in hq_bins}
+        label_to_node["mq/lq"] = []
+        for c in cluster_to_contig:
+            if c not in hq_bins:
+                label_to_node["mq/lq"] += list(cluster_to_contig[c])
+    if centroids is not None:
+        all_embs = tsne.fit_transform(torch.cat((torch.tensor(embs), torch.tensor(centroids)), dim=0))
+        centroids_2dim = all_embs[embs.shape[0] :]
+        node_embeddings_2dim = all_embs[: embs.shape[0]]
+    else:
+        centroids_2dim = None
+        node_embeddings_2dim = tsne.fit_transform(torch.tensor(embs))
+    return node_embeddings_2dim, centroids_2dim
+
+
+def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
+    # properties of all nodes
+    nodeid_to_label = {i: node_to_label.get(n, "NA") for i, n in enumerate(dataset.node_names)}
+    contig_lens = {i: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
+    nodes_titles = {
+        i: str(dataset.node_names[i]) + "<br>Length: " + str(contig_lens[i]) for i in range(len(dataset.contig_names))
+    }
+    if dataset.depth is not None:
+        nodes_titles = {
+            i: nodes_titles[i] + "<br>Depth: " + ", ".join(["{:.4}".format(x) for x in dataset.nodes_depths[i]])
+            for i in range(len(dataset.contig_names))
+        }
+    if cluster_to_contig:
+        contig_to_cluster = {contig: cluster for cluster, contigs in cluster_to_contig.items() for contig in contigs}
+        nodes_titles = {
+            i: nodes_titles[i] + "<br>Cluster: " + str(contig_to_cluster[n])
+            for i, n in enumerate(dataset.contig_names)
+        }
+
+    # convert DGL graph to networkx
+    nx_graph = graph.cpu().to_networkx(edge_attrs=["weight"]).to_undirected()
+    connected_comp = [c for c in sorted(nx.connected_components(nx_graph), key=len, reverse=True) if len(c) > 0]
+    # TODO: draw connected components to separate files
+    for i in range(10, 50):
+        # without_largest_comp = [item for sublist in connected_comp[10:110] for item in sublist if len(sublist) > 2]
+        this_comp = connected_comp[i]
+        nx_graph = nx.subgraph(nx_graph, this_comp)
+
+        draw_nx_graph(
+            nx_graph,
+            nodeid_to_label,
+            label_to_node,
+            outname + "_" + str(i),
+            contig_sizes=contig_lens,
+            node_titles=nodes_titles,
+        )
+
+
+def write_embs(embs, node_names, outname):
+    # write embs as dict node_name: embs
+    embs_dict = {node_names[i]: embs[i] for i in range(len(embs))}
+    with open(outname, "wb") as f:
+        pickle.dump(embs_dict, f)
+
+
+def write_edges(graph, outname):
+    with open(outname, "w") as graphf:
+        for e in zip(graph.edges()[0], graph.edges()[1]):
+            graphf.write(str(e[0].item()) + "\t" + str(e[1].item()) + "\n")
+
+
+def check_dirs(args):
+    """Check if files necessary to run exist, other wise print message and exit"""
+    if args.outdir is None:
+        if args.assembly is None:
+            print("Please specify assembly path or outdir with --assembly or --outdir")
+            exit()
+        else:
+            args.outdir = args.assembly
+    else:
+        Path(args.outdir).mkdir(parents=True, exist_ok=True)
+
+    # check if other dirs exists
+    if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
+        print(f"Assembly Graph file {args.graph_file} not found")
+        exit()
+    if not os.path.exists(os.path.join(args.assembly, args.features)):
+        # needs assembly files to calculate features
+        if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
+            print(f"Assembly {args.assembly_name} not found")
+            exit()
+        if not os.path.exists(os.path.join(args.assembly, args.depth)):
+            print(f"Depth file {args.depth} not found")
+            exit()
+
+
+def setup_vae(dataset, args):
+    batchsteps = []
+    vamb_epochs = 500
+    if len(dataset.nodes_depths[0]) == 1:
+        vamb_bs = 32
+        batchsteps = [25, 75, 150]
+    else:
+        vamb_bs = 64
+        batchsteps = [25, 75, 150, 300]
+    nhiddens = [512, 512]
+    print("using these batchsteps:", batchsteps)
+
+    # features dir: if not set, use assembly dir if specified, else use outdir
+    if args.features is None:
+        if args.assembly != "":
+            features_dir = os.path.join(args.assembly, "features.tsv")
+        else:
+            features_dir = os.path.join(args.outdir, "features.tsv")
+    else:
+        features_dir = args.features
+    vamb_emb_exists = os.path.exists(features_dir)
+    return batchsteps, vamb_bs, vamb_epochs, nhiddens, features_dir, vamb_emb_exists
+
+
+def load_labels(dataset, args):
+    logging.info("loading labels from {}".format(args.labels))
+    node_to_label = {c: "NA" for c in dataset.contig_names}
+    labels = set(["NA"])
+    with open(args.labels, "r") as f:
+        for line in f:
+            # label, node = line.strip().split()
+            if args.labels.endswith(".csv"):
+                values = line.strip().split(",")
+            elif args.labels.endswith(".tsv"):  # amber format
+                if line.startswith("@"):
+                    continue
+                values = line.strip().split("\t")
+            node = values[0]
+            label = values[1]
+            if node in node_to_label:
+                node_to_label[node] = label
+                labels.add(label)
+            else:
+                print("unused label:", line.strip())
+    labels = list(labels)
+    label_to_node = {s: [] for s in labels}
+    for n in node_to_label:
+        s = node_to_label[n]
+        label_to_node[s].append(n)
+    dataset.node_to_label = {n: l for n, l in node_to_label.items()}
+    dataset.species = labels
+    dataset.label_to_node = label_to_node
+    # calculate homophily
+    positive_edges = 0
+    edges_without_label = 0
+    for u, v in zip(dataset.edges_src, dataset.edges_dst):
+        # breakpoint()
+        if (
+            dataset.contig_names[u] not in dataset.node_to_label
+            or dataset.contig_names[v] not in dataset.node_to_label
+        ):
+            edges_without_label += 1
+        if dataset.node_to_label[dataset.contig_names[u]] == dataset.node_to_label[dataset.contig_names[v]]:
+            positive_edges += 1
+    print(
+        "homophily:",
+        positive_edges / (len(dataset.graph.edges("eid")) - edges_without_label),
+        len(dataset.graph.edges("eid")) - edges_without_label,
+    )
+    return dataset, label_to_node, node_to_label
+
+
+def get_activation(args):
+    # pick activation function
+    if args.activation == "prelu":
+        activation = nn.PReLU(args.hidden)
+    elif args.activation == "relu":
+        activation = nn.ReLU()
+    elif args.activation == "tanh":
+        activation = nn.Tanh()
+    elif args.activation == "sigmoid":
+        activation = nn.Sigmoid()
+    elif args.activation == "lrelu":
+        activation = nn.LeakyReLU()
+    return activation
+
+
+def run_graphmb(dataset, args, device, logger):
+    activation = get_activation(args)
+    model = SAGE(
+        dataset.graph.ndata["feat"].shape[1],
+        args.hidden,
+        args.embsize,
+        args.layers,
+        activation,
+        args.dropout,
+        agg=args.aggtype,
+    )
+    model = model.to(device)
+
+    if model is not None:
+        model = model.to(device)
+
+    logging.info(model)
+    if dataset.ref_marker_sets is not None and args.clusteringalgo is not None and not args.skip_preclustering:
+        # cluster using only input features
+        print("pre train clustering:")
+        pre_cluster_to_contig, centroids = cluster_embs(
+            dataset.graph.ndata["feat"].detach().cpu().numpy(),
+            dataset.node_names,
+            args.clusteringalgo,
+            k,
+            device=device,
+            node_lens=np.array([c[0] for c in dataset.nodes_len]),
+        )
+        results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, pre_cluster_to_contig)
+        calculate_bin_metrics(results, logger=logger)
+
+    best_train_embs, best_model, last_train_embs, last_model = train_graphsage(
+        dataset,
+        model,
+        batch_size=args.batchsize,
+        fan_out=args.fanout,
+        num_negs=args.negatives,
+        neg_share=False,
+        num_epochs=args.epoch,
+        lr=args.lr,
+        k=args.kclusters,
+        clusteringalgo=args.clusteringalgo,
+        print_interval=args.print,
+        loss_weights=(not args.no_loss_weights),
+        sample_weights=(not args.no_sample_weights),
+        logger=logger,
+        device=device,
+        epsilon=args.early_stopping,
+        evalepochs=args.evalepochs,
+    )
+    return best_train_embs, best_model, last_train_embs, last_model
+
+
+def write_bins(args, dataset, cluster_to_contig):
+    bin_dir = Path(args.outdir + "/{}_bins/".format(args.outname))
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
+    clustered_contigs = set()
+    multi_contig_clusters = 0
+    print(len(cluster_to_contig), "clusters")
+    short_contigs = set()
+    skipped_clusters = 0
+    for c in cluster_to_contig:
+        cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in cluster_to_contig[c]])
+        if cluster_size < args.minbin:
+            # print("skipped small cluster", len(cluster_to_contig[c]), "contig")
+            for contig in cluster_to_contig[c]:
+                short_contigs.add(contig)
+            skipped_clusters += 1
+            continue
+        multi_contig_clusters += 1
+        with open(bin_dir / f"{c}.fa", "w") as binfile:
+            # breakpoint()
+            for contig in cluster_to_contig[c]:
+                binfile.write(">" + contig + "\n")
+                binfile.write(dataset.contig_seqs[contig] + "\n")
+                clustered_contigs.add(contig)
+        # print("multi cluster", c, "size", cluster_size, "contigs", len(cluster_to_contig[c]))
+    print("skipped {} clusters".format(skipped_clusters))
+    single_clusters = multi_contig_clusters
+    left_over = set(dataset.contig_names) - clustered_contigs - short_contigs
+    for c in left_over:
+        if c not in clustered_contigs and len(dataset.contig_seqs[c]) > args.minbin:
+
+            with open(bin_dir / f"{single_clusters}.fna", "w") as binfile:
+                binfile.write(">" + c + "\n")
+                binfile.write(dataset.contig_seqs[c] + "\n")
+                single_clusters += 1
+            # print("contig", single_clusters, "size", len(dataset.contig_seqs[c]))
+    print("wrote", single_clusters, "clusters", multi_contig_clusters, ">= #contig", args.mincomp)
+
+
+def run_post_processing(final_embs, args, logger, dataset, graph, device, label_to_node, node_to_label):
+    if "cluster" in args.post or "kmeans" in args.post:
+        logger.info("clustering embs with {} ({})".format(args.clusteringalgo, args.kclusters))
+        # train_embs = last_train_embs
+
+        if args.clusteringalgo is False:
+            args.clusteringalgo = "kmeans"
+        if args.cuda:
+            best_train_embs = final_embs.cpu()
+            # last_train_embs should already be detached and on cpu
+        best_cluster_to_contig, best_centroids = cluster_embs(
+            best_train_embs.numpy(),
+            dataset.node_names,
+            args.clusteringalgo,
+            # len(dataset.connected),
+            args.kclusters,
+            device=device,
+        )
+        cluster_sizes = {}
+        for c in best_cluster_to_contig:
+            cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in best_cluster_to_contig[c]])
+            cluster_sizes[c] = cluster_size
+        best_contig_to_bin = {}
+        for bin in best_cluster_to_contig:
+            for contig in best_cluster_to_contig[bin]:
+                best_contig_to_bin[contig] = bin
+        # run for best epoch only
+        if args.markers is not None:
+            total_hq = 0
+            total_mq = 0
+            results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, best_cluster_to_contig)
+            hq_bins = set()
+            for binid in results:
+                if results[binid]["comp"] > 90 and results[binid]["cont"] < 5:
+                    contig_labels = [dataset.node_to_label.get(node, 0) for node in best_cluster_to_contig[binid]]
+                    labels_count = Counter(contig_labels)
+                    logger.info(
+                        f"{binid}, {round(results[binid]['comp'],4)}, {round(results[binid]['cont'],4)}, "
+                        f"{len(best_cluster_to_contig[binid])} {labels_count}"
+                    )
+                    hq_bins.add(binid)
+                    total_hq += 1
+                if results[binid]["comp"] > 50 and results[binid]["cont"] < 10:
+                    total_mq += 1
+            logger.info("Total HQ {}".format(total_hq))
+            logger.info("Total MQ {}".format(total_mq))
+
+        contig_lens = {dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
+        if len(dataset.species) > 1:
+            evaluate_binning(best_cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
+            # calculate overall P/R/F
+            calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node)
+            calculate_overall_prf(
+                {
+                    cluster: best_cluster_to_contig[cluster]
+                    for cluster in best_cluster_to_contig
+                    if cluster_sizes[cluster] > args.minbin
+                },
+                {
+                    contig: best_contig_to_bin[contig]
+                    for contig in best_contig_to_bin
+                    if cluster_sizes[best_contig_to_bin[contig]] > args.minbin
+                },
+                node_to_label,
+                label_to_node,
+            )
+        if "writebins" in args.post:
+            print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
+            # breakpoint()
+            write_bins(args, dataset, best_cluster_to_contig)
+        if "contig2bin" in args.post:
+            # invert cluster_to_contig
+            logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
+            with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
+                for c in best_contig_to_bin:
+                    f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
+
+    # plot tsne embs
+    if "tsne" in args.post:
+        node_embeddings_2dim, centroids_2dim = run_tsne(best_train_embs, dataset, best_cluster_to_contig, hq_bins)
+        plot_embs(
+            dataset.node_names,
+            node_embeddings_2dim,
+            label_to_node,
+            centroids=centroids_2dim,
+            hq_centroids=hq_bins,
+            node_sizes=None,
+            outputname=args.outdir + args.outname + "_tsne_clusters.png",
+        )
+
+        # node_sizes=[dataset.nodes_len[i][0] * 100 for i in range(len(dataset.contig_names))],
+    if "draw" in args.post:
+        print("drawing graph")
+        draw(
+            dataset,
+            node_to_label,
+            label_to_node,
+            best_cluster_to_contig,
+            args.outdir + args.outname + "_graph.png",
+            graph=graph,
+        )
+
+    if "edges" in args.post:
+        print("writing edges to", args.outdir + args.outname + "_edges")
+        write_edges(graph, args.outdir + args.outname + "_edges")
+
+    if "writeembs" in args.post:
+        logger.info("writing best and last embs to {}".format(args.outdir))
+        best_train_embs = best_train_embs.cpu().detach().numpy()
+        write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"))
+        write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
     # input files
@@ -124,30 +514,11 @@ def main():
         print(f"GraphMB {__version__}")
         exit(0)
 
-    if args.outdir is None:
-        if args.assembly is None:
-            print("Please specify assembly path or outdir with --assembly or --outdir")
-            exit()
-        else:
-            args.outdir = args.assembly
-    else:
-        Path(args.outdir).mkdir(parents=True, exist_ok=True)
-
-    # check if other dirs exists
-    if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
-        print(f"Assembly Graph file {args.graph_file} not found")
-        exit()
-    if not os.path.exists(os.path.join(args.assembly, args.features)):
-        # needs assembly files to calculate features
-        if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
-            print(f"Assembly {args.assembly_name} not found")
-            exit()
-        if not os.path.exists(os.path.join(args.assembly, args.depth)):
-            print(f"Depth file {args.depth} not found")
-            exit()
+    check_dirs(args)
 
     print("setting seed to {}".format(args.seed))
     set_seed(args.seed)
+
     # set up logging
     now = datetime.now()
     logger = logging.getLogger()
@@ -161,6 +532,7 @@ def main():
     logger.addHandler(output_file_handler)
     logger.info(args)
     logger.addHandler(stdout_handler)
+    logging.getLogger("matplotlib.font_manager").disabled = True
 
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
@@ -172,7 +544,6 @@ def main():
     sys.excepthook = handle_exception
 
     logger.info(f"Running GraphMB {__version__}")
-    logging.getLogger("matplotlib.font_manager").disabled = True
 
     # setup cuda and cpu
     logging.info("using cuda: {}".format(str(args.cuda)))
@@ -199,15 +570,6 @@ def main():
     )
     dataset.assembly = args.assembly
 
-    if args.randomize:
-        logger.info("generating a random graph")
-        random_graph = dgl.rand_graph(len(dataset.node_names), len(dataset.edges_src))
-        # random_graph = dgl.add_self_loop(random_graph)
-        for k in dataset.graph.ndata:
-            random_graph.ndata[k] = dataset.graph.ndata[k]
-        random_graph.edata["weight"] = torch.ones(len(dataset.edges_src))
-        dataset.graph = random_graph
-
     # filter graph by components
     dataset.connected = [c for c in dataset.connected if len(c) >= args.mincomp]
 
@@ -231,26 +593,7 @@ def main():
         dataset.nodes_depths = torch.ones(dataset.nodes_kmer.shape[0], 1)
 
     ### prepare contig features with VAE
-    batchsteps = []
-    vamb_epochs = 500
-    if len(dataset.nodes_depths[0]) == 1:
-        vamb_bs = 32
-        batchsteps = [25, 75, 150]
-    else:
-        vamb_bs = 64
-        batchsteps = [25, 75, 150, 300]
-    nhiddens = [512, 512]
-    print("using these batchsteps:", batchsteps)
-
-    # features dir: if not set, use assembly dir if specified, else use outdir
-    if args.features is None:
-        if args.assembly != "":
-            features_dir = os.path.join(args.assembly, "features.tsv")
-        else:
-            features_dir = os.path.join(args.outdir, "features.tsv")
-    else:
-        features_dir = args.features
-    vamb_emb_exists = os.path.exists(features_dir)
+    batchsteps, vamb_bs, vamb_epochs, nhiddens, features_dir, vamb_emb_exists = setup_vae(dataset, args)
     if args.vamb or not vamb_emb_exists:
         print("running VAMB...")
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
@@ -278,7 +621,7 @@ def main():
             # args.features = "features.tsv"
             print("Contig features saved to {}".format(features_dir))
 
-    # Read  features/embs from file in tsv format
+    # Read features/embs from file in tsv format
     node_embs = {}
     print("loading features from", features_dir)
     with open(features_dir, "r") as ffile:
@@ -322,57 +665,13 @@ def main():
     graph = graph.to(device)
 
     # k can be user defined or dependent on the dataset
-    k = len(dataset.species)
-    if args.kclusters is not None:
-        k = int(args.kclusters)
+    if args.kclusters is None:
+        args.kclusters = len(dataset.species)
+    args.kclusters = int(args.kclusters)
 
     # Load labels from file (eg binning results)
     if args.labels:
-        logging.info("loading labels from {}".format(args.labels))
-        node_to_label = {c: "NA" for c in dataset.contig_names}
-        labels = set(["NA"])
-        with open(args.labels, "r") as f:
-            for line in f:
-                # label, node = line.strip().split()
-                if args.labels.endswith(".csv"):
-                    values = line.strip().split(",")
-                elif args.labels.endswith(".tsv"):  # amber format
-                    if line.startswith("@"):
-                        continue
-                    values = line.strip().split("\t")
-                node = values[0]
-                label = values[1]
-                if node in node_to_label:
-                    node_to_label[node] = label
-                    labels.add(label)
-                else:
-                    print("unused label:", line.strip())
-        labels = list(labels)
-        label_to_node = {s: [] for s in labels}
-        for n in node_to_label:
-            s = node_to_label[n]
-            label_to_node[s].append(n)
-        dataset.node_to_label = {n: l for n, l in node_to_label.items()}
-        dataset.species = labels
-        dataset.label_to_node = label_to_node
-        # calculate homophily
-        positive_edges = 0
-        edges_without_label = 0
-        for u, v in zip(dataset.edges_src, dataset.edges_dst):
-            # breakpoint()
-            if (
-                dataset.contig_names[u] not in dataset.node_to_label
-                or dataset.contig_names[v] not in dataset.node_to_label
-            ):
-                edges_without_label += 1
-            if dataset.node_to_label[dataset.contig_names[u]] == dataset.node_to_label[dataset.contig_names[v]]:
-                positive_edges += 1
-        print(
-            "homophily:",
-            positive_edges / (len(dataset.graph.edges("eid")) - edges_without_label),
-            len(dataset.graph.edges("eid")) - edges_without_label,
-        )
-
+        dataset, label_to_node, node_to_label = load_labels(dataset, args)
     else:  # use dataset own labels (by default its only NA)
         label_to_node = {s: [] for s in dataset.species}
         node_to_label = {n: dataset.species[i] for n, i in dataset.node_to_label.items()}
@@ -393,69 +692,9 @@ def main():
     else:
         dataset.ref_marker_sets = None
 
-    # pick activation function
-    if args.activation == "prelu":
-        activation = nn.PReLU(args.hidden)
-    elif args.activation == "relu":
-        activation = nn.ReLU()
-    elif args.activation == "tanh":
-        activation = nn.Tanh()
-    elif args.activation == "sigmoid":
-        activation = nn.Sigmoid()
-    elif args.activation == "lrelu":
-        activation = nn.LeakyReLU()
-
     model = None
     if args.embs is None and args.read_embs is False:
-        model = SAGE(
-            graph.ndata["feat"].shape[1],
-            args.hidden,
-            args.embsize,
-            args.layers,
-            activation,
-            args.dropout,
-            agg=args.aggtype,
-        )
-        model = model.to(device)
-
-        if model is not None:
-            model = model.to(device)
-
-        logging.info(model)
-        if dataset.ref_marker_sets is not None and args.clusteringalgo is not None and not args.skip_preclustering:
-            # cluster using only input features
-            print("pre train clustering:")
-            pre_cluster_to_contig, centroids = cluster_embs(
-                dataset.graph.ndata["feat"].detach().cpu().numpy(),
-                dataset.node_names,
-                args.clusteringalgo,
-                k,
-                device=device,
-                node_lens=np.array([c[0] for c in dataset.nodes_len]),
-            )
-            results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, pre_cluster_to_contig)
-            calculate_bin_metrics(results, logger=logger)
-
-        if args.model == "sage":
-            best_train_embs, best_model, last_train_embs, last_model = train_graphsage(
-                dataset,
-                model,
-                batch_size=args.batchsize,
-                fan_out=args.fanout,
-                num_negs=args.negatives,
-                neg_share=False,
-                num_epochs=args.epoch,
-                lr=args.lr,
-                k=k,
-                clusteringalgo=args.clusteringalgo,
-                print_interval=args.print,
-                loss_weights=(not args.no_loss_weights),
-                sample_weights=(not args.no_sample_weights),
-                logger=logger,
-                device=device,
-                epsilon=args.early_stopping,
-                evalepochs=args.evalepochs,
-            )
+        best_train_embs, best_model, last_train_embs, last_model = run_graphmb(dataset, args, device, logger)
 
     else:
         if args.embs is not None:
@@ -464,229 +703,11 @@ def main():
             emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
         with open(emb_file, "rb") as embsf:
             best_embs_dict = pickle.load(embsf)
-            best_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
-
-    if "cluster" in args.post or "kmeans" in args.post:
-        logger.info("clustering embs with {} ({})".format(args.clusteringalgo, k))
-        # train_embs = last_train_embs
-
-        if args.clusteringalgo is False:
-            args.clusteringalgo = "kmeans"
-        if model is None:
-            best_train_embs = graph.ndata["feat"]
-            last_train_embs = graph.ndata["feat"]
-        if args.cuda:
-            best_train_embs = best_train_embs.cpu()
-            # last_train_embs should already be detached and on cpu
-        best_cluster_to_contig, best_centroids = cluster_embs(
-            best_train_embs.numpy(),
-            dataset.node_names,
-            args.clusteringalgo,
-            # len(dataset.connected),
-            k,
-            device=device,
-        )
-        last_cluster_to_contig, last_centroids = cluster_embs(
-            last_train_embs,
-            dataset.node_names,
-            args.clusteringalgo,
-            # len(dataset.connected),
-            k,
-            device=device,
-        )
-        cluster_sizes = {}
-        for c in best_cluster_to_contig:
-            cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in best_cluster_to_contig[c]])
-            cluster_sizes[c] = cluster_size
-        best_contig_to_bin = {}
-        for bin in best_cluster_to_contig:
-            for contig in best_cluster_to_contig[bin]:
-                best_contig_to_bin[contig] = bin
-        # run for best epoch only
-        if args.markers is not None:
-            total_hq = 0
-            total_mq = 0
-            results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, best_cluster_to_contig)
-            hq_bins = set()
-            for binid in results:
-                if results[binid]["comp"] > 90 and results[binid]["cont"] < 5:
-                    contig_labels = [dataset.node_to_label.get(node, 0) for node in best_cluster_to_contig[binid]]
-                    labels_count = Counter(contig_labels)
-                    logger.info(
-                        f"{binid}, {round(results[binid]['comp'],4)}, {round(results[binid]['cont'],4)}, "
-                        f"{len(best_cluster_to_contig[binid])} {labels_count}"
-                    )
-                    hq_bins.add(binid)
-                    total_hq += 1
-                if results[binid]["comp"] > 50 and results[binid]["cont"] < 10:
-                    total_mq += 1
-            logger.info("Total HQ {}".format(total_hq))
-            logger.info("Total MQ {}".format(total_mq))
-
-        contig_lens = {dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
-        if len(dataset.species) > 1:
-            evaluate_binning(best_cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
-            # calculate overall P/R/F
-            calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node)
-            calculate_overall_prf(
-                {
-                    cluster: best_cluster_to_contig[cluster]
-                    for cluster in best_cluster_to_contig
-                    if cluster_sizes[cluster] > args.minbin
-                },
-                {
-                    contig: best_contig_to_bin[contig]
-                    for contig in best_contig_to_bin
-                    if cluster_sizes[best_contig_to_bin[contig]] > args.minbin
-                },
-                node_to_label,
-                label_to_node,
-            )
-        if "writebins" in args.post:
-            print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
-            # breakpoint()
-            bin_dir = Path(args.outdir + "/{}_bins/".format(args.outname))
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
-            clustered_contigs = set()
-            multi_contig_clusters = 0
-            print(len(best_cluster_to_contig), "clusters")
-            short_contigs = set()
-            skipped_clusters = 0
-            for c in best_cluster_to_contig:
-                cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in best_cluster_to_contig[c]])
-                if cluster_size < args.minbin:
-                    # print("skipped small cluster", len(cluster_to_contig[c]), "contig")
-                    for contig in best_cluster_to_contig[c]:
-                        short_contigs.add(contig)
-                    skipped_clusters += 1
-                    continue
-                multi_contig_clusters += 1
-                with open(bin_dir / f"{c}.fa", "w") as binfile:
-                    # breakpoint()
-                    for contig in best_cluster_to_contig[c]:
-                        binfile.write(">" + contig + "\n")
-                        binfile.write(dataset.contig_seqs[contig] + "\n")
-                        clustered_contigs.add(contig)
-                # print("multi cluster", c, "size", cluster_size, "contigs", len(cluster_to_contig[c]))
-            print("skipped {} clusters".format(skipped_clusters))
-            single_clusters = multi_contig_clusters
-            left_over = set(dataset.contig_names) - clustered_contigs - short_contigs
-            for c in left_over:
-                if c not in clustered_contigs and len(dataset.contig_seqs[c]) > args.minbin:
-
-                    with open(bin_dir / f"{single_clusters}.fna", "w") as binfile:
-                        binfile.write(">" + c + "\n")
-                        binfile.write(dataset.contig_seqs[c] + "\n")
-                        single_clusters += 1
-                    # print("contig", single_clusters, "size", len(dataset.contig_seqs[c]))
-            print("wrote", single_clusters, "clusters", multi_contig_clusters, ">= #contig", args.mincomp)
-        if "contig2bin" in args.post:
-            # invert cluster_to_contig
-            logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
-            with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
-                for c in best_contig_to_bin:
-                    f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
-            last_contig_to_bin = {}
-            for bin in last_cluster_to_contig:
-                for contig in last_cluster_to_contig[bin]:
-                    last_contig_to_bin[contig] = bin
-            with open(args.outdir + f"/{args.outname}_last_contig2bin.tsv", "w") as f:
-                for c in last_contig_to_bin:
-                    f.write(f"{str(c)}\t{str(last_contig_to_bin[c])}\n")
-
-    # plot tsne embs
-    if "tsne" in args.post:
-        from sklearn.manifold import TSNE
-
-        print("running tSNE")
-        # filter only good clusters
-        tsne = TSNE(n_components=2, random_state=SEED)
-        if len(dataset.species) == 1:
-            label_to_node = {c: cluster_to_contig[c] for c in hq_bins}
-            label_to_node["mq/lq"] = []
-            for c in cluster_to_contig:
-                if c not in hq_bins:
-                    label_to_node["mq/lq"] += list(cluster_to_contig[c])
-        if centroids is not None:
-            all_embs = tsne.fit_transform(torch.cat((torch.tensor(train_embs), torch.tensor(centroids)), dim=0))
-            centroids_2dim = all_embs[train_embs.shape[0] :]
-            node_embeddings_2dim = all_embs[: train_embs.shape[0]]
-        else:
-            centroids_2dim = None
-            node_embeddings_2dim = tsne.fit_transform(torch.tensor(train_embs))
-        plot_embs(
-            dataset.node_names,
-            node_embeddings_2dim,
-            label_to_node,
-            centroids=centroids_2dim,
-            hq_centroids=hq_bins,
-            node_sizes=None,
-            outputname=args.outdir + args.outname + "_tsne_clusters.png",
-        )
-        # node_sizes=[dataset.nodes_len[i][0] * 100 for i in range(len(dataset.contig_names))],
-    if "draw" in args.post:
-        print("drawing graph")
-        # properties of all nodes
-        nodeid_to_label = {i: node_to_label.get(n, "NA") for i, n in enumerate(dataset.node_names)}
-        contig_lens = {i: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
-        nodes_titles = {
-            i: str(dataset.node_names[i]) + "<br>Length: " + str(contig_lens[i])
-            for i in range(len(dataset.contig_names))
-        }
-        if dataset.depth is not None:
-            nodes_titles = {
-                i: nodes_titles[i] + "<br>Depth: " + ", ".join(["{:.4}".format(x) for x in dataset.nodes_depths[i]])
-                for i in range(len(dataset.contig_names))
-            }
-        if cluster_to_contig:
-            contig_to_cluster = {
-                contig: cluster for cluster, contigs in cluster_to_contig.items() for contig in contigs
-            }
-            nodes_titles = {
-                i: nodes_titles[i] + "<br>Cluster: " + str(contig_to_cluster[n])
-                for i, n in enumerate(dataset.contig_names)
-            }
-
-        # convert DGL graph to networkx
-        nx_graph = graph.cpu().to_networkx(edge_attrs=["weight"]).to_undirected()
-        connected_comp = [c for c in sorted(nx.connected_components(nx_graph), key=len, reverse=True) if len(c) > 0]
-        # TODO: draw connected components to separate files
-        for i in range(10, 50):
-            # without_largest_comp = [item for sublist in connected_comp[10:110] for item in sublist if len(sublist) > 2]
-            this_comp = connected_comp[i]
-            nx_graph = nx.subgraph(nx_graph, this_comp)
-
-            draw_nx_graph(
-                nx_graph,
-                nodeid_to_label,
-                label_to_node,
-                args.outdir + args.outname + "_" + str(i),
-                contig_sizes=contig_lens,
-                node_titles=nodes_titles,
-            )
-    if "edges" in args.post:
-        print("writing edges to", args.outdir + args.outname + "_edges")
-        with open(args.outdir + args.outname + "_edges", "w") as graphf:
-            for e in zip(graph.edges()[0], graph.edges()[1]):
-                graphf.write(str(e[0].item()) + "\t" + str(e[1].item()) + "\n")
-
-    if "proximity" in args.post:
-        breakpoint()
-        dists = torch.bmm(train_embs, train_embs)
-        edges_dist = dists * graph.adj()
-
-    if "writeembs" in args.post:
-        # write embs
-        logger.info("writing best and last embs")
-        best_train_embs = best_train_embs.cpu().detach().numpy()
-        best_train_embs_dict = {dataset.node_names[i]: best_train_embs[i] for i in range(len(best_train_embs))}
-        with open(os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"), "wb") as f:
-            pickle.dump(best_train_embs_dict, f)
-        # last_train_embs = last_train_embs
-        last_train_embs_dict = {dataset.node_names[i]: last_train_embs[i] for i in range(len(last_train_embs))}
-        with open(os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"), "wb") as f:
-            pickle.dump(last_train_embs_dict, f)
+            best_train_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
+    if model is None:
+        best_train_embs = graph.ndata["feat"]
+        last_train_embs = graph.ndata["feat"]
+    run_post_processing(best_train_embs, args, logger, dataset, graph, device, label_to_node, node_to_label)
 
 
 if __name__ == "__main__":
