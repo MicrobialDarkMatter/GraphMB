@@ -310,10 +310,10 @@ def train_graphsage(
 
         if cluster_features:
             encoded = torch.cat((encoded, nfeat), axis=1)
-        if dataset.ref_marker_sets is not None and epoch % evalepochs == 0:
+        if dataset.assembly.ref_marker_sets is not None and epoch % evalepochs == 0:
             best_hq, best_hq_epoch, kmeans_loss, clusters = cluster_eval(
                 model=model,
-                dataset=dataset,
+                dataset=dataset.assembly,
                 logits=encoded,
                 clustering=clusteringalgo,
                 k=k,
@@ -328,10 +328,10 @@ def train_graphsage(
             )
 
             # compare clusters
-            new_assignments = np.zeros(len(dataset.node_names))
+            new_assignments = np.zeros(len(dataset.assembly.node_names))
             for i, cluster in enumerate(clusters):
                 for contig in clusters[cluster]:
-                    new_assignments[dataset.contig_names.index(contig)] = i
+                    new_assignments[dataset.assembly.node_names.index(contig)] = i
 
             old_assignments = new_assignments.copy()
         else:
@@ -351,17 +351,17 @@ def train_graphsage(
     last_train_embs = encoded
     last_model = model
     logger.info("saving last model")
-    torch.save(last_model.state_dict(), os.path.join(dataset.assembly, "last_model_hq.pkl"))
+    torch.save(last_model.state_dict(), os.path.join(dataset.assembly.cache_dir, "last_model_hq.pkl"))
     logger.info("Avg epoch time: {}".format(avg / (epoch - 4)))
     model.eval()
     logger.info(f"Best HQ {best_hq} epoch, {best_hq_epoch}")
     if total_steps == 0:
         print("No training was done")
-    elif dataset.ref_marker_sets is not None:
+    elif dataset.assembly.ref_marker_sets is not None:
         logger.info("loading best model")
         best_model = copy.deepcopy(model)
         try:
-            best_model.load_state_dict(torch.load(os.path.join(dataset.assembly, "best_model_hq.pkl")))
+            best_model.load_state_dict(torch.load(os.path.join(dataset.assembly.cache_dir, "best_model_hq.pkl")))
         except RuntimeError:
             pdb.set_trace()
     else:

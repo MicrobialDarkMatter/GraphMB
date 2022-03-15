@@ -19,7 +19,7 @@ import networkx as nx
 
 
 import os
-from graphmb.contigsdataset import ContigsDataset
+from graphmb.contigsdataset import AssemblyDataset, ContigsDataset, DGLAssemblyDataset
 from pathlib import Path
 import scipy.stats as stats
 from graphmb.evaluate import (
@@ -42,7 +42,6 @@ from graphmb.version import __version__
 from vamb.vamb_run import run as run_vamb
 
 SEED = 0
-BACTERIA_MARKERS = "data/Bacteria.ms"
 
 
 def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
@@ -51,7 +50,7 @@ def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
     print("running tSNE")
     # filter only good clusters
     tsne = TSNE(n_components=2, random_state=SEED)
-    if len(dataset.species) == 1:
+    if len(dataset.labels) == 1:
         label_to_node = {c: cluster_to_contig[c] for c in hq_bins}
         label_to_node["mq/lq"] = []
         for c in cluster_to_contig:
@@ -70,7 +69,7 @@ def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
 def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
     # properties of all nodes
     nodeid_to_label = {i: node_to_label.get(n, "NA") for i, n in enumerate(dataset.node_names)}
-    contig_lens = {i: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
+    contig_lens = {i: dataset.node_lengths[i] for i in range(len(dataset.node_names))}
     nodes_titles = {
         i: str(dataset.node_names[i]) + "<br>Length: " + str(contig_lens[i]) for i in range(len(dataset.contig_names))
     }
@@ -143,78 +142,6 @@ def check_dirs(args):
             exit()
 
 
-def setup_vae(dataset, args):
-    batchsteps = []
-    vamb_epochs = 500
-    if len(dataset.nodes_depths[0]) == 1:
-        vamb_bs = 32
-        batchsteps = [25, 75, 150]
-    else:
-        vamb_bs = 64
-        batchsteps = [25, 75, 150, 300]
-    nhiddens = [512, 512]
-    print("using these batchsteps:", batchsteps)
-
-    # features dir: if not set, use assembly dir if specified, else use outdir
-    if args.features is None:
-        if args.assembly != "":
-            features_dir = os.path.join(args.assembly, "features.tsv")
-        else:
-            features_dir = os.path.join(args.outdir, "features.tsv")
-    else:
-        features_dir = args.features
-    vamb_emb_exists = os.path.exists(features_dir)
-    return batchsteps, vamb_bs, vamb_epochs, nhiddens, features_dir, vamb_emb_exists
-
-
-def load_labels(dataset, args):
-    logging.info("loading labels from {}".format(args.labels))
-    node_to_label = {c: "NA" for c in dataset.contig_names}
-    labels = set(["NA"])
-    with open(args.labels, "r") as f:
-        for line in f:
-            # label, node = line.strip().split()
-            if args.labels.endswith(".csv"):
-                values = line.strip().split(",")
-            elif args.labels.endswith(".tsv"):  # amber format
-                if line.startswith("@"):
-                    continue
-                values = line.strip().split("\t")
-            node = values[0]
-            label = values[1]
-            if node in node_to_label:
-                node_to_label[node] = label
-                labels.add(label)
-            else:
-                print("unused label:", line.strip())
-    labels = list(labels)
-    label_to_node = {s: [] for s in labels}
-    for n in node_to_label:
-        s = node_to_label[n]
-        label_to_node[s].append(n)
-    dataset.node_to_label = {n: l for n, l in node_to_label.items()}
-    dataset.species = labels
-    dataset.label_to_node = label_to_node
-    # calculate homophily
-    positive_edges = 0
-    edges_without_label = 0
-    for u, v in zip(dataset.edges_src, dataset.edges_dst):
-        # breakpoint()
-        if (
-            dataset.contig_names[u] not in dataset.node_to_label
-            or dataset.contig_names[v] not in dataset.node_to_label
-        ):
-            edges_without_label += 1
-        if dataset.node_to_label[dataset.contig_names[u]] == dataset.node_to_label[dataset.contig_names[v]]:
-            positive_edges += 1
-    print(
-        "homophily:",
-        positive_edges / (len(dataset.graph.edges("eid")) - edges_without_label),
-        len(dataset.graph.edges("eid")) - edges_without_label,
-    )
-    return dataset, label_to_node, node_to_label
-
-
 def get_activation(args):
     # pick activation function
     if args.activation == "prelu":
@@ -247,18 +174,25 @@ def run_graphmb(dataset, args, device, logger):
         model = model.to(device)
 
     logging.info(model)
-    if dataset.ref_marker_sets is not None and args.clusteringalgo is not None and not args.skip_preclustering:
+    if (
+        dataset.assembly.ref_marker_sets is not None
+        and args.clusteringalgo is not None
+        and not args.skip_preclustering
+    ):
         # cluster using only input features
         print("pre train clustering:")
         pre_cluster_to_contig, centroids = cluster_embs(
             dataset.graph.ndata["feat"].detach().cpu().numpy(),
-            dataset.node_names,
+            dataset.assembly.node_names,
             args.clusteringalgo,
-            k,
+            args.kclusters,
             device=device,
-            node_lens=np.array([c[0] for c in dataset.nodes_len]),
+            # node_lens=np.array([c[0] for c in dataset.assembly.nodes_len]),
+            node_lens=np.array(dataset.assembly.node_lengths),
         )
-        results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, pre_cluster_to_contig)
+        results = evaluate_contig_sets(
+            dataset.assembly.ref_marker_sets, dataset.assembly.contig_markers, pre_cluster_to_contig
+        )
         calculate_bin_metrics(results, logger=logger)
 
     best_train_embs, best_model, last_train_embs, last_model = train_graphsage(
@@ -284,6 +218,7 @@ def run_graphmb(dataset, args, device, logger):
 
 
 def write_bins(args, dataset, cluster_to_contig):
+    breakpoint()
     bin_dir = Path(args.outdir + "/{}_bins/".format(args.outname))
     bin_dir.mkdir(parents=True, exist_ok=True)
     [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
@@ -293,7 +228,7 @@ def write_bins(args, dataset, cluster_to_contig):
     short_contigs = set()
     skipped_clusters = 0
     for c in cluster_to_contig:
-        cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in cluster_to_contig[c]])
+        cluster_size = sum([dataset.node_lengths[dataset.node_names.index(contig)] for contig in cluster_to_contig[c]])
         if cluster_size < args.minbin:
             # print("skipped small cluster", len(cluster_to_contig[c]), "contig")
             for contig in cluster_to_contig[c]:
@@ -302,21 +237,20 @@ def write_bins(args, dataset, cluster_to_contig):
             continue
         multi_contig_clusters += 1
         with open(bin_dir / f"{c}.fa", "w") as binfile:
-            # breakpoint()
             for contig in cluster_to_contig[c]:
                 binfile.write(">" + contig + "\n")
-                binfile.write(dataset.contig_seqs[contig] + "\n")
+                binfile.write(dataset.node_seqs[contig] + "\n")
                 clustered_contigs.add(contig)
         # print("multi cluster", c, "size", cluster_size, "contigs", len(cluster_to_contig[c]))
     print("skipped {} clusters".format(skipped_clusters))
     single_clusters = multi_contig_clusters
-    left_over = set(dataset.contig_names) - clustered_contigs - short_contigs
+    left_over = set(dataset.node_names) - clustered_contigs - short_contigs
     for c in left_over:
-        if c not in clustered_contigs and len(dataset.contig_seqs[c]) > args.minbin:
+        if c not in clustered_contigs and len(dataset.node_seqs[c]) > args.minbin:
 
             with open(bin_dir / f"{single_clusters}.fna", "w") as binfile:
                 binfile.write(">" + c + "\n")
-                binfile.write(dataset.contig_seqs[c] + "\n")
+                binfile.write(dataset.node_seqs[c] + "\n")
                 single_clusters += 1
             # print("contig", single_clusters, "size", len(dataset.contig_seqs[c]))
     print("wrote", single_clusters, "clusters", multi_contig_clusters, ">= #contig", args.mincomp)
@@ -330,10 +264,10 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
         if args.clusteringalgo is False:
             args.clusteringalgo = "kmeans"
         if args.cuda:
-            best_train_embs = final_embs.cpu()
+            final_embs = final_embs.cpu()
             # last_train_embs should already be detached and on cpu
         best_cluster_to_contig, best_centroids = cluster_embs(
-            best_train_embs.numpy(),
+            final_embs.numpy(),
             dataset.node_names,
             args.clusteringalgo,
             # len(dataset.connected),
@@ -342,7 +276,7 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
         )
         cluster_sizes = {}
         for c in best_cluster_to_contig:
-            cluster_size = sum([len(dataset.contig_seqs[contig]) for contig in best_cluster_to_contig[c]])
+            cluster_size = sum([len(dataset.node_seqs[contig]) for contig in best_cluster_to_contig[c]])
             cluster_sizes[c] = cluster_size
         best_contig_to_bin = {}
         for bin in best_cluster_to_contig:
@@ -368,9 +302,8 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
                     total_mq += 1
             logger.info("Total HQ {}".format(total_hq))
             logger.info("Total MQ {}".format(total_mq))
-
-        contig_lens = {dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
-        if len(dataset.species) > 1:
+        contig_lens = {dataset.node_names[i]: dataset.node_lengths[i] for i in range(len(dataset.node_names))}
+        if len(dataset.labels) > 1:
             evaluate_binning(best_cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
             # calculate overall P/R/F
             calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node)
@@ -390,7 +323,6 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
             )
         if "writebins" in args.post:
             print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
-            # breakpoint()
             write_bins(args, dataset, best_cluster_to_contig)
         if "contig2bin" in args.post:
             # invert cluster_to_contig
@@ -401,7 +333,7 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
 
     # plot tsne embs
     if "tsne" in args.post:
-        node_embeddings_2dim, centroids_2dim = run_tsne(best_train_embs, dataset, best_cluster_to_contig, hq_bins)
+        node_embeddings_2dim, centroids_2dim = run_tsne(final_embs, dataset, best_cluster_to_contig, hq_bins)
         plot_embs(
             dataset.node_names,
             node_embeddings_2dim,
@@ -430,9 +362,9 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
 
     if "writeembs" in args.post:
         logger.info("writing best and last embs to {}".format(args.outdir))
-        best_train_embs = best_train_embs.cpu().detach().numpy()
-        write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"))
-        write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"))
+        final_embs = final_embs.cpu().detach().numpy()
+        write_embs(final_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"))
+        # write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"))
 
 
 def main():
@@ -452,7 +384,7 @@ def main():
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
 
     # model specification
-    parser.add_argument("--model", type=str, help="only sage for now", default="sage")
+    parser.add_argument("--model_name", type=str, help="only sage for now", default="sage_lstm")
     parser.add_argument(
         "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
     )
@@ -528,7 +460,6 @@ def main():
     print("logging to {}".format(logfile))
 
     stdout_handler = logging.StreamHandler(sys.stdout)
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     logger.addHandler(output_file_handler)
     logger.info(args)
     logger.addHandler(stdout_handler)
@@ -552,162 +483,108 @@ def main():
     torch.set_num_threads(args.numcores)
 
     # specify data properties for caching
-    name = "contigs_graph"
-    name += "_min" + str(args.mincontig) + "_kmer" + str(args.kmer)
-    dataset = ContigsDataset(
-        name,
+    if args.features is None:
+        if args.assembly != "":
+            features_dir = os.path.join(args.assembly, "features.tsv")
+        else:
+            features_dir = os.path.join(args.outdir, "features.tsv")
+    else:
+        features_dir = args.features
+
+    # create assembly object
+    dataset = AssemblyDataset(
         args.assembly,
-        assembly_name=args.assembly_name,
-        graph_file=args.graph_file,
-        save_dir=args.outdir,
-        force_reload=args.reload,
-        min_contig=args.mincontig,
-        depth=args.depth,
-        kmer=int(args.kmer),
-        markers=args.markers,
-        assembly_type=args.assembly_type,
-        load_kmer=True,
+        args.assembly_name,
+        args.graph_file,
+        args.depth,
+        args.markers,
+        args.labels,
+        features_dir,
+        args.outdir,
+        min_contig_length=args.mincontig,
     )
-    dataset.assembly = args.assembly
+    if dataset.check_cache() and not args.reload:
+        dataset.read_cache()
+    else:
+        dataset.read_assembly()
+    dataset.read_scgs()
+    # k can be user defined or dependent on the dataset
+    if args.kclusters is None:
+        args.kclusters = len(dataset.labels)
+    args.kclusters = int(args.kclusters)
 
     # filter graph by components
-    dataset.connected = [c for c in dataset.connected if len(c) >= args.mincomp]
+    # dataset.connected = [c for c in dataset.connected if len(c) >= args.mincomp]
 
     #### select features to use
     # this code wont be used for now but next version will train AE from these features
     # zscore Kmer features (kmer are already loaded from reading the dataset)
-    dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
+    # dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
 
-    # Read depths from JGI file
-    if args.depth is not None and os.path.isfile(os.path.join(args.assembly, args.depth)):
-        dataset.depth = args.depth
-        dataset.nodes_depths = []
-        dataset.read_depths(os.path.join(args.assembly, args.depth))
-        logging.debug("Abundance dim: {}".format(len(dataset.nodes_depths[0])))
-        dataset.nodes_depths = torch.tensor(dataset.nodes_depths)
-        if len(dataset.nodes_depths[0]) > 1:  # normalize depths
-            dataset.nodes_depths = stats.zscore(dataset.nodes_depths, axis=0)
-            depthssum = dataset.nodes_depths.sum(axis=1) + 1e-10
-            dataset.nodes_depths /= depthssum.reshape((-1, 1))
-    else:
-        dataset.nodes_depths = torch.ones(dataset.nodes_kmer.shape[0], 1)
-
-    ### prepare contig features with VAE
-    batchsteps, vamb_bs, vamb_epochs, nhiddens, features_dir, vamb_emb_exists = setup_vae(dataset, args)
+    vamb_emb_exists = os.path.exists(features_dir)
     if args.vamb or not vamb_emb_exists:
         print("running VAMB...")
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
-        vamb_logpath = os.path.join(vamb_outdir, "log.txt")
-        if os.path.exists(vamb_outdir) and os.path.isdir(vamb_outdir):
-            shutil.rmtree(vamb_outdir)
-        os.mkdir(vamb_outdir)
-        with open(vamb_logpath, "w") as vamb_logfile:
-            run_vamb(
-                outdir=vamb_outdir,
-                fastapath=os.path.join(args.assembly, args.assembly_name),
-                jgipath=os.path.join(args.assembly, args.depth),
-                logfile=vamb_logfile,
-                cuda=args.cuda,
-                batchsteps=batchsteps,
-                batchsize=vamb_bs,
-                nepochs=vamb_epochs,
-                mincontiglength=args.mincontig,
-                nhiddens=nhiddens,
-                nlatent=int(args.vambdim),
-                norefcheck=True,
-            )
-            if args.assembly != "":
-                shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), features_dir)
-            # args.features = "features.tsv"
-            print("Contig features saved to {}".format(features_dir))
+        dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
+    dataset.read_features()
 
-    # Read features/embs from file in tsv format
-    node_embs = {}
-    print("loading features from", features_dir)
-    with open(features_dir, "r") as ffile:
-        for line in ffile:
-            values = line.strip().split()
-            node_embs[values[0]] = [float(x) for x in values[1:]]
-
-    dataset.nodes_embs = [
-        node_embs.get(n, np.random.uniform(10e-5, 1.0, len(values[1:]))) for n in dataset.node_names
-    ]  # deal with missing embs
-    dataset.nodes_embs = torch.FloatTensor(dataset.nodes_embs)
-
-    # initialize empty features vector
-    dataset.nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
-    if args.usekmer:
-        dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer), dim=1)
-    # if args.depth is not None:
-    #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
-    if args.features is not None:  # append embs
-        dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_embs), dim=1)
-    dataset.graph.ndata["feat"] = dataset.nodes_data
-    # dataset.graph.ndata["len"] = torch.Tensor(dataset.nodes_len)
-
+    # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
-    if args.no_edges:
-        dataset.filter_edges(10e6)
+    # if args.no_edges:
+    #    dataset.filter_edges(10e6)
     # elif args.read_edges or args.depth:
-    if args.edge_threshold is not None:
-        dataset.filter_edges(int(args.edge_threshold))
+    # if args.edge_threshold is not None:
+    #    dataset.filter_edges(int(args.edge_threshold))
 
-    # All nodes have a self loop
-    # dataset.graph = dgl.remove_self_loop(dataset.graph)
-    # diff_edges = len(dataset.graph.edata["weight"])
-    # dataset.graph = dgl.add_self_loop(dataset.graph)
-
-    # max_weight = dataset.graph.edata["weight"].max().item()
-    # dataset.graph.edata["weight"][diff_edges:] = max_weight
-    dataset.graph.edata["weight"] = dataset.graph.edata["weight"].float()
-    graph = dataset[0]
-    logger.info(graph)
-    graph = graph.to(device)
-
-    # k can be user defined or dependent on the dataset
-    if args.kclusters is None:
-        args.kclusters = len(dataset.species)
-    args.kclusters = int(args.kclusters)
-
-    # Load labels from file (eg binning results)
-    if args.labels:
-        dataset, label_to_node, node_to_label = load_labels(dataset, args)
-    else:  # use dataset own labels (by default its only NA)
-        label_to_node = {s: [] for s in dataset.species}
-        node_to_label = {n: dataset.species[i] for n, i in dataset.node_to_label.items()}
-        for n in dataset.node_to_label:
-            # for s in dataset.node_to_label[n]:
-            s = dataset.species[dataset.node_to_label[n]]
-            label_to_node[s].append(n)
-
-    # Load contig marker genes (Bacteria list)
-    if args.markers is not None:
-        logging.info("loading checkm results")
-        ref_sets = read_marker_gene_sets(BACTERIA_MARKERS)
-        contig_markers = read_contig_genes(os.path.join(args.assembly, args.markers))
-        dataset.ref_marker_sets = ref_sets
-        dataset.contig_markers = contig_markers
-        marker_counts = get_markers_to_contigs(ref_sets, contig_markers)
-        dataset.markers = marker_counts
-    else:
-        dataset.ref_marker_sets = None
-
-    model = None
-    if args.embs is None and args.read_embs is False:
-        best_train_embs, best_model, last_train_embs, last_model = run_graphmb(dataset, args, device, logger)
-
-    else:
-        if args.embs is not None:
-            emb_file = args.embs
-        else:
-            emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
+    if args.embs is not None:  # no training, just run post processing
+        emb_file = args.embs
         with open(emb_file, "rb") as embsf:
             best_embs_dict = pickle.load(embsf)
             best_train_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
-    if model is None:
-        best_train_embs = graph.ndata["feat"]
-        last_train_embs = graph.ndata["feat"]
-    run_post_processing(best_train_embs, args, logger, dataset, graph, device, label_to_node, node_to_label)
+    # else:
+    #
+
+    # DGL specific code
+    elif args.model_name == "sage_lstm":
+        dgl_dataset = DGLAssemblyDataset(dataset)
+        # initialize empty features vector
+        nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
+        # if args.usekmer:
+        #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer), dim=1)
+        # if args.depth is not None:
+        #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
+        if args.features is not None:  # append embs
+            node_embs = torch.FloatTensor(dataset.node_embs)
+            nodes_data = torch.cat((nodes_data, node_embs), dim=1)
+        dgl_dataset.graph.ndata["feat"] = nodes_data
+        # dataset.graph.ndata["len"] = torch.Tensor(dataset.nodes_len)
+
+        # All nodes have a self loop
+        # dataset.graph = dgl.remove_self_loop(dataset.graph)
+        # diff_edges = len(dataset.graph.edata["weight"])
+        # dataset.graph = dgl.add_self_loop(dataset.graph)
+
+        # max_weight = dataset.graph.edata["weight"].max().item()
+        # dataset.graph.edata["weight"][diff_edges:] = max_weight
+        dgl_dataset.graph.edata["weight"] = dgl_dataset.graph.edata["weight"].float()
+        graph = dgl_dataset[0]
+        logger.info(graph)
+        graph = graph.to(device)
+
+        model = None
+        if args.embs is None and args.read_embs is False:
+            best_train_embs, best_model, last_train_embs, last_model = run_graphmb(dgl_dataset, args, device, logger)
+            emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
+
+        if model is None:
+            best_train_embs = graph.ndata["feat"]
+            last_train_embs = graph.ndata["feat"]
+    elif args.mode_name in ("sage", "gcn", "gat"):
+        pass
+
+    run_post_processing(
+        best_train_embs, args, logger, dataset, graph, device, dataset.label_to_node, dataset.node_to_label
+    )
 
 
 if __name__ == "__main__":

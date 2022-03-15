@@ -667,7 +667,7 @@ def cluster_eval(
     for bin in cluster_to_contig:
         for contig in cluster_to_contig[bin]:
             contig_to_cluster[contig] = bin
-    if dataset.species is not None and len(dataset.species) > 1:
+    if dataset.labels is not None and len(dataset.labels) > 1:
         # evaluate_binning(
         #    cluster_to_contig,
         #    dataset.node_to_label,
@@ -684,7 +684,7 @@ def cluster_eval(
             best_hq = len(hq)
             best_hq_epoch = epoch
             logger.info("new best!!")
-            torch.save(model.state_dict(), os.path.join(dataset.assembly, "best_model_hq.pkl"))
+            torch.save(model.state_dict(), os.path.join(dataset.cache_dir, "best_model_hq.pkl"))
 
         if clusteringloss:
             centroids = torch.tensor(centroids, device=device)
