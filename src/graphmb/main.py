@@ -219,7 +219,7 @@ def write_bins(args, dataset, cluster_to_contig, logger):
     [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
     clustered_contigs = set()
     multi_contig_clusters = 0
-    logger.info(len(cluster_to_contig), "clusters")
+    logger.info(f"{len(cluster_to_contig)} clusters")
     short_contigs = set()
     skipped_clusters = 0
     for c in cluster_to_contig:
@@ -248,21 +248,24 @@ def write_bins(args, dataset, cluster_to_contig, logger):
                 binfile.write(dataset.node_seqs[c] + "\n")
                 single_clusters += 1
             # print("contig", single_clusters, "size", len(dataset.contig_seqs[c]))
-    logger.info("wrote", single_clusters, "clusters", multi_contig_clusters, ">= #contig", args.mincomp)
+    logger.info(f"wrote {single_clusters} clusters {multi_contig_clusters} >= #contig {args.mincomp}")
 
 
-def run_post_processing(final_embs, args, logger, dataset, graph, device, label_to_node, node_to_label):
+def run_post_processing(final_embs, args, logger, dataset, device, label_to_node, node_to_label):
     if "cluster" in args.post or "kmeans" in args.post:
         logger.info("clustering embs with {} ({})".format(args.clusteringalgo, args.kclusters))
         # train_embs = last_train_embs
 
         if args.clusteringalgo is False:
             args.clusteringalgo = "kmeans"
-        if args.cuda:
-            final_embs = final_embs.cpu()
+        if not isinstance(final_embs, np.ndarray):
+            final_embs = final_embs.numpy()
+            if args.cuda:
+                final_embs = final_embs.cpu()
+
             # last_train_embs should already be detached and on cpu
         best_cluster_to_contig, best_centroids = cluster_embs(
-            final_embs.numpy(),
+            final_embs,
             dataset.node_names,
             args.clusteringalgo,
             # len(dataset.connected),
@@ -317,7 +320,7 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
                 label_to_node,
             )
         if "writebins" in args.post:
-            logger.info("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
+            logger.info(f"writing bins to {args.outdir}/{args.outname}_bins/")
             write_bins(args, dataset, best_cluster_to_contig, logger)
         if "contig2bin" in args.post:
             # invert cluster_to_contig
@@ -352,12 +355,11 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
         )
 
     if "edges" in args.post:
-        logger.info("writing edges to", args.outdir + args.outname + "_edges")
+        logger.info(f"writing edges to {args.outdir + args.outname}_edges")
         write_edges(graph, args.outdir + args.outname + "_edges")
 
     if "writeembs" in args.post:
         logger.info("writing best and last embs to {}".format(args.outdir))
-        final_embs = final_embs.cpu().detach().numpy()
         write_embs(final_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"))
         # write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"))
 
@@ -577,11 +579,10 @@ def main():
             best_train_embs = graph.ndata["feat"]
             last_train_embs = graph.ndata["feat"]
     elif args.model_name in ("sage", "gcn", "gat"):
-        vaegbin.run_gnn(dataset, args)
+        # TODO implement repeats and grid search
+        best_train_embs = vaegbin.run_gnn(dataset, args)
 
-    run_post_processing(
-        best_train_embs, args, logger, dataset, graph, device, dataset.label_to_node, dataset.node_to_label
-    )
+    run_post_processing(best_train_embs, args, logger, dataset, device, dataset.label_to_node, dataset.node_to_label)
 
 
 if __name__ == "__main__":

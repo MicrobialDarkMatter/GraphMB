@@ -15,6 +15,9 @@ from vamb.cluster import cluster as vamb_cluster
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH
 
 
+name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
+
+
 def normalize_adj_sparse(A):
     # https://github.com/tkipf/gcn/blob/master/gcn/utils.py
     A.setdiag(1)
@@ -147,34 +150,35 @@ def compute_clusters_and_stats(
     )
 
 
-def run_gnn(dataset, args):
-    node_names = np.array(dataset.node_names)
-    n_runs = 2
-    RESULT_EVERY = 10
-    adj_norm = normalize_adj_sparse(dataset.adj_matrix)
-    hidden_units = 128
-    output_dim = 64
-    epochs = args.epoch
-    lr = 1e-2
-    nlayers = 2
-    VAE = False
-    clustering = "vamb"
-    k = 0
-    use_edge_weights = False
-    use_disconnected = True
-    cluster_markers_only = False
-    decay = 0.5 ** (2.0 / epochs)
-    concat_features = False  # True to improve HQ
-    print("using edge weights", use_edge_weights)
-    print("using disconnected", use_disconnected)
-    print("concat features", concat_features)
-    print("cluster markers only", cluster_markers_only)
-    # tf.config.experimental_run_functions_eagerly(True)
-    """if cluster_markers_only:
-        #print("eval with ", len(nodes_with_markers), "contigds")
-        cluster_mask = [n in nodes_with_markers for n in range(len(node_names))]
-    else:"""
+def filter_disconnected(adj, node_names, markers):
+    # get idx of nodes that are connected or have at least one marker
+    graph = nx.convert_matrix.from_scipy_sparse_matrix(adj, edge_attribute="weight")
+    # breakpoint()
+    nodes_to_remove = set()
+    for n1 in graph.nodes:
+        if len(list(graph.neighbors(n1))) == 0 and (
+            node_names[n1] not in markers or len(markers[node_names[n1]]) == 0
+        ):
+            nodes_to_remove.add(n1)
+    graph.remove_nodes_from(list(nodes_to_remove))
+    print(len(nodes_to_remove), "out of", len(node_names), "nodes without edges and markers")
+    return set(graph.nodes())
+
+
+def prepare_data_for_gnn(dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False):
+    connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
+    nodes_with_markers = [
+        i
+        for i, n in enumerate(dataset.node_names)
+        if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
+    ]
     cluster_mask = [True] * len(dataset.node_names)
+    adj_norm = normalize_adj_sparse(dataset.adj_matrix)
+    if cluster_markers_only:
+        # print("eval with ", len(nodes_with_markers), "contigds")
+        cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
+    else:
+        cluster_mask = [True] * len(dataset.node_names)
     if use_edge_weights:
         edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
             dataset.edge_weights.max() - dataset.edge_weights.min()
@@ -222,110 +226,130 @@ def run_gnn(dataset, args):
     neg_pair_idx = None
     pos_pair_idx = None
     print("train len edges:", train_adj.indices.shape[0])
-    for nlayers in range(1, 2):
-        X = dataset.node_embs
-        print("feat dim", X.shape)
-        for pname, X in [("VAE-F", X)]:
-            # for fname, X in [("RAW-F", node_raw), ("VAE-F", node_features)]:
-            # for pname, pair_idx in [("", None), ("ALL-DIFF-C", all_different_idx)]:
-            # for pname, pair_idx in [("ALL-DIFF-C", all_different_idx)]:
-            # for pname, neg_pair_idx, pos_pair_idx in [("SAME-C", None, all_same_idx), ("SAME-DIFF", all_different_idx, all_same_idx)]:
-            # for pname, neg_pair_idx, pos_pair_idx in [("", None, None), ("DIFF-C", all_different_idx, None), ("SAME-C", None, all_same_idx), ("SAME-DIFF", all_different_idx, all_same_idx)]:
-            # for pname, neg_pair_idx, pos_pair_idx in [("DIFF-C", all_different_idx, None)]:
-            # for pname, neg_pair_idx, pos_pair_idx in [("DIFF-C", all_different_idx, None)]:
-            for gname, gmodel in [
-                ("GCN", GCN),
-                ("SAGE", SAGE),
-                ("GAT", GAT),
-            ]:  # , ("GCNLAF", GCNLAF), ("SAGE", SAGE), ("SAGELAF", SAGELAF), ("GAT", GAT), ("GATLAF", GATLAF)]:
-                scores = []
-                all_cluster_labels = []
-                features = tf.constant(X.astype(np.float32))
-                S = []
-                for i in range(n_runs):
-                    model = gmodel(
-                        features=features,
-                        labels=None,
-                        adj=train_adj,
-                        n_labels=output_dim,
-                        hidden_units=hidden_units,
-                        layers=nlayers,
-                        conv_last=False,
-                    )  # , use_bn=True, use_vae=False)
-                    th = TH(model, lr=lr, lambda_vae=0.01, all_different_idx=neg_pair_idx, all_same_idx=pos_pair_idx)
-                    train_idx = np.arange(len(features))
-                    pbar = tqdm(range(epochs))
-                    scores = []
-                    for e in pbar:
-                        if VAE:
-                            loss = th.train_unsupervised_vae(train_idx)
-                        else:
-                            loss, same_loss, diff_loss = th.train_unsupervised(train_idx)
-                            # loss = th.train_unsupervised_v2(train_idx)
-                        loss = loss.numpy()
-                        pbar.set_description(f"[{i} {gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f}")
-                        # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
-                        if (e + 1) % RESULT_EVERY == 0:
-                            model.adj = adj
-                            node_new_features = model(None, training=False)
-                            node_new_features = node_new_features.numpy()
-                            node_new_features = node_new_features[:, :output_dim]
-                            # concat with original features
-                            if concat_features:
-                                node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
-                            cluster_labels, stats, _, _ = compute_clusters_and_stats(
-                                node_new_features[cluster_mask],
-                                node_names[cluster_mask],
-                                dataset.ref_marker_sets,
-                                dataset.contig_markers,
-                                dataset.node_to_label,
-                                dataset.label_to_node,
-                                clustering=clustering,
-                                k=k,
-                            )
-                            # print(f'--- EPOCH {e:d} ---')
-                            # print(stats)
-                            scores.append(stats)
-                            all_cluster_labels.append(cluster_labels)
-                            model.adj = train_adj
-                            # print('--- END ---')
-                    model.adj = adj
-                    node_new_features = model(None, training=False)
-                    node_new_features = node_new_features.numpy()
-                    node_new_features = node_new_features[:, :output_dim]
-                    # concat with original features
-                    if concat_features:
-                        node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+    X = dataset.node_embs
+    return X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx
 
-                    cluster_labels, stats, _, _ = compute_clusters_and_stats(
-                        node_new_features[cluster_mask],
-                        node_names[cluster_mask],
-                        dataset.ref_marker_sets,
-                        dataset.contig_markers,
-                        dataset.node_to_label,
-                        dataset.label_to_node,
-                        clustering=clustering,
-                        k=k,
-                    )
-                    scores.append(stats)
-                    # get best stats:
-                    if concat_features:  # use HQ
-                        hqs = [s["hq"] for s in scores]
-                        best_idx = np.argmax(hqs)
-                    else:  # use F1
-                        f1s = [s["f1"] for s in scores]
-                        best_idx = np.argmax(f1s)
-                    # S.append(stats)
-                    S.append(scores[best_idx])
-                    print(f"best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]}")
-                    with open(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_{i}_results.tsv", "w") as f:
-                        f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
-                        for i in range(len(cluster_labels)):
-                            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
-                    del loss, model, th
-                res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
-                if gt_idx_label_to_node is not None:
-                    # save embs
-                    np.save(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_embs.npy", node_new_features)
-                plot_clusters(node_new_features, features.numpy(), cluster_labels, f"{gname} VAMB {nlayers}l {pname}")
-    res_table.show()
+
+def run_gnn(dataset, args):
+    node_names = np.array(dataset.node_names)
+    RESULT_EVERY = args.evalepochs
+    hidden_units = args.hidden
+    output_dim = args.embsize
+    epochs = args.epoch
+    lr = args.lr  # 1e-2
+    nlayers = args.layers
+    VAE = False
+    gname = args.model_name
+    # TODO get model by model name
+    gmodel = name_to_model[gname.upper()]
+    clustering = "vamb"
+    k = args.kclusters
+    use_edge_weights = False
+    use_disconnected = True
+    cluster_markers_only = False
+    decay = 0.5 ** (2.0 / epochs)
+    concat_features = False  # True to improve HQ
+    # TODO: move preprocessing of contrains and masks to another function
+    print("using edge weights", use_edge_weights)
+    print("using disconnected", use_disconnected)
+    print("concat features", concat_features)
+    print("cluster markers only", cluster_markers_only)
+    # tf.config.experimental_run_functions_eagerly(True)
+
+    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
+        dataset, use_edge_weights, use_disconnected, cluster_markers_only
+    )
+    print("feat dim", X.shape)
+    pname = ""
+
+    scores = []
+    all_cluster_labels = []
+    features = tf.constant(X.astype(np.float32))
+    S = []
+    model = gmodel(
+        features=features,
+        labels=None,
+        adj=train_adj,
+        n_labels=output_dim,
+        hidden_units=hidden_units,
+        layers=nlayers,
+        conv_last=False,
+    )  # , use_bn=True, use_vae=False)
+    th = TH(model, lr=lr, lambda_vae=0.01, all_different_idx=neg_pair_idx, all_same_idx=pos_pair_idx)
+    train_idx = np.arange(len(features))
+    pbar = tqdm(range(epochs))
+    scores = []
+    for e in pbar:
+        if VAE:
+            loss = th.train_unsupervised_vae(train_idx)
+        else:
+            loss, same_loss, diff_loss = th.train_unsupervised(train_idx)
+            # loss = th.train_unsupervised_v2(train_idx)
+        loss = loss.numpy()
+        pbar.set_description(f"[{gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f}")
+        # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
+        if (e + 1) % RESULT_EVERY == 0:
+            model.adj = adj
+            node_new_features = model(None, training=False)
+            node_new_features = node_new_features.numpy()
+            node_new_features = node_new_features[:, :output_dim]
+            # concat with original features
+            if concat_features:
+                node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+            cluster_labels, stats, _, _ = compute_clusters_and_stats(
+                node_new_features[cluster_mask],
+                node_names[cluster_mask],
+                dataset.ref_marker_sets,
+                dataset.contig_markers,
+                dataset.node_to_label,
+                dataset.label_to_node,
+                clustering=clustering,
+                k=k,
+            )
+            # print(f'--- EPOCH {e:d} ---')
+            # print(stats)
+            scores.append(stats)
+            all_cluster_labels.append(cluster_labels)
+            model.adj = train_adj
+            # print('--- END ---')
+    model.adj = adj
+    node_new_features = model(None, training=False)
+    node_new_features = node_new_features.numpy()
+    node_new_features = node_new_features[:, :output_dim]
+    # concat with original features
+    if concat_features:
+        node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+
+    cluster_labels, stats, _, _ = compute_clusters_and_stats(
+        node_new_features[cluster_mask],
+        node_names[cluster_mask],
+        dataset.ref_marker_sets,
+        dataset.contig_markers,
+        dataset.node_to_label,
+        dataset.label_to_node,
+        clustering=clustering,
+        k=k,
+    )
+    scores.append(stats)
+    # get best stats:
+    if concat_features:  # use HQ
+        hqs = [s["hq"] for s in scores]
+        best_idx = np.argmax(hqs)
+    else:  # use F1
+        f1s = [s["f1"] for s in scores]
+        best_idx = np.argmax(f1s)
+    # S.append(stats)
+    S.append(scores[best_idx])
+    print(f"best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]}")
+    with open(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_results.tsv", "w") as f:
+        f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+        for i in range(len(cluster_labels)):
+            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
+    del loss, model, th
+    # res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
+    # if gt_idx_label_to_node is not None:
+    #    # save embs
+    #    np.save(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_embs.npy", node_new_features)
+    # plot_clusters(node_new_features, features.numpy(), cluster_labels, f"{gname} VAMB {nlayers}l {pname}")
+    # res_table.show()
+    return node_new_features
