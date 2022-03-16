@@ -176,7 +176,7 @@ def run_graphmb(dataset, args, device, logger):
         and not args.skip_preclustering
     ):
         # cluster using only input features
-        print("pre train clustering:")
+        logger.info("pre train clustering:")
         pre_cluster_to_contig, centroids = cluster_embs(
             dataset.graph.ndata["feat"].detach().cpu().numpy(),
             dataset.assembly.node_names,
@@ -213,13 +213,13 @@ def run_graphmb(dataset, args, device, logger):
     return best_train_embs, best_model, last_train_embs, last_model
 
 
-def write_bins(args, dataset, cluster_to_contig):
+def write_bins(args, dataset, cluster_to_contig, logger):
     bin_dir = Path(args.outdir + "/{}_bins/".format(args.outname))
     bin_dir.mkdir(parents=True, exist_ok=True)
     [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
     clustered_contigs = set()
     multi_contig_clusters = 0
-    print(len(cluster_to_contig), "clusters")
+    logger.info(len(cluster_to_contig), "clusters")
     short_contigs = set()
     skipped_clusters = 0
     for c in cluster_to_contig:
@@ -237,7 +237,7 @@ def write_bins(args, dataset, cluster_to_contig):
                 binfile.write(dataset.node_seqs[contig] + "\n")
                 clustered_contigs.add(contig)
         # print("multi cluster", c, "size", cluster_size, "contigs", len(cluster_to_contig[c]))
-    print("skipped {} clusters".format(skipped_clusters))
+    logger.info("skipped {} clusters".format(skipped_clusters))
     single_clusters = multi_contig_clusters
     left_over = set(dataset.node_names) - clustered_contigs - short_contigs
     for c in left_over:
@@ -248,7 +248,7 @@ def write_bins(args, dataset, cluster_to_contig):
                 binfile.write(dataset.node_seqs[c] + "\n")
                 single_clusters += 1
             # print("contig", single_clusters, "size", len(dataset.contig_seqs[c]))
-    print("wrote", single_clusters, "clusters", multi_contig_clusters, ">= #contig", args.mincomp)
+    logger.info("wrote", single_clusters, "clusters", multi_contig_clusters, ">= #contig", args.mincomp)
 
 
 def run_post_processing(final_embs, args, logger, dataset, graph, device, label_to_node, node_to_label):
@@ -317,8 +317,8 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
                 label_to_node,
             )
         if "writebins" in args.post:
-            print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
-            write_bins(args, dataset, best_cluster_to_contig)
+            logger.info("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))
+            write_bins(args, dataset, best_cluster_to_contig, logger)
         if "contig2bin" in args.post:
             # invert cluster_to_contig
             logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
@@ -352,7 +352,7 @@ def run_post_processing(final_embs, args, logger, dataset, graph, device, label_
         )
 
     if "edges" in args.post:
-        print("writing edges to", args.outdir + args.outname + "_edges")
+        logger.info("writing edges to", args.outdir + args.outname + "_edges")
         write_edges(graph, args.outdir + args.outname + "_edges")
 
     if "writeembs" in args.post:
@@ -443,9 +443,6 @@ def main():
 
     check_dirs(args)
 
-    print("setting seed to {}".format(args.seed))
-    set_seed(args.seed)
-
     # set up logging
     now = datetime.now()
     logger = logging.getLogger()
@@ -472,10 +469,13 @@ def main():
     logger.info(f"Running GraphMB {__version__}")
 
     # setup cuda and cpu
-    logging.info("using cuda: {}".format(str(args.cuda)))
+    logger.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
-    print("cuda available:", (device == "cuda:0"), ", using ", device)
+    logger.info(f"cuda available: {(device == 'cuda:0')} using {device}")
     torch.set_num_threads(args.numcores)
+
+    logger.info("setting seed to {}".format(args.seed))
+    set_seed(args.seed)
 
     # specify data properties for caching
     if args.features is None:
@@ -488,6 +488,7 @@ def main():
 
     # create assembly object
     dataset = AssemblyDataset(
+        logger,
         args.assembly,
         args.assembly_name,
         args.graph_file,
@@ -519,7 +520,7 @@ def main():
 
     vamb_emb_exists = os.path.exists(features_dir)
     if args.vamb or not vamb_emb_exists:
-        print("running VAMB...")
+        logger.info("running VAMB...")
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
     dataset.read_features()

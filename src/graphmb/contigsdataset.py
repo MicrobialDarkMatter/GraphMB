@@ -38,6 +38,7 @@ class AssemblyDataset:
     # everything as numpy to make it easier to convert
     def __init__(
         self,
+        logger,
         data_dir,
         fastafile,
         graphfile,
@@ -49,7 +50,7 @@ class AssemblyDataset:
         assemblytype="flye",
         min_contig_length=0,
     ):
-        # try read from this, if fails:
+        self.logger = logger
         self.data_dir = data_dir
         self.fastafile = fastafile
         self.graphfile = graphfile
@@ -84,16 +85,16 @@ class AssemblyDataset:
 
     def read_assembly(self):
         """Read assembly files, convert to numpy arrays and save to disk"""
-        print("processing sequences", os.path.join(self.data_dir, self.fastafile))
+        self.logger.info("processing sequences {}".format(os.path.join(self.data_dir, self.fastafile)))
         self.read_seqs()
-        print("read", len(self.node_seqs), "seqs")
+        self.logger.info(f"read {len(self.node_seqs)} seqs")
         np.save(os.path.join(self.cache_dir, "node_names.npy"), self.node_names)
         np.save(os.path.join(self.cache_dir, "node_lengths.npy"), self.node_lengths)
         np.save(os.path.join(self.cache_dir, "node_attributes_kmer.npy"), self.node_kmers.astype(float))
         pickle.dump(self.node_seqs, open(os.path.join(self.cache_dir, "node_seqs.pkl"), "wb"))
-        print("processing GFA file", os.path.join(self.data_dir, self.graphfile))
+        self.logger.info("processing GFA file {}".format(os.path.join(self.data_dir, self.graphfile)))
         self.read_gfa()
-        print("read", len(self.edges_src), "edges")
+        self.logger.info(f"read {len(self.edges_src)}, edges")
         np.save(os.path.join(self.cache_dir, "edge_weights.npy"), self.edge_weights)
         scipy.sparse.save_npz(os.path.join(self.cache_dir, "adj_sparse.npz"), self.adj_matrix)
         np.save(os.path.join(self.cache_dir, "graph_nodes.npy"), self.graph_nodes)
@@ -101,10 +102,10 @@ class AssemblyDataset:
         # self.rename_nodes_to_index()
         # self.nodes_depths = np.array(self.nodes_depths)
         # read lengths
-        print("reading depths")
+        self.logger.info("reading depths")
         self.read_depths()
         np.save(os.path.join(self.cache_dir, "node_attributes_depth.npy"), np.array(self.node_depths))
-        print("reading labels")
+        self.logger.info("reading labels")
         self.read_labels()
         np.save(os.path.join(self.cache_dir, "node_to_label.npy"), self.node_to_label)
         np.save(os.path.join(self.cache_dir, "label_to_node.npy"), self.label_to_node)
@@ -220,7 +221,7 @@ class AssemblyDataset:
                         self.edges_dst.append(src_index)
                         self.edge_weights.append(rc)
             # TODO: Other information from gfa file: contig sequences
-        print("skipped contigs", len(skipped_contigs), "<", self.min_contig_length)
+        self.logger.info(f"skipped contigs {len(skipped_contigs)} < {self.min_contig_length}")
         self.adj_matrix = scipy.sparse.coo_matrix(
             (self.edge_weights, (self.edges_src, self.edges_dst)), shape=(len(self.node_names), len(self.node_names))
         )
@@ -240,8 +241,7 @@ class AssemblyDataset:
                     if node_name in self.node_names:
                         node_depths[node_name] = np.array([float(values[i]) for i in depth_i])
                     else:
-                        print("node name not found:", node_name)
-            # TODO convert to np
+                        self.logger.info("node name not found: {}".format(node_name))
             self.node_depths = np.array([node_depths[n] for n in self.node_names])
             if len(self.node_depths[0]) > 1:  # normalize depths
                 self.node_depths = stats.zscore(self.node_depths, axis=0)
@@ -270,7 +270,7 @@ class AssemblyDataset:
                         node_to_label[node] = label
                         labels.add(label)
                     else:
-                        print("unused label:", line.strip())
+                        self.logger.info(("unused label: {}".format(line.strip())))
             labels = list(labels)
             label_to_node = {s: [] for s in labels}
             for n in node_to_label:
@@ -295,10 +295,8 @@ class AssemblyDataset:
                 edges_without_label += 1
             if self.node_to_label[self.node_names[u]] == self.node_to_label[self.node_names[v]]:
                 positive_edges += 1
-        print(
-            "homophily:",
-            positive_edges / (len(self.edge_weights) - edges_without_label),
-            len(self.edge_weights) - edges_without_label,
+        self.logger.info(
+            f"homophily: {positive_edges / (len(self.edge_weights) - edges_without_label)} {len(self.edge_weights) - edges_without_label}"
         )
 
     def read_scgs(self):
@@ -315,7 +313,7 @@ class AssemblyDataset:
             self.ref_marker_sets = None
 
     def run_vamb(self, vamb_outdir, cuda, vambdim):
-        print("running VAMB")
+        self.logger.info("running VAMB")
         batchsteps = []
         vamb_epochs = 500
         if len(self.node_depths[0]) == 1:
@@ -325,7 +323,7 @@ class AssemblyDataset:
             vamb_bs = 64
             batchsteps = [25, 75, 150, 300]
         nhiddens = [512, 512]
-        print("using these batchsteps:", batchsteps)
+        self.logger.info("using these batchsteps:{}".format(batchsteps))
 
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
         if os.path.exists(vamb_outdir) and os.path.isdir(vamb_outdir):
@@ -349,16 +347,16 @@ class AssemblyDataset:
             if self.data_dir != "":
                 shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), self.featuresfile)
             # args.features = "features.tsv"
-            print("Contig features saved to {}".format(self.featuresfile))
+            self.logger.info("Contig features saved to {}".format(self.featuresfile))
 
     def read_features(self):
         node_embs = {}
-        print("loading features from", self.featuresfile)
+        self.logger.info("loading features from {}".format(self.featuresfile))
         with open(self.featuresfile, "r") as ffile:
             for line in ffile:
                 values = line.strip().split()
                 node_embs[values[0]] = [float(x) for x in values[1:]]
-        print("loaded {} features/ {} nodes".format(len(node_embs), len(self.node_names)))
+        self.logger.info("loaded {} features/ {} nodes".format(len(node_embs), len(self.node_names)))
         self.node_embs = [
             node_embs.get(n, np.random.uniform(10e-5, 1.0, len(values[1:]))) for n in self.node_names
         ]  # deal with missing embs
@@ -368,6 +366,7 @@ class AssemblyDataset:
 class DGLAssemblyDataset(DGLDataset):
     def __init__(self, assembly):
         self.assembly = assembly
+        self.logger = assembly.logger
         super().__init__(name="assembly_graph", save_dir=assembly.cache_dir, force_reload=False)
 
     def __getitem__(self, i):
@@ -382,24 +381,24 @@ class DGLAssemblyDataset(DGLDataset):
         # if root:
         #    root_node = G.add_node("root", length=0)
         # TODO: skip unconnected and too short/big
-        print("creating DGL graph")
+        self.logger.info("creating DGL graph")
         self.graph = dgl.graph(
             (self.assembly.edges_src, self.assembly.edges_dst),
             num_nodes=len(self.assembly.node_names),
         )
         self.graph.edata["weight"] = torch.tensor(self.assembly.edge_weights)
 
-        print("done")
+        self.logger.info("done")
         self.graph.ndata["label"] = torch.LongTensor(
             [self.assembly.labels.index(self.assembly.node_to_label[n]) for n in self.assembly.node_names]
         )
 
         nx_graph = self.graph.to_networkx().to_undirected()
-        print("connected components...")
+        self.logger.info("connected components...")
         # self.connected = [c for c in sorted(nx.connected_components(nx_graph), key=len, reverse=True) if len(c) > 1]
         # breakpoint()
         self.connected = [c for c in sorted(nx.connected_components(nx_graph), key=len, reverse=True) if len(c) > 0]
-        print(len(self.connected), "connected")
+        self.logger.info((len(self.connected), "connected"))
         # for group in self.connected:
         #    self.graphs.append(
         #        dgl.node_subgraph(self.graph, [self.node_names.index(c) for c in group if c in self.node_names])
