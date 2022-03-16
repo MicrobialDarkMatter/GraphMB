@@ -17,16 +17,12 @@ import torch
 import torch.nn as nn
 import networkx as nx
 
-
 import os
-from graphmb.contigsdataset import AssemblyDataset, ContigsDataset, DGLAssemblyDataset
+from graphmb.contigsdataset import AssemblyDataset, DGLAssemblyDataset
 from pathlib import Path
 import scipy.stats as stats
 from graphmb.evaluate import (
-    read_marker_gene_sets,
-    read_contig_genes,
     evaluate_contig_sets,
-    get_markers_to_contigs,
     calculate_overall_prf,
 )
 from graphmb.graphsage_unsupervised import train_graphsage, SAGE
@@ -38,8 +34,8 @@ from graphmb.graph_functions import (
     draw_nx_graph,
     set_seed,
 )
+import vaegbin
 from graphmb.version import __version__
-from vamb.vamb_run import run as run_vamb
 
 SEED = 0
 
@@ -117,7 +113,7 @@ def write_edges(graph, outname):
             graphf.write(str(e[0].item()) + "\t" + str(e[1].item()) + "\n")
 
 
-def check_dirs(args):
+def check_dirs(args, use_features=True):
     """Check if files necessary to run exist, other wise print message and exit"""
     if args.outdir is None:
         if args.assembly is None:
@@ -132,7 +128,7 @@ def check_dirs(args):
     if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
         print(f"Assembly Graph file {args.graph_file} not found")
         exit()
-    if not os.path.exists(os.path.join(args.assembly, args.features)):
+    if not os.path.exists(os.path.join(args.assembly, args.features)) or not use_features:
         # needs assembly files to calculate features
         if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
             print(f"Assembly {args.assembly_name} not found")
@@ -218,7 +214,6 @@ def run_graphmb(dataset, args, device, logger):
 
 
 def write_bins(args, dataset, cluster_to_contig):
-    breakpoint()
     bin_dir = Path(args.outdir + "/{}_bins/".format(args.outname))
     bin_dir.mkdir(parents=True, exist_ok=True)
     [f.unlink() for f in bin_dir.glob("*.fa") if f.is_file()]
@@ -489,7 +484,7 @@ def main():
         else:
             features_dir = os.path.join(args.outdir, "features.tsv")
     else:
-        features_dir = args.features
+        features_dir = os.path.join(args.assembly, args.features)
 
     # create assembly object
     dataset = AssemblyDataset(
@@ -506,6 +501,7 @@ def main():
     if dataset.check_cache() and not args.reload:
         dataset.read_cache()
     else:
+        check_dirs(args, use_features=False)
         dataset.read_assembly()
     dataset.read_scgs()
     # k can be user defined or dependent on the dataset
@@ -579,8 +575,8 @@ def main():
         if model is None:
             best_train_embs = graph.ndata["feat"]
             last_train_embs = graph.ndata["feat"]
-    elif args.mode_name in ("sage", "gcn", "gat"):
-        pass
+    elif args.model_name in ("sage", "gcn", "gat"):
+        vaegbin.run_gnn(dataset, args)
 
     run_post_processing(
         best_train_embs, args, logger, dataset, graph, device, dataset.label_to_node, dataset.node_to_label

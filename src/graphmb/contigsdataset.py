@@ -255,7 +255,7 @@ class AssemblyDataset:
         if self.labelsfile is not None:
             node_to_label = {c: "NA" for c in self.node_names}
             labels = set(["NA"])
-            with open(self.labelsfile, "r") as f:
+            with open(os.path.join(self.data_dir, self.labelsfile), "r") as f:
                 for line in f:
                     # label, node = line.strip().split()
                     if self.labelsfile.endswith(".csv"):
@@ -358,7 +358,7 @@ class AssemblyDataset:
             for line in ffile:
                 values = line.strip().split()
                 node_embs[values[0]] = [float(x) for x in values[1:]]
-
+        print("loaded {} features/ {} nodes".format(len(node_embs), len(self.node_names)))
         self.node_embs = [
             node_embs.get(n, np.random.uniform(10e-5, 1.0, len(values[1:]))) for n in self.node_names
         ]  # deal with missing embs
