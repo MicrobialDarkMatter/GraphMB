@@ -1,0 +1,331 @@
+from sklearn.cluster import KMeans
+import sys
+import os
+from tqdm import tqdm
+import itertools
+import numpy as np
+import tensorflow as tf
+import pandas as pd
+import matplotlib.pyplot as plt
+import networkx as nx
+from rich.console import Console
+from rich.table import Table
+from scipy.sparse import csr_matrix, diags
+from vamb.cluster import cluster as vamb_cluster
+from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH
+
+
+def normalize_adj_sparse(A):
+    # https://github.com/tkipf/gcn/blob/master/gcn/utils.py
+    A.setdiag(1)
+    rowsum = np.array(A.sum(1))
+    d_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
+    d_mat_inv_sqrt = diags(d_inv_sqrt)
+    return A.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()
+
+
+def completeness(reference_markers, genes):
+    numerator = 0.0
+    for marker_set in reference_markers:
+        common = marker_set & genes
+        if len(marker_set) > 0:
+            numerator += len(common) / len(marker_set)
+    return 100 * (numerator / len(reference_markers))
+
+
+def contamination(reference_markers, genes):
+    numerator = 0.0
+    for i, marker_set in enumerate(reference_markers):
+        inner_total = 0.0
+        for gene in marker_set:
+            if gene in genes and genes[gene] > 0:
+                inner_total += genes[gene] - 1.0
+        if len(marker_set) > 0:
+            numerator += inner_total / len(marker_set)
+    return 100.0 * (numerator / len(reference_markers))
+
+
+def compute_cluster_score(reference_markers, contig_genes, node_names, node_labels):
+    labels_to_nodes = {i: node_names[node_labels == i].tolist() for i in np.unique(node_labels)}
+    results = {}
+    for label in labels_to_nodes:
+        genes = {}
+        for node_name in labels_to_nodes[label]:
+            if node_name not in contig_genes:
+                # print("missing", node_name)
+                continue
+            for gene in contig_genes[node_name]:
+                if gene not in genes:
+                    genes[gene] = 0
+                genes[gene] += contig_genes[node_name][gene]
+
+        comp = completeness(reference_markers, set(genes.keys()))
+        cont = contamination(reference_markers, genes)
+        results[label] = {"comp": comp, "cont": cont, "genes": genes}
+    return results
+
+
+def compute_hq(reference_markers, contig_genes, node_names, node_labels, comp_th=90, cont_th=5):
+    cluster_stats = compute_cluster_score(reference_markers, contig_genes, node_names, node_labels)
+    hq = 0
+    positive_clusters = []
+    for label in cluster_stats:
+        if cluster_stats[label]["comp"] >= comp_th and cluster_stats[label]["cont"] < cont_th:
+            hq += 1
+            positive_clusters.append(label)
+    return hq, positive_clusters
+
+
+def compute_clusters_and_stats(
+    X, node_names, reference_markers, contig_genes, node_to_gt_idx_label, gt_idx_label_to_node, k=0, clustering="vamb"
+):
+    if clustering == "vamb":
+        physical_devices = tf.config.list_physical_devices("GPU")
+        use_cuda = len(physical_devices) > 0
+        best_cluster_to_contig = {i: c for (i, (n, c)) in enumerate(vamb_cluster(X.astype(np.float32), node_names))}
+
+        best_contig_to_bin = {}
+        for b in best_cluster_to_contig:
+            for contig in best_cluster_to_contig[b]:
+                best_contig_to_bin[contig] = b
+        labels = np.array([best_contig_to_bin[n] for n in node_names])
+    elif clustering == "kmeans":
+        clf = KMeans(k, random_state=1234)
+        labels = clf.fit_predict(X)
+        best_contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
+        best_cluster_to_contig = {i: [] for i in range(k)}
+        for i in range(len(node_names)):
+            best_cluster_to_contig[labels[i]].append(node_names[i])
+    hq, positive_clusters = compute_hq(
+        reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
+    )
+    mq, _ = compute_hq(
+        reference_markers=reference_markers,
+        contig_genes=contig_genes,
+        node_names=node_names,
+        node_labels=labels,
+        comp_th=50,
+        cont_th=10,
+    )
+    non_comp, _ = compute_hq(
+        reference_markers=reference_markers,
+        contig_genes=contig_genes,
+        node_names=node_names,
+        node_labels=labels,
+        comp_th=0,
+        cont_th=10,
+    )
+    all_cont, _ = compute_hq(
+        reference_markers=reference_markers,
+        contig_genes=contig_genes,
+        node_names=node_names,
+        node_labels=labels,
+        comp_th=90,
+        cont_th=1000,
+    )
+    # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
+    positive_pairs = []
+    node_names_to_idx = {node_name: i for i, node_name in enumerate(node_names)}
+    for label in positive_clusters:
+        for (p1, p2) in itertools.combinations(best_cluster_to_contig[label], 2):
+            positive_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))
+    # print("found {} positive pairs".format(len(positive_pairs)))
+    positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
+    """if node_to_gt_idx_label is not None:
+        p, r, f1, ari = calculate_overall_prf(
+            best_cluster_to_contig, best_contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
+        )
+    else:"""
+    p, r, f1, ari = 0, 0, 0, 0
+
+    return (
+        labels,
+        {"precision": p, "recall": r, "f1": f1, "ari": ari, "hq": hq, "mq": mq, "n_clusters": len(np.unique(labels))},
+        positive_pairs,
+        positive_clusters,
+    )
+
+
+def run_gnn(dataset, args):
+    node_names = np.array(dataset.node_names)
+    n_runs = 2
+    RESULT_EVERY = 10
+    adj_norm = normalize_adj_sparse(dataset.adj_matrix)
+    hidden_units = 128
+    output_dim = 64
+    epochs = args.epoch
+    lr = 1e-2
+    nlayers = 2
+    VAE = False
+    clustering = "vamb"
+    k = 0
+    use_edge_weights = False
+    use_disconnected = True
+    cluster_markers_only = False
+    decay = 0.5 ** (2.0 / epochs)
+    concat_features = False  # True to improve HQ
+    print("using edge weights", use_edge_weights)
+    print("using disconnected", use_disconnected)
+    print("concat features", concat_features)
+    print("cluster markers only", cluster_markers_only)
+    # tf.config.experimental_run_functions_eagerly(True)
+    """if cluster_markers_only:
+        #print("eval with ", len(nodes_with_markers), "contigds")
+        cluster_mask = [n in nodes_with_markers for n in range(len(node_names))]
+    else:"""
+    cluster_mask = [True] * len(dataset.node_names)
+    if use_edge_weights:
+        edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
+            dataset.edge_weights.max() - dataset.edge_weights.min()
+        )
+        old_rows, old_cols = dataset.adj_matrix.row, dataset.adj_matrix.col
+        old_idx_to_edge_idx = {(r, c): i for i, (r, c) in enumerate(zip(old_rows, old_cols))}
+        old_values = adj_norm.data.astype(np.float32)
+        new_values = []
+        for i, j, ov in zip(adj_norm.row, adj_norm.col, old_values):
+            if i == j:
+                new_values.append(1.0)
+            else:
+                try:
+                    eidx = old_idx_to_edge_idx[(i, j)]
+                    new_values.append(ov * edge_features[eidx])
+                except:
+                    new_values.append(ov)
+        new_values = np.array(new_values).astype(np.float32)
+    else:
+        new_values = adj_norm.data.astype(np.float32)
+    adj = tf.SparseTensor(
+        indices=np.array([adj_norm.row, adj_norm.col]).T, values=new_values, dense_shape=adj_norm.shape
+    )
+    adj = tf.sparse.reorder(adj)
+    if not use_disconnected:
+        train_edges = [
+            eid
+            for eid in range(len(adj_norm.row))
+            if adj_norm.row[eid] in connected_marker_nodes and adj_norm.col[eid] in connected_marker_nodes
+        ]
+
+        train_adj = tf.SparseTensor(
+            indices=np.array([adj_norm.row[train_edges], adj_norm.col[train_edges]]).T,
+            values=new_values[train_edges],
+            dense_shape=adj_norm.shape,
+        )
+
+        # train_adj = tf.SparseTensor(indices=np.array([adj_norm.row, adj_norm.col]).T,
+        #                    values=new_values,
+        #                    dense_shape=adj_norm.shape)
+        train_adj = tf.sparse.reorder(train_adj)
+
+    else:
+        train_adj = adj
+    neg_pair_idx = None
+    pos_pair_idx = None
+    print("train len edges:", train_adj.indices.shape[0])
+    for nlayers in range(1, 2):
+        X = dataset.node_embs
+        print("feat dim", X.shape)
+        for pname, X in [("VAE-F", X)]:
+            # for fname, X in [("RAW-F", node_raw), ("VAE-F", node_features)]:
+            # for pname, pair_idx in [("", None), ("ALL-DIFF-C", all_different_idx)]:
+            # for pname, pair_idx in [("ALL-DIFF-C", all_different_idx)]:
+            # for pname, neg_pair_idx, pos_pair_idx in [("SAME-C", None, all_same_idx), ("SAME-DIFF", all_different_idx, all_same_idx)]:
+            # for pname, neg_pair_idx, pos_pair_idx in [("", None, None), ("DIFF-C", all_different_idx, None), ("SAME-C", None, all_same_idx), ("SAME-DIFF", all_different_idx, all_same_idx)]:
+            # for pname, neg_pair_idx, pos_pair_idx in [("DIFF-C", all_different_idx, None)]:
+            # for pname, neg_pair_idx, pos_pair_idx in [("DIFF-C", all_different_idx, None)]:
+            for gname, gmodel in [
+                ("GCN", GCN),
+                ("SAGE", SAGE),
+                ("GAT", GAT),
+            ]:  # , ("GCNLAF", GCNLAF), ("SAGE", SAGE), ("SAGELAF", SAGELAF), ("GAT", GAT), ("GATLAF", GATLAF)]:
+                scores = []
+                all_cluster_labels = []
+                features = tf.constant(X.astype(np.float32))
+                S = []
+                for i in range(n_runs):
+                    model = gmodel(
+                        features=features,
+                        labels=None,
+                        adj=train_adj,
+                        n_labels=output_dim,
+                        hidden_units=hidden_units,
+                        layers=nlayers,
+                        conv_last=False,
+                    )  # , use_bn=True, use_vae=False)
+                    th = TH(model, lr=lr, lambda_vae=0.01, all_different_idx=neg_pair_idx, all_same_idx=pos_pair_idx)
+                    train_idx = np.arange(len(features))
+                    pbar = tqdm(range(epochs))
+                    scores = []
+                    for e in pbar:
+                        if VAE:
+                            loss = th.train_unsupervised_vae(train_idx)
+                        else:
+                            loss, same_loss, diff_loss = th.train_unsupervised(train_idx)
+                            # loss = th.train_unsupervised_v2(train_idx)
+                        loss = loss.numpy()
+                        pbar.set_description(f"[{i} {gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f}")
+                        # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
+                        if (e + 1) % RESULT_EVERY == 0:
+                            model.adj = adj
+                            node_new_features = model(None, training=False)
+                            node_new_features = node_new_features.numpy()
+                            node_new_features = node_new_features[:, :output_dim]
+                            # concat with original features
+                            if concat_features:
+                                node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+                            cluster_labels, stats, _, _ = compute_clusters_and_stats(
+                                node_new_features[cluster_mask],
+                                node_names[cluster_mask],
+                                dataset.ref_marker_sets,
+                                dataset.contig_markers,
+                                dataset.node_to_label,
+                                dataset.label_to_node,
+                                clustering=clustering,
+                                k=k,
+                            )
+                            # print(f'--- EPOCH {e:d} ---')
+                            # print(stats)
+                            scores.append(stats)
+                            all_cluster_labels.append(cluster_labels)
+                            model.adj = train_adj
+                            # print('--- END ---')
+                    model.adj = adj
+                    node_new_features = model(None, training=False)
+                    node_new_features = node_new_features.numpy()
+                    node_new_features = node_new_features[:, :output_dim]
+                    # concat with original features
+                    if concat_features:
+                        node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+
+                    cluster_labels, stats, _, _ = compute_clusters_and_stats(
+                        node_new_features[cluster_mask],
+                        node_names[cluster_mask],
+                        dataset.ref_marker_sets,
+                        dataset.contig_markers,
+                        dataset.node_to_label,
+                        dataset.label_to_node,
+                        clustering=clustering,
+                        k=k,
+                    )
+                    scores.append(stats)
+                    # get best stats:
+                    if concat_features:  # use HQ
+                        hqs = [s["hq"] for s in scores]
+                        best_idx = np.argmax(hqs)
+                    else:  # use F1
+                        f1s = [s["f1"] for s in scores]
+                        best_idx = np.argmax(f1s)
+                    # S.append(stats)
+                    S.append(scores[best_idx])
+                    print(f"best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]}")
+                    with open(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_{i}_results.tsv", "w") as f:
+                        f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+                        for i in range(len(cluster_labels)):
+                            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
+                    del loss, model, th
+                res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
+                if gt_idx_label_to_node is not None:
+                    # save embs
+                    np.save(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_embs.npy", node_new_features)
+                plot_clusters(node_new_features, features.numpy(), cluster_labels, f"{gname} VAMB {nlayers}l {pname}")
+    res_table.show()
