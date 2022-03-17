@@ -183,6 +183,7 @@ def run_graphmb(dataset, args, device, logger):
             device=device,
             # node_lens=np.array([c[0] for c in dataset.assembly.nodes_len]),
             node_lens=np.array(dataset.assembly.node_lengths),
+            seed=args.seed,
         )
         results = evaluate_contig_sets(
             dataset.assembly.ref_marker_sets, dataset.assembly.contig_markers, pre_cluster_to_contig
@@ -200,6 +201,7 @@ def run_graphmb(dataset, args, device, logger):
         lr=args.lr,
         k=args.kclusters,
         clusteringalgo=args.clusteringalgo,
+        cluster_features=False,
         print_interval=args.print,
         loss_weights=(not args.no_loss_weights),
         sample_weights=(not args.no_sample_weights),
@@ -207,6 +209,7 @@ def run_graphmb(dataset, args, device, logger):
         device=device,
         epsilon=args.early_stopping,
         evalepochs=args.evalepochs,
+        seed=args.seed,
     )
     return best_train_embs, best_model, last_train_embs, last_model
 
@@ -249,7 +252,7 @@ def write_bins(args, dataset, cluster_to_contig, logger):
     logger.info(f"wrote {single_clusters} clusters {multi_contig_clusters} >= #contig {args.mincomp}")
 
 
-def run_post_processing(final_embs, args, logger, dataset, device, label_to_node, node_to_label):
+def run_post_processing(final_embs, args, logger, dataset, device, label_to_node, node_to_label, seed):
     if "cluster" in args.post or "kmeans" in args.post:
         logger.info("clustering embs with {} ({})".format(args.clusteringalgo, args.kclusters))
         # train_embs = last_train_embs
@@ -269,6 +272,7 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
             # len(dataset.connected),
             args.kclusters,
             device=device,
+            seed=seed,
         )
         cluster_sizes = {}
         for c in best_cluster_to_contig:
@@ -523,7 +527,8 @@ def main():
         logger.info("running VAMB...")
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
-    dataset.read_features()
+    if not args.rawfeatures:
+        dataset.read_features()
 
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
@@ -547,7 +552,9 @@ def main():
         # initialize empty features vector
         nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
         if args.rawfeatures:
-            nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer, dataset.nodes_depths), dim=1)
+            nodes_data = torch.cat(
+                (nodes_data, torch.FloatTensor(dataset.node_kmers), torch.FloatTensor(dataset.node_depths)), dim=1
+            )
         # if args.depth is not None:
         #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
         elif args.features is not None:  # append embs
@@ -570,7 +577,7 @@ def main():
 
         model = None
         if args.embs is None and args.read_embs is False:
-            best_train_embs, best_model, last_train_embs, last_model = run_graphmb(dgl_dataset, args, device, logger)
+            best_train_embs, model, last_train_embs, last_model = run_graphmb(dgl_dataset, args, device, logger)
             emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
 
         if model is None:
@@ -580,7 +587,9 @@ def main():
         # TODO implement repeats and grid search
         best_train_embs = vaegbin.run_gnn(dataset, args)
 
-    run_post_processing(best_train_embs, args, logger, dataset, device, dataset.label_to_node, dataset.node_to_label)
+    run_post_processing(
+        best_train_embs, args, logger, dataset, device, dataset.label_to_node, dataset.node_to_label, seed=args.seed
+    )
 
 
 if __name__ == "__main__":

@@ -165,7 +165,16 @@ def filter_disconnected(adj, node_names, markers):
     return set(graph.nodes())
 
 
-def prepare_data_for_gnn(dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False):
+def prepare_data_for_gnn(
+    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False
+):
+    node_raw = np.hstack((dataset.node_kmers, dataset.node_depths))
+    node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
+    node_features = (dataset.node_embs - dataset.node_embs.mean(axis=0, keepdims=True)) / dataset.node_embs.std(
+        axis=0, keepdims=True
+    )
+    depth = 2
+    # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth)
     connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
     nodes_with_markers = [
         i
@@ -215,10 +224,6 @@ def prepare_data_for_gnn(dataset, use_edge_weights=True, use_disconnected=True, 
             values=new_values[train_edges],
             dense_shape=adj_norm.shape,
         )
-
-        # train_adj = tf.SparseTensor(indices=np.array([adj_norm.row, adj_norm.col]).T,
-        #                    values=new_values,
-        #                    dense_shape=adj_norm.shape)
         train_adj = tf.sparse.reorder(train_adj)
 
     else:
@@ -226,7 +231,10 @@ def prepare_data_for_gnn(dataset, use_edge_weights=True, use_disconnected=True, 
     neg_pair_idx = None
     pos_pair_idx = None
     print("train len edges:", train_adj.indices.shape[0])
-    X = dataset.node_embs
+    if use_raw:
+        X = node_raw
+    else:
+        X = node_features
     return X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx
 
 
@@ -240,9 +248,8 @@ def run_gnn(dataset, args):
     nlayers = args.layers
     VAE = False
     gname = args.model_name
-    # TODO get model by model name
     gmodel = name_to_model[gname.upper()]
-    clustering = "vamb"
+    clustering = args.clusteringalgo
     k = args.kclusters
     use_edge_weights = False
     use_disconnected = True
@@ -257,7 +264,7 @@ def run_gnn(dataset, args):
     # tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
-        dataset, use_edge_weights, use_disconnected, cluster_markers_only
+        dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.raw_features
     )
     print("feat dim", X.shape)
     pname = ""
