@@ -4,6 +4,8 @@
 
 GraphMB is a Metagenomic Binner developed for long-read assemblies, that takes advantage of graph machine learning 
 algorithms and the assembly graph generated during assembly. It has been tested on (meta)flye assemblies.
+Our preprint: 
+> Lamurias, A., Sereika, M., Albertsen, M., Hose, K., & Nielsen, T. D. (2022). Metagenomic binning with assembly graph embeddings. BioRxiv, 2022.02.25.481923. https://doi.org/10.1101/2022.02.25.481923
 
 ## Dependencies
 
@@ -19,7 +21,7 @@ Can be found here: https://graphmb.readthedocs.io/en/latest/
 
 ### Option 1 - From wheel
 ```bash
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.2/graphmb-0.1.2-py3-none-any.whl
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
 ```
 
 ### Option 2 - From source
@@ -30,9 +32,11 @@ python -m venv venv; source venv/bin/activate # optional
 pip install .
 ```
 
-### Option 3 - From anaconda
+### Option 3 - From conda
 ```bash
-conda install -c andrelamurias graphmb
+conda create -n graphmb -c conda-forge make cmake libgcc python=3.7 pip
+conda activate graphmb
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
 ```
 
 ### Option 4 - Docker
@@ -41,7 +45,7 @@ Either build the docker image with the Dockerfile or pull from dockerhub:
 docker pull andrelamurias/graphmb
 ```
 
-Then you can GraphMB on a contain. The image includes the Strong100 dataset. 
+Then you can run GraphMB on a container. The image includes the Strong100 dataset. 
 If you want to use other datasets, use the -v option to mount the path to your data.
 ```bash
 docker run -it andrelamurias/graphmb bash
@@ -87,7 +91,7 @@ graphmb --assembly data/strong100/ --outdir results/strong100/ --assembly_name e
 By default GraphMB saves a TSV file mapping each contig to a bin to the assembly directory, as well as the weights and output embeddings of the best model.
 The output directory can be changed with the `--outdir` argument.
 
-To prevent GraphMB from run clustering after each epoch, do not provide the markers param.
+To prevent GraphMB from run clustering after each epoch, do not provide the markers param or set the `--evalepochs` option to a higher number (default is 10)
 This will make it run faster but the results might not be optimal.
 
 ```bash
@@ -105,8 +109,6 @@ You can also run on CPU and limit the number of threads to use:
 ```bash
 graphmb --assembly data/strong100/ --outdir results/strong100/ --numcores 4
 ```
-
-If installed with pip, you can also use `graphmb` instead of `graphmb`.
 
 ## Typical workflow
 Our workflows are available [here](https://github.com/AndreLamurias/binning_workflows).

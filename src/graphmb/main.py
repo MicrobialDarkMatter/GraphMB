@@ -8,6 +8,7 @@ from datetime import datetime
 from collections import Counter
 import numpy as np
 import sys
+import os
 import copy
 import pickle
 import shutil
@@ -16,7 +17,6 @@ import dgl
 import torch
 import torch.nn as nn
 import networkx as nx
-
 import os
 from graphmb.contigsdataset import AssemblyDataset, DGLAssemblyDataset
 from pathlib import Path
@@ -452,7 +452,6 @@ def main():
     logfile = os.path.join(args.outdir, now.strftime("%Y%m%d-%H%M%S") + "{}_output.log".format(args.outname))
     output_file_handler = logging.FileHandler(logfile)
     print("logging to {}".format(logfile))
-
     stdout_handler = logging.StreamHandler(sys.stdout)
     logger.addHandler(output_file_handler)
     logger.info(args)
@@ -515,7 +514,7 @@ def main():
     # filter graph by components
     # dataset.connected = [c for c in dataset.connected if len(c) >= args.mincomp]
 
-    #### select features to use
+    # select features to use
     # this code wont be used for now but next version will train AE from these features
     # zscore Kmer features (kmer are already loaded from reading the dataset)
     # dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
