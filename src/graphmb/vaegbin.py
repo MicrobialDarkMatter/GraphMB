@@ -168,11 +168,15 @@ def filter_disconnected(adj, node_names, markers):
 def prepare_data_for_gnn(
     dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False
 ):
-    node_raw = np.hstack((dataset.node_kmers, dataset.node_depths))
-    node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
-    node_features = (dataset.node_embs - dataset.node_embs.mean(axis=0, keepdims=True)) / dataset.node_embs.std(
-        axis=0, keepdims=True
-    )
+    if use_raw:
+        node_raw = np.hstack((dataset.node_kmers, dataset.node_depths))
+        node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
+        X = node_raw
+    else:
+        node_features = (dataset.node_embs - dataset.node_embs.mean(axis=0, keepdims=True)) / dataset.node_embs.std(
+            axis=0, keepdims=True
+        )
+        X = node_features
     depth = 2
     # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth)
     connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
@@ -231,10 +235,6 @@ def prepare_data_for_gnn(
     neg_pair_idx = None
     pos_pair_idx = None
     print("train len edges:", train_adj.indices.shape[0])
-    if use_raw:
-        X = node_raw
-    else:
-        X = node_features
     return X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx
 
 
@@ -264,7 +264,7 @@ def run_gnn(dataset, args):
     # tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
-        dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.raw_features
+        dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.rawfeatures
     )
     print("feat dim", X.shape)
     pname = ""
