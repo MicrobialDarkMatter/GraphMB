@@ -38,6 +38,7 @@ class AssemblyDataset:
     # everything as numpy to make it easier to convert
     def __init__(
         self,
+        name,
         logger,
         data_dir,
         fastafile,
@@ -50,6 +51,7 @@ class AssemblyDataset:
         assemblytype="flye",
         min_contig_length=0,
     ):
+        self.name = name
         self.logger = logger
         self.data_dir = data_dir
         self.fastafile = fastafile
@@ -367,7 +369,7 @@ class DGLAssemblyDataset(DGLDataset):
     def __init__(self, assembly):
         self.assembly = assembly
         self.logger = assembly.logger
-        super().__init__(name="assembly_graph", save_dir=assembly.cache_dir, force_reload=False)
+        super().__init__(name=assembly.name + "assembly_graph", save_dir=assembly.cache_dir, force_reload=False)
 
     def __getitem__(self, i):
         return self.graph

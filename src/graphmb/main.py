@@ -13,7 +13,6 @@ import copy
 import pickle
 import shutil
 import pdb
-import dgl
 import torch
 import torch.nn as nn
 import networkx as nx
@@ -37,12 +36,11 @@ from graphmb.graph_functions import (
 import vaegbin
 from graphmb.version import __version__
 
-SEED = 0
-
 
 def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
     from sklearn.manifold import TSNE
 
+    SEED = 0
     print("running tSNE")
     # filter only good clusters
     tsne = TSNE(n_components=2, random_state=SEED)
@@ -404,7 +402,7 @@ def main():
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
     parser.add_argument("--evalepochs", type=int, help="Epoch interval to run eval", default=10)
     parser.add_argument("--kmer", default=4)
-    parser.add_argument("--usekmer", help="Use kmer features", action="store_true")
+    parser.add_argument("--rawfeatures", help="Use raw features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
     parser.add_argument("--no_loss_weights", action="store_false", help="Using edge weights for loss (positive only)")
     parser.add_argument("--no_sample_weights", action="store_false", help="Using edge weights to sample negatives")
@@ -489,6 +487,7 @@ def main():
 
     # create assembly object
     dataset = AssemblyDataset(
+        args.outname,
         logger,
         args.assembly,
         args.assembly_name,
@@ -547,11 +546,11 @@ def main():
         dgl_dataset = DGLAssemblyDataset(dataset)
         # initialize empty features vector
         nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
-        # if args.usekmer:
-        #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer), dim=1)
+        if args.rawfeatures:
+            nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_kmer, dataset.nodes_depths), dim=1)
         # if args.depth is not None:
         #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
-        if args.features is not None:  # append embs
+        elif args.features is not None:  # append embs
             node_embs = torch.FloatTensor(dataset.node_embs)
             nodes_data = torch.cat((nodes_data, node_embs), dim=1)
         dgl_dataset.graph.ndata["feat"] = nodes_data

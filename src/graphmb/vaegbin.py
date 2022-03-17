@@ -341,7 +341,7 @@ def run_gnn(dataset, args):
     # S.append(stats)
     S.append(scores[best_idx])
     print(f"best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]}")
-    with open(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_results.tsv", "w") as f:
+    with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers}l_{pname}_results.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
