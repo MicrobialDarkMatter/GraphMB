@@ -202,6 +202,7 @@ def train_graphsage(
     sample_weights=False,
     epsilon=0.1,
     evalepochs=1,
+    seed=0,
 ):
 
     nfeat = dataset.graph.ndata.pop("feat")
@@ -209,7 +210,7 @@ def train_graphsage(
     # Create PyTorch DataLoader for constructing blocks
     n_edges = dataset.graph.num_edges()
     train_seeds = torch.arange(n_edges)
-    set_seed()
+    set_seed(seed)
 
     # Create samplers
     if not sample_weights:
@@ -256,7 +257,7 @@ def train_graphsage(
         for step, (input_nodes, pos_graph, neg_graph, blocks) in enumerate(dataloader):
             batch_inputs = nfeat[input_nodes].to(device)
             d_step = time.time()
-            set_seed()
+            set_seed(seed)
             model.train()
             pos_graph = pos_graph.to(device)
             neg_graph = neg_graph.to(device)
@@ -305,12 +306,11 @@ def train_graphsage(
             logger.info("Early stopping {}".format(str(losses[-5:])))
             break
 
-        model.eval()
-        encoded = model.inference(dataset.graph, nfeat, device, batch_size, num_workers)
-
-        if cluster_features:
-            encoded = torch.cat((encoded, nfeat), axis=1)
         if dataset.assembly.ref_marker_sets is not None and epoch % evalepochs == 0:
+            model.eval()
+            encoded = model.inference(dataset.graph, nfeat, device, batch_size, num_workers)
+            if cluster_features:
+                encoded = torch.cat((encoded, nfeat), axis=1)
             best_hq, best_hq_epoch, kmeans_loss, clusters = cluster_eval(
                 model=model,
                 dataset=dataset.assembly,
@@ -325,6 +325,7 @@ def train_graphsage(
                 clusteringloss=False,
                 logger=logger,
                 use_marker_contigs_only=False,
+                seed=seed,
             )
 
             # compare clusters
@@ -346,7 +347,7 @@ def train_graphsage(
         toc = time.time()
         if epoch >= 5:
             avg += toc - tic
-        encoded = encoded.cpu().detach().numpy()
+        # = encoded.cpu().detach().numpy()
 
     last_train_embs = encoded
     last_model = model
@@ -366,9 +367,10 @@ def train_graphsage(
             pdb.set_trace()
     else:
         best_model = last_model
-    set_seed()
+    set_seed(seed)
     print("running best or last model again")
     best_train_embs = best_model.inference(dataset.graph, nfeat, device, batch_size, num_workers)
+
     best_train_embs = best_train_embs.detach()
     if cluster_features:
         best_train_embs = torch.cat((best_train_embs, nfeat), axis=1).detach()

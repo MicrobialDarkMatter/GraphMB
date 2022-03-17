@@ -384,15 +384,8 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
         plt.show()
 
 
-def cluster_embs(
-    node_embeddings,
-    node_ids,
-    clusteringalgo,
-    kclusters,
-    device="cpu",
-    node_lens=None,
-):
-
+def cluster_embs(node_embeddings, node_ids, clusteringalgo, kclusters, device="cpu", node_lens=None, seed=0):
+    set_seed(seed)
     if clusteringalgo == "vamb":
         it = vamb_cluster(
             node_embeddings, node_ids, cuda=(device == "cuda:0")
@@ -591,7 +584,7 @@ def calculate_bin_metrics(results, extra_metrics=False, logger=None):
             )
         )
     else:
-        logger.info(f"HQ: {len(hq_bins)}, MQ:, {len(mq_bins)}")
+        logger.info(f"HQ: {len(hq_bins)}, MQ:, {len(mq_bins)} Total bins: {len(results)}")
     return hq_bins, mq_bins
 
 
@@ -609,6 +602,7 @@ def cluster_eval(
     clusteringloss=False,
     logger=None,
     use_marker_contigs_only=False,
+    seed=0,
 ):
     """Cluster contig embs and eval with markers
 
@@ -642,7 +636,7 @@ def cluster_eval(
     kmeans_loss = None
     t0_cluster = time.time()
     model.eval()
-    set_seed()
+    set_seed(seed)
     if torch.is_tensor(logits):
         embeds = logits.detach().numpy()
     else:
@@ -662,6 +656,7 @@ def cluster_eval(
         # len(dataset.connected),
         k,
         device=device,
+        seed=seed,
     )
     contig_to_cluster = {}
     for bin in cluster_to_contig:
@@ -683,7 +678,7 @@ def cluster_eval(
         if len(hq) > best_hq:
             best_hq = len(hq)
             best_hq_epoch = epoch
-            logger.info("new best!!")
+            logger.info("new best checkpoint, saving checkpoint to best_model_hq.pkl")
             torch.save(model.state_dict(), os.path.join(dataset.cache_dir, "best_model_hq.pkl"))
 
         if clusteringloss:
