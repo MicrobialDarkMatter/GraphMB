@@ -260,9 +260,9 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
         if args.clusteringalgo is False:
             args.clusteringalgo = "kmeans"
         if not isinstance(final_embs, np.ndarray):
-            final_embs = final_embs.numpy()
             if args.cuda:
                 final_embs = final_embs.cpu()
+            final_embs = final_embs.numpy()
 
             # last_train_embs should already be detached and on cpu
         best_cluster_to_contig, best_centroids = cluster_embs(
@@ -528,8 +528,6 @@ def main():
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
 
-        dataset.read_features()
-
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
     # if args.no_edges:
@@ -537,14 +535,12 @@ def main():
     # elif args.read_edges or args.depth:
     # if args.edge_threshold is not None:
     #    dataset.filter_edges(int(args.edge_threshold))
-
+    dataset.read_features()
     if args.embs is not None:  # no training, just run post processing
         emb_file = args.embs
         with open(emb_file, "rb") as embsf:
             best_embs_dict = pickle.load(embsf)
             best_train_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
-    # else:
-    #
 
     # DGL specific code
     elif args.model_name == "sage_lstm":

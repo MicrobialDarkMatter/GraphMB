@@ -32,6 +32,8 @@ class TH:
         self.pos_weight = (s0 * s0 - S) / S
         self.norm = s0 * s0 / ((s0 * s0 - S) * 2.0)
 
+        self.decoder = Dense(self.model.features.shape[1], activation="relu")
+
     @tf.function
     def train(self, idx):
         with tf.GradientTape() as tape:
@@ -59,6 +61,10 @@ class TH:
         with tf.GradientTape() as tape:
             # breakpoint()
             node_hat = self.model(idx)
+            recon_features = self.decoder(node_hat)
+            assert recon_features.shape == self.model.features.shape
+            recon_loss = tf.keras.losses.MeanSquaredError()(self.model.features, recon_features)
+
             pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
             # y = tf.reshape(self.dense_adj, [-1])
             # y_hat = tf.reshape(pairwise_similarity, [-1])
@@ -92,6 +98,7 @@ class TH:
                 tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
             )
             loss = 0.5 * (pos_loss + neg_loss)
+            loss += recon_loss
 
             if self.all_different_idx is not None:
                 ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
@@ -108,7 +115,7 @@ class TH:
         tw = self.model.trainable_weights
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
-        return loss, same_loss, diff_loss
+        return loss, recon_loss, diff_loss
 
     @tf.function
     def train_unsupervised_vae(self, idx):

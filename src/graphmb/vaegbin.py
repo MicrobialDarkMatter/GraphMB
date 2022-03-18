@@ -293,10 +293,12 @@ def run_gnn(dataset, args, logger):
         if VAE:
             loss = th.train_unsupervised_vae(train_idx)
         else:
-            loss, same_loss, diff_loss = th.train_unsupervised(train_idx)
+            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
             # loss = th.train_unsupervised_v2(train_idx)
         loss = loss.numpy()
-        pbar.set_description(f"[{gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f} BestHQ={best_hq}")
+        pbar.set_description(
+            f"[{gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq}"
+        )
         # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
         if (e + 1) % RESULT_EVERY == 0:
             model.adj = adj
