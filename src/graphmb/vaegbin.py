@@ -238,7 +238,7 @@ def prepare_data_for_gnn(
     return X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx
 
 
-def run_gnn(dataset, args):
+def run_gnn(dataset, args, logger):
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
     hidden_units = args.hidden
@@ -251,22 +251,22 @@ def run_gnn(dataset, args):
     gmodel = name_to_model[gname.upper()]
     clustering = args.clusteringalgo
     k = args.kclusters
-    use_edge_weights = False
+    use_edge_weights = True
     use_disconnected = True
     cluster_markers_only = False
     decay = 0.5 ** (2.0 / epochs)
     concat_features = False  # True to improve HQ
     # TODO: move preprocessing of contrains and masks to another function
-    print("using edge weights", use_edge_weights)
-    print("using disconnected", use_disconnected)
-    print("concat features", concat_features)
-    print("cluster markers only", cluster_markers_only)
+    logger.info("using edge weights {}".format(use_edge_weights))
+    logger.info("using disconnected {}".format(use_disconnected))
+    logger.info("concat features {}".format(concat_features))
+    logger.info("cluster markers only {}".format(cluster_markers_only))
     # tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.rawfeatures
     )
-    print("feat dim", X.shape)
+    logger.info("feat dim {}".format(X.shape))
     pname = ""
 
     scores = []
@@ -286,6 +286,9 @@ def run_gnn(dataset, args):
     train_idx = np.arange(len(features))
     pbar = tqdm(range(epochs))
     scores = []
+    best_embs = None
+    best_model = None
+    best_hq = 0
     for e in pbar:
         if VAE:
             loss = th.train_unsupervised_vae(train_idx)
@@ -293,7 +296,7 @@ def run_gnn(dataset, args):
             loss, same_loss, diff_loss = th.train_unsupervised(train_idx)
             # loss = th.train_unsupervised_v2(train_idx)
         loss = loss.numpy()
-        pbar.set_description(f"[{gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f}")
+        pbar.set_description(f"[{gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f} BestHQ={best_hq}")
         # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
         if (e + 1) % RESULT_EVERY == 0:
             model.adj = adj
@@ -318,6 +321,10 @@ def run_gnn(dataset, args):
             scores.append(stats)
             all_cluster_labels.append(cluster_labels)
             model.adj = train_adj
+            if stats["hq"] > best_hq:
+                best_hq = stats["hq"]
+                best_model = model
+                best_embs = node_new_features
             # print('--- END ---')
     model.adj = adj
     node_new_features = model(None, training=False)
@@ -339,15 +346,15 @@ def run_gnn(dataset, args):
     )
     scores.append(stats)
     # get best stats:
-    if concat_features:  # use HQ
-        hqs = [s["hq"] for s in scores]
-        best_idx = np.argmax(hqs)
-    else:  # use F1
-        f1s = [s["f1"] for s in scores]
-        best_idx = np.argmax(f1s)
+    # if concat_features:  # use HQ
+    hqs = [s["hq"] for s in scores]
+    best_idx = np.argmax(hqs)
+    # else:  # use F1
+    #    f1s = [s["f1"] for s in scores]
+    #    best_idx = np.argmax(f1s)
     # S.append(stats)
     S.append(scores[best_idx])
-    print(f"best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]}")
+    logger.info(f"best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]}")
     with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers}l_{pname}_results.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):
@@ -359,4 +366,4 @@ def run_gnn(dataset, args):
     #    np.save(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_embs.npy", node_new_features)
     # plot_clusters(node_new_features, features.numpy(), cluster_labels, f"{gname} VAMB {nlayers}l {pname}")
     # res_table.show()
-    return node_new_features
+    return best_embs

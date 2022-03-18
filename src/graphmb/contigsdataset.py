@@ -6,11 +6,13 @@ import pickle
 import pdb
 import shutil
 import torch
-import dgl
 import numpy as np
 import networkx as nx
 import scipy.stats as stats
 import scipy.sparse
+
+os.environ["DGLBACKEND"] = "pytorch"
+import dgl
 from dgl.data import DGLDataset
 from dgl.data.utils import makedirs, save_info, load_info
 from graphmb.graph_functions import read_reads_mapping_sam, count_kmers, get_kmer_to_id

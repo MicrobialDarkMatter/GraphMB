@@ -523,11 +523,11 @@ def main():
     # dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
 
     vamb_emb_exists = os.path.exists(features_dir)
-    if args.vamb or not vamb_emb_exists:
-        logger.info("running VAMB...")
+
+    if not args.rawfeatures and (args.vamb or not vamb_emb_exists):
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
-    if not args.rawfeatures:
+
         dataset.read_features()
 
     # graph transformations
@@ -585,7 +585,7 @@ def main():
             last_train_embs = graph.ndata["feat"]
     elif args.model_name in ("sage", "gcn", "gat"):
         # TODO implement repeats and grid search
-        best_train_embs = vaegbin.run_gnn(dataset, args)
+        best_train_embs = vaegbin.run_gnn(dataset, args, logger)
 
     run_post_processing(
         best_train_embs, args, logger, dataset, device, dataset.label_to_node, dataset.node_to_label, seed=args.seed
