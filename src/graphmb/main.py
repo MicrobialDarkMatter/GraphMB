@@ -253,6 +253,7 @@ def write_bins(args, dataset, cluster_to_contig, logger):
 
 
 def run_post_processing(final_embs, args, logger, dataset, device, label_to_node, node_to_label, seed):
+    metrics = {}
     if "cluster" in args.post or "kmeans" in args.post:
         logger.info("clustering embs with {} ({})".format(args.clusteringalgo, args.kclusters))
         # train_embs = last_train_embs
@@ -302,6 +303,8 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
                     total_mq += 1
             logger.info("Total HQ {}".format(total_hq))
             logger.info("Total MQ {}".format(total_mq))
+            metrics["hq_bins"] = total_hq
+            metrics["mq_bins"] = total_mq
         contig_lens = {dataset.node_names[i]: dataset.node_lengths[i] for i in range(len(dataset.node_names))}
         if len(dataset.labels) > 1:
             evaluate_binning(best_cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
@@ -364,6 +367,7 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
         logger.info("writing best and last embs to {}".format(args.outdir))
         write_embs(final_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"))
         # write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"))
+    return metrics
 
 
 def main():
@@ -419,6 +423,7 @@ def main():
         help="Stop training if delta between last two losses is less than this",
         default="0.1",
     )
+    parser.add_argument("--nruns", type=int, help="Number of runs", default=1)
     # data processing
     parser.add_argument("--mincontig", type=int, help="Minimum size of input contigs", default=1000)
     parser.add_argument("--minbin", type=int, help="Minimum size of clusters in bp", default=200000)
@@ -539,56 +544,72 @@ def main():
     # if args.edge_threshold is not None:
     #    dataset.filter_edges(int(args.edge_threshold))
     dataset.read_features()
-    if args.embs is not None:  # no training, just run post processing
-        emb_file = args.embs
-        with open(emb_file, "rb") as embsf:
-            best_embs_dict = pickle.load(embsf)
-            best_train_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
+    metrics_per_run = []
+    for n in range(args.nruns):
+        logger.info("RUN {}".format(n))
+        if args.embs is not None:  # no training, just run post processing
+            emb_file = args.embs
+            with open(emb_file, "rb") as embsf:
+                best_embs_dict = pickle.load(embsf)
+                best_train_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
 
-    # DGL specific code
-    elif args.model_name == "sage_lstm":
-        dgl_dataset = DGLAssemblyDataset(dataset)
-        # initialize empty features vector
-        nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
-        if args.rawfeatures:
-            nodes_data = torch.cat(
-                (nodes_data, torch.FloatTensor(dataset.node_kmers), torch.FloatTensor(dataset.node_depths)), dim=1
-            )
-        # if args.depth is not None:
-        #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
-        elif args.features is not None:  # append embs
-            node_embs = torch.FloatTensor(dataset.node_embs)
-            nodes_data = torch.cat((nodes_data, node_embs), dim=1)
-        dgl_dataset.graph.ndata["feat"] = nodes_data
-        # dataset.graph.ndata["len"] = torch.Tensor(dataset.nodes_len)
+        # DGL specific code
+        elif args.model_name == "sage_lstm":
+            dgl_dataset = DGLAssemblyDataset(dataset)
+            # initialize empty features vector
+            nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
+            if args.rawfeatures:
+                nodes_data = torch.cat(
+                    (nodes_data, torch.FloatTensor(dataset.node_kmers), torch.FloatTensor(dataset.node_depths)), dim=1
+                )
+            # if args.depth is not None:
+            #    dataset.nodes_data = torch.cat((dataset.nodes_data, dataset.nodes_depths), dim=1)
+            elif args.features is not None:  # append embs
+                node_embs = torch.FloatTensor(dataset.node_embs)
+                nodes_data = torch.cat((nodes_data, node_embs), dim=1)
+            dgl_dataset.graph.ndata["feat"] = nodes_data
+            # dataset.graph.ndata["len"] = torch.Tensor(dataset.nodes_len)
 
-        # All nodes have a self loop
-        # dataset.graph = dgl.remove_self_loop(dataset.graph)
-        # diff_edges = len(dataset.graph.edata["weight"])
-        # dataset.graph = dgl.add_self_loop(dataset.graph)
+            # All nodes have a self loop
+            # dataset.graph = dgl.remove_self_loop(dataset.graph)
+            # diff_edges = len(dataset.graph.edata["weight"])
+            # dataset.graph = dgl.add_self_loop(dataset.graph)
 
-        # max_weight = dataset.graph.edata["weight"].max().item()
-        # dataset.graph.edata["weight"][diff_edges:] = max_weight
-        dgl_dataset.graph.edata["weight"] = dgl_dataset.graph.edata["weight"].float()
-        graph = dgl_dataset[0]
-        logger.info(graph)
-        graph = graph.to(device)
+            # max_weight = dataset.graph.edata["weight"].max().item()
+            # dataset.graph.edata["weight"][diff_edges:] = max_weight
+            dgl_dataset.graph.edata["weight"] = dgl_dataset.graph.edata["weight"].float()
+            graph = dgl_dataset[0]
+            logger.info(graph)
+            graph = graph.to(device)
 
-        model = None
-        if args.embs is None and args.read_embs is False:
-            best_train_embs, model, last_train_embs, last_model = run_graphmb(dgl_dataset, args, device, logger)
-            emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
+            model = None
+            if args.embs is None and args.read_embs is False:
+                best_train_embs, model, last_train_embs, last_model = run_graphmb(dgl_dataset, args, device, logger)
+                emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
 
-        if model is None:
-            best_train_embs = graph.ndata["feat"]
-            last_train_embs = graph.ndata["feat"]
-    elif args.model_name in ("sage", "gcn", "gat"):
-        # TODO implement repeats and grid search
-        best_train_embs = vaegbin.run_gnn(dataset, args, logger)
+            if model is None:
+                best_train_embs = graph.ndata["feat"]
+                last_train_embs = graph.ndata["feat"]
+        elif args.model_name in ("sage", "gcn", "gat"):
+            # TODO implement repeats and grid search
+            best_train_embs = vaegbin.run_gnn(dataset, args, logger)
 
-    run_post_processing(
-        best_train_embs, args, logger, dataset, device, dataset.label_to_node, dataset.node_to_label, seed=args.seed
-    )
+        metrics = run_post_processing(
+            best_train_embs,
+            args,
+            logger,
+            dataset,
+            device,
+            dataset.label_to_node,
+            dataset.node_to_label,
+            seed=args.seed,
+        )
+        metrics_per_run.append(metrics)
+
+    metrics_names = metrics_per_run[0].keys()
+    for mname in metrics_names:
+        values = [m[mname] for m in metrics_per_run]
+        logger.info("{}: {} {}".format(mname, np.mean(values), np.std(values)))
 
 
 if __name__ == "__main__":
