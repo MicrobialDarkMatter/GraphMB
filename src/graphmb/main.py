@@ -201,7 +201,7 @@ def run_graphmb(dataset, args, device, logger):
         lr=args.lr,
         k=args.kclusters,
         clusteringalgo=args.clusteringalgo,
-        cluster_features=False,
+        cluster_features=args.concat_features,
         print_interval=args.print,
         loss_weights=(not args.no_loss_weights),
         sample_weights=(not args.no_sample_weights),
@@ -408,6 +408,9 @@ def main():
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--rawfeatures", help="Use raw features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
+    parser.add_argument(
+        "--concat_features", help="Concat learned and original features before clustering", action="store_true"
+    )
     parser.add_argument("--no_loss_weights", action="store_false", help="Using edge weights for loss (positive only)")
     parser.add_argument("--no_sample_weights", action="store_false", help="Using edge weights to sample negatives")
     parser.add_argument(
