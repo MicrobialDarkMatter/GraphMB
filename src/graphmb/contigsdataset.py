@@ -305,10 +305,11 @@ class AssemblyDataset:
 
     def read_scgs(self):
         # Load contig marker genes (Bacteria list)
-        if self.scgfile is not None:
+        scg_path = os.path.join(self.data_dir, self.scgfile)
+        if scg_path is not None:
             # logging.info("loading checkm results")
             ref_sets = read_marker_gene_sets(BACTERIA_MARKERS)
-            contig_markers = read_contig_genes(self.scgfile)
+            contig_markers = read_contig_genes(scg_path)
             self.ref_marker_sets = ref_sets
             self.contig_markers = contig_markers
             marker_counts = get_markers_to_contigs(ref_sets, contig_markers)
