@@ -605,6 +605,8 @@ def main():
             seed=args.seed,
         )
         metrics_per_run.append(metrics)
+        args.seed += 1
+        set_seed(args.seed)
 
     metrics_names = metrics_per_run[0].keys()
     for mname in metrics_names:
