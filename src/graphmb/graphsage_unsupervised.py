@@ -335,15 +335,6 @@ def train_graphsage(
                     new_assignments[dataset.assembly.node_names.index(contig)] = i
 
             old_assignments = new_assignments.copy()
-        else:
-            logger.info(
-                "Epoch {:05d} | Best HQ: {} | Best epoch {} | Total loss {:.4f}".format(
-                    epoch,
-                    best_hq,
-                    best_hq_epoch,
-                    loss.detach(),
-                )
-            )
         toc = time.time()
         if epoch >= 5:
             avg += toc - tic

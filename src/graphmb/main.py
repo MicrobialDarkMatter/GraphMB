@@ -188,7 +188,8 @@ def run_graphmb(dataset, args, device, logger):
         results = evaluate_contig_sets(
             dataset.assembly.ref_marker_sets, dataset.assembly.contig_markers, pre_cluster_to_contig
         )
-        calculate_bin_metrics(results, logger=logger)
+        metrics = calculate_bin_metrics(results, logger=logger)
+        logger.info(f"HQ: {len(metrics['hq'])}, MQ:, {len(metrics['mq'])} Total bins: {len(metrics['total'])}")
 
     best_train_embs, best_model, last_train_embs, last_model = train_graphsage(
         dataset,

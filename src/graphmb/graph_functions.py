@@ -568,24 +568,17 @@ def calculate_bin_metrics(results, extra_metrics=False, logger=None):
     # TODO zero division
     hq_bins = [bin for bin in results if results[bin]["comp"] >= 90 and results[bin]["cont"] < 5]
     mq_bins = [bin for bin in results if results[bin]["comp"] >= 50 and results[bin]["cont"] < 10]
+    metrics = {"hq": hq_bins, "mq": mq_bins, "total": results}
     if extra_metrics:
-        avg_comp = sum([results[bin]["comp"] for bin in results]) / len(results)
-        avg_cont = sum([results[bin]["cont"] for bin in results]) / len(results)
+        metrics["avg_comp"] = sum([results[bin]["comp"] for bin in results]) / len(results)
+        metrics["avg_cont"] = sum([results[bin]["cont"] for bin in results]) / len(results)
         cont_comp50 = [results[bin]["cont"] for bin in results if results[bin]["comp"] > 50]
-        cont_comp50 = sum(cont_comp50) / len(cont_comp50)
+        metrics["cont_comp50"] = sum(cont_comp50) / len(cont_comp50)
         cont_comp90 = [results[bin]["cont"] for bin in results if results[bin]["comp"] > 90]
-        cont_comp90 = sum(cont_comp90) / len(cont_comp90)
+        metrics["cont_comp90"] = sum(cont_comp90) / len(cont_comp90)
         comp_cont5 = [results[bin]["comp"] for bin in results if results[bin]["cont"] < 5]
-        comp_cont5 = sum(comp_cont5) / len(comp_cont5)
-        logger.info("HQ:", hq_bins, "avg comp", avg_comp, "avg cont", avg_cont, "avg cont when comp>50", cont_comp50)
-        logger.info(
-            "HQ {}, avg comp {:.2f}, avg cont {:.2f}, cont when comp>50 {:.2f}, cont when comp>90 {:.2f}, comp when cont<5 {:.2f}".format(
-                hq_bins, avg_comp, avg_cont, cont_comp50, cont_comp90, comp_cont5
-            )
-        )
-    else:
-        logger.info(f"HQ: {len(hq_bins)}, MQ:, {len(mq_bins)} Total bins: {len(results)}")
-    return hq_bins, mq_bins
+        metrics["comp_cont5"] = sum(comp_cont5) / len(comp_cont5)
+    return metrics
 
 
 def cluster_eval(
@@ -671,12 +664,20 @@ def cluster_eval(
         # )
         calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
     if dataset.ref_marker_sets is not None:
-
         results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
-        hq, mq = calculate_bin_metrics(results, logger=logger)
+        metrics = calculate_bin_metrics(results, logger=logger)
+        logger.info(
+            f"HQ: {len(metrics['hq'])}, MQ:, {len(metrics['mq'])} Total bins: {len(metrics['total'])} Best HQ: {best_hq} Best HQ epoch: {best_hq_epoch}"
+        )
+        # logger.info("HQ:", hq_bins, "avg comp", avg_comp, "avg cont", avg_cont, "avg cont when comp>50", cont_comp50)
+        # logger.info(
+        #    "HQ {}, avg comp {:.2f}, avg cont {:.2f}, cont when comp>50 {:.2f}, cont when comp>90 {:.2f}, comp when cont<5 {:.2f}".format(
+        #        hq_bins, avg_comp, avg_cont, cont_comp50, cont_comp90, comp_cont5
+        #    )
+        # )
         # print("clustering time:", time.time() - t0_cluster, embeds.shape)
-        if len(hq) > best_hq:
-            best_hq = len(hq)
+        if len(metrics["hq"]) > best_hq:
+            best_hq = len(metrics["hq"])
             best_hq_epoch = epoch
             logger.info("new best checkpoint, saving checkpoint to best_model_hq.pkl")
             torch.save(model.state_dict(), os.path.join(dataset.cache_dir, "best_model_hq.pkl"))
@@ -688,7 +689,7 @@ def cluster_eval(
             # get IDs of contigs of HQ bins
             hq_node_ids = [
                 dataset.node_names.index(n)
-                for bin in hq
+                for bin in metrics["hq"]
                 for n in cluster_to_contig[bin]
                 # if sum(dataset.contig_markers[n].values()) > 0
             ]
