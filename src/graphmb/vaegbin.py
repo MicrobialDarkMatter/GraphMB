@@ -255,7 +255,7 @@ def run_gnn(dataset, args, logger):
     use_disconnected = True
     cluster_markers_only = False
     decay = 0.5 ** (2.0 / epochs)
-    concat_features = False  # True to improve HQ
+    concat_features = args.concat_features  # True to improve HQ
     # TODO: move preprocessing of contrains and masks to another function
     logger.info("using edge weights {}".format(use_edge_weights))
     logger.info("using disconnected {}".format(use_disconnected))
