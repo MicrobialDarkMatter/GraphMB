@@ -294,10 +294,10 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
                 if results[binid]["comp"] > 90 and results[binid]["cont"] < 5:
                     contig_labels = [dataset.node_to_label.get(node, 0) for node in best_cluster_to_contig[binid]]
                     labels_count = Counter(contig_labels)
-                    logger.info(
-                        f"{binid}, {round(results[binid]['comp'],4)}, {round(results[binid]['cont'],4)}, "
-                        f"{len(best_cluster_to_contig[binid])} {labels_count}"
-                    )
+                    # logger.debug(
+                    #    f"{binid}, {round(results[binid]['comp'],4)}, {round(results[binid]['cont'],4)}, "
+                    #    f"{len(best_cluster_to_contig[binid])} {labels_count}"
+                    # )
                     hq_bins.add(binid)
                     total_hq += 1
                 if results[binid]["comp"] > 50 and results[binid]["cont"] < 10:
@@ -592,7 +592,6 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         elif args.model_name in ("sage", "gcn", "gat"):
-            # TODO implement repeats and grid search
             best_train_embs = vaegbin.run_gnn(dataset, args, logger)
 
         metrics = run_post_processing(
@@ -612,7 +611,7 @@ def main():
     metrics_names = metrics_per_run[0].keys()
     for mname in metrics_names:
         values = [m[mname] for m in metrics_per_run]
-        logger.info("{}: {} {}".format(mname, np.mean(values), np.std(values)))
+        logger.info("{}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
 
 
 if __name__ == "__main__":
