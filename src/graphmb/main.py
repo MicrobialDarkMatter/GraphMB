@@ -591,7 +591,7 @@ def main():
             if model is None:
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
-        elif args.model_name in ("sage", "gcn", "gat"):
+        elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae"):
             best_train_embs = vaegbin.run_gnn(dataset, args, logger)
 
         metrics = run_post_processing(

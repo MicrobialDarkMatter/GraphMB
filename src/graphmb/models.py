@@ -17,6 +17,7 @@ class TH:
         lambda_vae=0.1,
         all_different_idx=None,
         all_same_idx=None,
+        use_ae=False,
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -31,8 +32,10 @@ class TH:
         self.all_same_idx = all_same_idx
         self.pos_weight = (s0 * s0 - S) / S
         self.norm = s0 * s0 / ((s0 * s0 - S) * 2.0)
-
-        self.decoder = Dense(self.model.features.shape[1], activation="relu")
+        self.use_ae = use_ae
+        if self.use_ae:
+            self.encoder = Dense(64, activation="relu")
+            self.decoder = Dense(self.model.features.shape[1], activation="relu")
 
     @tf.function
     def train(self, idx):
@@ -60,15 +63,20 @@ class TH:
     def train_unsupervised(self, idx):
         with tf.GradientTape() as tape:
             # breakpoint()
+            if self.use_ae:
+                encoded_features = self.encoder(self.model.features)
+                self.model.features = encoded_features
             node_hat = self.model(idx)
-            recon_features = self.decoder(node_hat)
-            assert recon_features.shape == self.model.features.shape
-            recon_loss = tf.keras.losses.MeanSquaredError()(self.model.features, recon_features)
-
+            if self.use_ae:
+                recon_features = self.decoder(node_hat)
+                assert recon_features.shape == self.model.features.shape
+                recon_loss = tf.keras.losses.MeanSquaredError()(self.model.features, recon_features)
+            else:
+                recon_loss = 0
             pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
             # y = tf.reshape(self.dense_adj, [-1])
             # y_hat = tf.reshape(pairwise_similarity, [-1])
-            ##loss = tf.nn.weighted_cross_entropy_with_logits(logits=y_hat, labels=y, pos_weight=self.pos_weight)
+            # loss = tf.nn.weighted_cross_entropy_with_logits(logits=y_hat, labels=y, pos_weight=self.pos_weight)
             # loss = self.norm * tf.reduce_mean(loss)
 
             diff_loss = 0

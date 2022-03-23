@@ -248,7 +248,7 @@ def run_gnn(dataset, args, logger):
     nlayers = args.layers
     VAE = False
     gname = args.model_name
-    gmodel = name_to_model[gname.upper()]
+    gmodel = name_to_model[gname.split("_")[0].upper()]
     clustering = args.clusteringalgo
     k = args.kclusters
     use_edge_weights = True
@@ -256,6 +256,7 @@ def run_gnn(dataset, args, logger):
     cluster_markers_only = False
     decay = 0.5 ** (2.0 / epochs)
     concat_features = args.concat_features  # True to improve HQ
+    use_ae = gname.endswith("_ae")
     # TODO: move preprocessing of contrains and masks to another function
     logger.info("using edge weights {}".format(use_edge_weights))
     logger.info("using disconnected {}".format(use_disconnected))
@@ -282,7 +283,7 @@ def run_gnn(dataset, args, logger):
         layers=nlayers,
         conv_last=False,
     )  # , use_bn=True, use_vae=False)
-    th = TH(model, lr=lr, lambda_vae=0.01, all_different_idx=neg_pair_idx, all_same_idx=pos_pair_idx)
+    th = TH(model, lr=lr, lambda_vae=0.01, all_different_idx=neg_pair_idx, all_same_idx=pos_pair_idx, use_ae=use_ae,)
     train_idx = np.arange(len(features))
     pbar = tqdm(range(epochs))
     scores = []
