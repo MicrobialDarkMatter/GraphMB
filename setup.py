@@ -26,7 +26,7 @@ setup(
         "dgl==0.6.1",
         "tqdm==4.61.2",
         "pandas==1.3.5",
-        "tensorflow==2.7.0",
+        "tensorflow==2.4.0",
         "matplotlib==3.5.1",
         "rich==11.0.0",
     ],
