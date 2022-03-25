@@ -11,13 +11,7 @@ from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 class TH:
     def __init__(
-        self,
-        model,
-        lr=0.01,
-        lambda_vae=0.1,
-        all_different_idx=None,
-        all_same_idx=None,
-        use_ae=False,
+        self, model, lr=0.01, lambda_vae=0.1, all_different_idx=None, all_same_idx=None, use_ae=False, latentdim=32
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -34,7 +28,8 @@ class TH:
         self.norm = s0 * s0 / ((s0 * s0 - S) * 2.0)
         self.use_ae = use_ae
         if self.use_ae:
-            self.encoder = Dense(64, activation="relu")
+            self.features = self.model.features
+            self.encoder = Dense(latentdim, activation="relu")
             self.decoder = Dense(self.model.features.shape[1], activation="relu")
 
     @tf.function
@@ -62,15 +57,16 @@ class TH:
     @tf.function
     def train_unsupervised(self, idx):
         with tf.GradientTape() as tape:
+            #
             # breakpoint()
             if self.use_ae:
-                encoded_features = self.encoder(self.model.features)
+                encoded_features = self.encoder(self.features)
                 self.model.features = encoded_features
             node_hat = self.model(idx)
             if self.use_ae:
                 recon_features = self.decoder(node_hat)
-                assert recon_features.shape == self.model.features.shape
-                recon_loss = tf.keras.losses.MeanSquaredError()(self.model.features, recon_features)
+                # assert recon_features.shape == self.features.shape
+                recon_loss = tf.keras.losses.MeanSquaredError()(self.features, recon_features)
             else:
                 recon_loss = 0
             pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
@@ -210,6 +206,7 @@ class GCN(Model):
     def __init__(
         self,
         features,
+        input_dim,
         labels,
         adj,
         n_labels=None,
@@ -227,7 +224,7 @@ class GCN(Model):
         self.adj_size = adj.dense_shape.numpy()
 
         adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
+        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
 
         x = node_in
         # first gcn layer
@@ -254,7 +251,7 @@ class GCN(Model):
                 x = Dense(n_labels, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
+        self.model.build([(features.shape[0], input_dim), tuple(self.adj_size)])
 
     def call(self, idx, training=True):
         output = self.model((self.features, self.adj), training=training)
@@ -312,7 +309,9 @@ class GCNLAF(Model):
 
 
 class GAT(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
+    def __init__(
+        self, features, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
+    ):
         super(GAT, self).__init__()
         self.features = features
         self.labels = labels
@@ -320,7 +319,7 @@ class GAT(Model):
         self.adj_size = adj.dense_shape.numpy()
 
         adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
+        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
 
         x = node_in
         for l in range(layers):
@@ -338,7 +337,7 @@ class GAT(Model):
             x = Dense(n_labels, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
+        self.model.build([(self.features.shape[0], input_dim), tuple(self.adj_size)])
 
     def call(self, idx, training=True):
         output = self.model((self.features, self.adj), training=training)
@@ -399,7 +398,9 @@ class GATLAF(Model):
 
 
 class SAGE(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
+    def __init__(
+        self, features, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
+    ):
         super(SAGE, self).__init__()
         self.features = features
         self.labels = labels
@@ -407,7 +408,7 @@ class SAGE(Model):
         self.adj_size = adj.dense_shape.numpy()
 
         adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
+        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
 
         x = node_in
         # first sage layer
@@ -432,7 +433,7 @@ class SAGE(Model):
             x = Dense(n_labels, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
+        self.model.build([(self.features.shape[0], input_dim), tuple(self.adj_size)])
 
     def call(self, idx, training=True):
         output = self.model((self.features, self.adj), training=training)
