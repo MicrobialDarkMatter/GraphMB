@@ -13,7 +13,7 @@ from rich.table import Table
 from scipy.sparse import csr_matrix, diags
 from vamb.cluster import cluster as vamb_cluster
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH
-
+from graph_functions import set_seed
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
 
@@ -232,13 +232,14 @@ def prepare_data_for_gnn(
 
     else:
         train_adj = adj
-    neg_pair_idx = None
+    # neg_pair_idx = None
     pos_pair_idx = None
     print("train len edges:", train_adj.indices.shape[0])
-    return X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx
+    return X, adj, train_adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
 
 
 def run_gnn(dataset, args, logger):
+    set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
     hidden_units = args.hidden
@@ -262,20 +263,30 @@ def run_gnn(dataset, args, logger):
     logger.info("using disconnected {}".format(use_disconnected))
     logger.info("concat features {}".format(concat_features))
     logger.info("cluster markers only {}".format(cluster_markers_only))
+
     # tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.rawfeatures
     )
     logger.info("feat dim {}".format(X.shape))
+    logger.info("SCG neg pairs {}".format(neg_pair_idx.shape))
     pname = ""
 
     scores = []
     all_cluster_labels = []
     features = tf.constant(X.astype(np.float32))
+    if not use_ae:
+        input_dim = X.shape[1]
+    else:
+        input_dim = output_dim
+    logger.info(f"input dim {input_dim}")
+    logger.info(f"output clustering dim {output_dim}")
     S = []
+    tf.config.run_functions_eagerly(True)
     model = gmodel(
         features=features,
+        input_dim=input_dim,
         labels=None,
         adj=train_adj,
         n_labels=output_dim,
@@ -283,7 +294,15 @@ def run_gnn(dataset, args, logger):
         layers=nlayers,
         conv_last=False,
     )  # , use_bn=True, use_vae=False)
-    th = TH(model, lr=lr, lambda_vae=0.01, all_different_idx=neg_pair_idx, all_same_idx=pos_pair_idx, use_ae=use_ae,)
+    th = TH(
+        model,
+        lr=lr,
+        lambda_vae=0.01,
+        all_different_idx=neg_pair_idx,
+        all_same_idx=pos_pair_idx,
+        use_ae=use_ae,
+        latentdim=output_dim,
+    )
     train_idx = np.arange(len(features))
     pbar = tqdm(range(epochs))
     scores = []

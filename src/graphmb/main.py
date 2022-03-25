@@ -332,6 +332,7 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
             # invert cluster_to_contig
             logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
             with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
+                f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
                 for c in best_contig_to_bin:
                     f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
 
@@ -592,6 +593,11 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae"):
+            if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
+                dataset.neg_pairs_idx = np.load(f"{dataset.cache_dir}/all_different.npy")
+            else:
+                dataset.get_all_different_idx()
+                np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
             best_train_embs = vaegbin.run_gnn(dataset, args, logger)
 
         metrics = run_post_processing(
