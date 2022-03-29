@@ -33,6 +33,7 @@ from graphmb.graph_functions import (
     draw_nx_graph,
     set_seed,
 )
+from amber_eval import amber_eval
 import vaegbin
 from graphmb.version import __version__
 
@@ -547,6 +548,7 @@ def main():
     #    dataset.filter_edges(int(args.edge_threshold))
     dataset.read_features()
     metrics_per_run = []
+    amber_metrics_per_run = []
     for n in range(args.nruns):
         logger.info("RUN {}".format(n))
         if args.embs is not None:  # no training, just run post processing
@@ -610,6 +612,16 @@ def main():
             dataset.node_to_label,
             seed=args.seed,
         )
+
+        if args.labels is not None:
+            amber_metrics, bin_counts = amber_eval(
+                args.labels, f"{args.outdir}/{args.outname}_best_contig2bin.tsv", ["graphmb"]
+            )
+            hq = bin_counts["> 90% completeness"][1]
+            mq = bin_counts["> 50% completeness"][1]
+            amber_metrics["hq"] = hq
+            amber_metrics["mq"] = mq
+            amber_metrics_per_run.append(amber_metrics)
         metrics_per_run.append(metrics)
         args.seed += 1
         set_seed(args.seed)
@@ -618,6 +630,12 @@ def main():
     for mname in metrics_names:
         values = [m[mname] for m in metrics_per_run]
         logger.info("{}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
+    if args.labels is not None:
+        # amber_metrics_names = amber_metrics_per_run[0].keys()
+        amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "hq", "mq"]
+        for mname in amber_metrics_names:
+            values = [m[mname] for m in amber_metrics_per_run]
+            logger.info("{}: {:.4f} {:.4f}".format(mname, np.mean(values), np.std(values)))
 
 
 if __name__ == "__main__":
