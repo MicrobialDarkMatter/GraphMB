@@ -264,7 +264,7 @@ def run_gnn(dataset, args, logger):
     logger.info("concat features {}".format(concat_features))
     logger.info("cluster markers only {}".format(cluster_markers_only))
 
-    # tf.config.experimental_run_functions_eagerly(True)
+    tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.rawfeatures
@@ -283,7 +283,7 @@ def run_gnn(dataset, args, logger):
     logger.info(f"input dim {input_dim}")
     logger.info(f"output clustering dim {output_dim}")
     S = []
-    tf.config.run_functions_eagerly(True)
+
     model = gmodel(
         features=features,
         input_dim=input_dim,
@@ -313,7 +313,7 @@ def run_gnn(dataset, args, logger):
         if VAE:
             loss = th.train_unsupervised_vae(train_idx)
         else:
-            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
+            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx, gnn_alpha=args.gnn_alpha)
             # loss = th.train_unsupervised_v2(train_idx)
         loss = loss.numpy()
         pbar.set_description(
