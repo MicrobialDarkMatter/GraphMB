@@ -265,7 +265,6 @@ def run_gnn(dataset, args, logger):
     decay = 0.5 ** (2.0 / epochs)
     concat_features = args.concat_features  # True to improve HQ
     use_ae = gname.endswith("_ae")
-    # TODO: move preprocessing of contrains and masks to another function
     logger.info("using edge weights {}".format(use_edge_weights))
     logger.info("using disconnected {}".format(use_disconnected))
     logger.info("concat features {}".format(concat_features))
@@ -320,7 +319,7 @@ def run_gnn(dataset, args, logger):
         if VAE:
             loss = th.train_unsupervised_vae(train_idx)
         else:
-            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx, gnn_alpha=args.gnn_alpha)
+            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx, gnn_alpha=float(args.gnn_alpha))
             # loss = th.train_unsupervised_v2(train_idx)
         loss = loss.numpy()
         pbar.set_description(

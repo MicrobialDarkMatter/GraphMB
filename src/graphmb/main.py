@@ -34,7 +34,7 @@ from graphmb.graph_functions import (
     draw_nx_graph,
     set_seed,
 )
-from amber_eval import amber_eval
+
 import vaegbin
 from graphmb.version import __version__
 
@@ -618,6 +618,7 @@ def main():
         )
 
         if args.labels is not None:
+            from amber_eval import amber_eval
             amber_metrics, bin_counts = amber_eval(
                 args.labels, f"{args.outdir}/{args.outname}_best_contig2bin.tsv", ["graphmb"]
             )
