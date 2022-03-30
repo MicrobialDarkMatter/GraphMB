@@ -81,13 +81,20 @@ def compute_hq(reference_markers, contig_genes, node_names, node_labels, comp_th
 
 
 def compute_clusters_and_stats(
-    X, node_names, reference_markers, contig_genes, node_to_gt_idx_label, gt_idx_label_to_node, k=0, clustering="vamb"
+    X,
+    node_names,
+    reference_markers,
+    contig_genes,
+    node_to_gt_idx_label,
+    gt_idx_label_to_node,
+    k=0,
+    clustering="vamb",
+    cuda=False,
 ):
     if clustering == "vamb":
-        physical_devices = tf.config.list_physical_devices("GPU")
-        use_cuda = len(physical_devices) > 0
-        best_cluster_to_contig = {i: c for (i, (n, c)) in enumerate(vamb_cluster(X.astype(np.float32), node_names))}
-
+        best_cluster_to_contig = {
+            i: c for (i, (n, c)) in enumerate(vamb_cluster(X.astype(np.float32), node_names, cuda=cuda))
+        }
         best_contig_to_bin = {}
         for b in best_cluster_to_contig:
             for contig in best_cluster_to_contig[b]:
@@ -264,7 +271,7 @@ def run_gnn(dataset, args, logger):
     logger.info("concat features {}".format(concat_features))
     logger.info("cluster markers only {}".format(cluster_markers_only))
 
-    tf.config.experimental_run_functions_eagerly(True)
+    # tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.rawfeatures
@@ -337,6 +344,7 @@ def run_gnn(dataset, args, logger):
                 dataset.label_to_node,
                 clustering=clustering,
                 k=k,
+                cuda=args.cuda,
             )
             # print(f'--- EPOCH {e:d} ---')
             # print(stats)
@@ -365,6 +373,7 @@ def run_gnn(dataset, args, logger):
         dataset.label_to_node,
         clustering=clustering,
         k=k,
+        cuda=args.cuda,
     )
     scores.append(stats)
     # get best stats:
