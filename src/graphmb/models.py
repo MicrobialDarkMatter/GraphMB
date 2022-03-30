@@ -17,7 +17,7 @@ class TH:
         # self.opt = SGD(learning_rate=lr)
         self.lambda_vae = lambda_vae
         self.model = model
-        self.dense_adj = tf.sparse.to_dense(self.model.adj)
+        # self.dense_adj = tf.sparse.to_dense(self.model.adj)
         self.adj_shape = self.model.adj.dense_shape
         S = tf.cast(tf.reduce_sum(self.model.adj.values), tf.float32)
         s0 = tf.cast(self.adj_shape[0], tf.float32)
@@ -31,28 +31,6 @@ class TH:
             self.features = self.model.features
             self.encoder = Dense(latentdim, activation="relu")
             self.decoder = Dense(self.model.features.shape[1], activation="relu")
-
-    @tf.function
-    def train(self, idx):
-        with tf.GradientTape() as tape:
-            node_features = self.model(idx)
-            # Not ideal to this
-            node_pairwise = tf.matmul(node_features, node_features, transpose_b=True)
-
-            # Gather only the non zero indices
-            non_zero_node_pairwise = tf.gather_nd(node_pairwise, self.model.adj.indices)
-
-            logits = tf.gather(self.model.labels, idx)
-
-            labels = tf.where(self.model.adj.indices > 0.5, tf.ones_like(logits), tf.zeros_like(logits))
-
-            loss = tf.keras.losses.binary_crossentropy(labels, logits, from_logits=True)
-            # loss = tf.nn.weighted_cross_entropy_with_logits(tf.ones_like(logits), logits, self.model.adj.values)
-            loss = tf.reduce_mean(loss)
-        tw = self.model.trainable_weights
-        grads = tape.gradient(loss, tw)
-        self.opt.apply_gradients(zip(grads, tw))
-        return loss
 
     @tf.function
     def train_unsupervised(self, idx, gnn_alpha=1):
@@ -70,10 +48,6 @@ class TH:
             else:
                 recon_loss = 0
             pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
-            # y = tf.reshape(self.dense_adj, [-1])
-            # y_hat = tf.reshape(pairwise_similarity, [-1])
-            # loss = tf.nn.weighted_cross_entropy_with_logits(logits=y_hat, labels=y, pos_weight=self.pos_weight)
-            # loss = self.norm * tf.reduce_mean(loss)
 
             diff_loss = 0
             same_loss = 0
@@ -125,78 +99,6 @@ class TH:
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
         return gnn_loss, recon_loss, diff_loss
-
-    @tf.function
-    def train_unsupervised_vae(self, idx):
-        with tf.GradientTape() as tape:
-            node_hat = self.model(idx)
-            n_nodes = tf.cast(tf.shape(idx)[0], tf.float32)
-
-            mu, log_std = tf.split(node_hat, 2, axis=1)
-            std = tf.math.exp(log_std)
-            eps = tf.random.normal(tf.shape(std))
-            z = eps * std + mu
-            kl = 0.5 / n_nodes * tf.reduce_mean(tf.reduce_sum(1.0 + 2.0 * log_std - mu ** 2 - std ** 2, axis=1))
-
-            pairwise_similarity = tf.matmul(z, z, transpose_b=True)
-            y = tf.reshape(self.dense_adj, [-1])
-            y_hat = tf.reshape(pairwise_similarity, [-1])
-
-            loss = self.norm * tf.reduce_mean(
-                tf.nn.weighted_cross_entropy_with_logits(logits=y_hat, labels=y, pos_weight=self.pos_weight)
-            )
-
-            loss = loss - self.lambda_vae * kl
-        tw = self.model.trainable_weights
-        grads = tape.gradient(loss, tw)
-        self.opt.apply_gradients(zip(grads, tw))
-        return loss
-
-    @tf.function
-    def train_unsupervised_v2(self, idx):
-        with tf.GradientTape() as tape:
-            node_hat = self.model(idx)
-            pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
-            positive_pairwise = tf.gather_nd(pairwise_similarity, self.model.adj.indices)
-            pos_weights = self.model.adj.values
-            pos_logits = tf.reshape(positive_pairwise, [-1])
-            pos_loss = tf.nn.sigmoid_cross_entropy_with_logits(tf.ones_like(pos_logits), pos_logits)
-            pos_loss = tf.reduce_sum(pos_weights * pos_loss) / tf.reduce_sum(pos_weights)
-            # pos_loss = tf.reduce_mean(pos_loss)
-
-            diag = tf.reduce_sum(node_hat * node_hat, axis=-1)
-            diag_loss = tf.nn.sigmoid_cross_entropy_with_logits(tf.ones_like(diag), diag)
-            diag_loss = tf.reduce_mean(diag_loss)
-
-            neg_idx = self.all_different_idx
-            negative_pairwise = tf.gather_nd(pairwise_similarity, neg_idx)
-            neg_logits = tf.reshape(negative_pairwise, [-1])
-            neg_loss = tf.nn.sigmoid_cross_entropy_with_logits(tf.zeros_like(neg_logits), neg_logits)
-            neg_loss = tf.reduce_mean(neg_loss)
-
-            # neg_idx = tf.random.uniform(shape=(50*len(self.model.adj.indices),), minval=0, \
-            #                            maxval=self.adj_shape[0]*self.adj_shape[1]-1, dtype=tf.int64)
-            # neg_idx_row = tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32)
-            # neg_idx_row = tf.cast(neg_idx_row, tf.int64)[:, None]
-            # neg_idx_col = tf.cast((neg_idx % self.adj_shape[1]), tf.int64)[:,None]
-            # neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
-            # negative_pairwise = tf.gather_nd(pairwise_similarity, neg_idx)
-            # neg_logits = tf.reshape(negative_pairwise, [-1])
-            # neg_loss = tf.nn.sigmoid_cross_entropy_with_logits(tf.zeros_like(neg_logits), neg_logits)
-            # neg_loss = tf.reduce_mean(neg_loss)
-
-            # neg_idx = self.all_different_idx
-            # n1 = tf.gather(node_hat, neg_idx[:,0])
-            # n2 = tf.gather(node_hat, neg_idx[:,1])
-            # neg_dists = tf.math.exp(-0.5*tf.reduce_sum((n1-n2)**2, axis=-1))
-            # neg_dists = tf.reduce_mean(neg_dists)
-
-            # loss = pos_loss - diag_loss + neg_loss
-            loss = pos_loss + diag_loss + neg_loss
-        tw = self.model.trainable_weights
-        grads = tape.gradient(loss, tw)
-        self.opt.apply_gradients(zip(grads, tw))
-        return loss
 
     @staticmethod
     def sample_idx(idx, n):

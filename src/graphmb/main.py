@@ -15,6 +15,7 @@ import shutil
 import pdb
 import torch
 import torch.nn as nn
+import tensorflow as tf
 import networkx as nx
 import os
 from graphmb.contigsdataset import AssemblyDataset, DGLAssemblyDataset
@@ -486,8 +487,7 @@ def main():
     # setup cuda and cpu
     logger.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
-    logger.info(f"cuda available: {(device == 'cuda:0')} using {device}")
-    torch.set_num_threads(args.numcores)
+    # logger.info(f"cuda available: {(device == 'cuda:0')} using {device}")
 
     logger.info("setting seed to {}".format(args.seed))
     set_seed(args.seed)
@@ -560,6 +560,7 @@ def main():
 
         # DGL specific code
         elif args.model_name == "sage_lstm":
+            torch.set_num_threads(args.numcores)
             dgl_dataset = DGLAssemblyDataset(dataset)
             # initialize empty features vector
             nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
@@ -596,6 +597,8 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae"):
+            if not args.cuda:
+                tf.config.set_visible_devices([], "GPU")
             if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
                 dataset.neg_pairs_idx = np.load(f"{dataset.cache_dir}/all_different.npy")
             else:
