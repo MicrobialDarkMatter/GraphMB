@@ -55,7 +55,7 @@ class TH:
         return loss
 
     @tf.function
-    def train_unsupervised(self, idx):
+    def train_unsupervised(self, idx, gnn_alpha=1):
         with tf.GradientTape() as tape:
             #
             # breakpoint()
@@ -86,9 +86,14 @@ class TH:
                 maxval=self.adj_shape[0] * self.adj_shape[1] - 1,
                 dtype=tf.int64,
             )
-            neg_idx_row = tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32)
+            neg_idx_row = tf.math.minimum(
+                tf.cast(self.adj_shape[0] - 1, tf.float32),
+                tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32),
+            )
             neg_idx_row = tf.cast(neg_idx_row, tf.int64)[:, None]
-            neg_idx_col = tf.cast((neg_idx % self.adj_shape[1]), tf.int64)[:, None]
+            neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)[
+                :, None
+            ]
             neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
 
             negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
@@ -101,8 +106,8 @@ class TH:
             neg_loss = tf.reduce_mean(
                 tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
             )
-            loss = 0.5 * (pos_loss + neg_loss)
-            loss += recon_loss
+            gnn_loss = 0.5 * (pos_loss + neg_loss)
+            loss = (tf.constant(gnn_alpha) * gnn_loss) + recon_loss
 
             if self.all_different_idx is not None:
                 ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
@@ -119,7 +124,7 @@ class TH:
         tw = self.model.trainable_weights
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
-        return loss, recon_loss, diff_loss
+        return gnn_loss, recon_loss, diff_loss
 
     @tf.function
     def train_unsupervised_vae(self, idx):
