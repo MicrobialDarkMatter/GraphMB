@@ -13,19 +13,16 @@ import copy
 import pickle
 import shutil
 import pdb
-import torch
-import torch.nn as nn
-import tensorflow as tf
 import networkx as nx
 import os
-from graphmb.contigsdataset import AssemblyDataset, DGLAssemblyDataset
+from graphmb.contigsdataset import AssemblyDataset
 from pathlib import Path
 import scipy.stats as stats
 from graphmb.evaluate import (
     evaluate_contig_sets,
     calculate_overall_prf,
 )
-from graphmb.graphsage_unsupervised import train_graphsage, SAGE
+
 from graphmb.graph_functions import (
     plot_embs,
     cluster_embs,
@@ -451,6 +448,7 @@ def main():
     )
     parser.add_argument("--assembly_type", help="flye or spades", default="flye")
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
+    parser.add_argument("--quiet", "-q", help="Do not output epoch progress", action="store_true")
     parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
     args = parser.parse_args()
 
@@ -560,7 +558,10 @@ def main():
 
         # DGL specific code
         elif args.model_name == "sage_lstm":
-            torch.set_num_threads(args.numcores)
+            from graphmb.graphsage_unsupervised import train_graphsage, SAGE
+            import torch
+            from graphmb.contigsdataset import DGLAssemblyDataset
+            torch.set_num_threads(args.numcores) 
             dgl_dataset = DGLAssemblyDataset(dataset)
             # initialize empty features vector
             nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
@@ -597,6 +598,10 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae"):
+            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
+            import tensorflow as tf
+
+            logging.getLogger("tensorflow").setLevel(logging.FATAL)
             if not args.cuda:
                 tf.config.set_visible_devices([], "GPU")
             if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
@@ -619,6 +624,7 @@ def main():
 
         if args.labels is not None:
             from amber_eval import amber_eval
+
             amber_metrics, bin_counts = amber_eval(
                 args.labels, f"{args.outdir}/{args.outname}_best_contig2bin.tsv", ["graphmb"]
             )

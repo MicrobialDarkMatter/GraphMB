@@ -69,8 +69,10 @@ class TH:
                 :, None
             ]
             neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
-
-            negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
+            try:
+                negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
+            except:
+                breakpoint()
 
             pos_loss = tf.reduce_mean(
                 tf.keras.losses.binary_crossentropy(

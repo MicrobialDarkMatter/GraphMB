@@ -310,7 +310,7 @@ def run_gnn(dataset, args, logger):
         latentdim=output_dim,
     )
     train_idx = np.arange(len(features))
-    pbar = tqdm(range(epochs))
+    pbar = tqdm(range(epochs), disable=args.quiet)
     scores = []
     best_embs = None
     best_model = None
