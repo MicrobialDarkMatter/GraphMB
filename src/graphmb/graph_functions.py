@@ -11,6 +11,7 @@ import operator
 from vamb.cluster import cluster as vamb_cluster
 import dgl
 import random
+import tensorflow
 
 from graphmb.evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets, calculate_overall_prf
 import torch
@@ -57,6 +58,7 @@ def set_seed(seed=0):
     torch.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
+    tensorflow.random.set_seed(seed)
 
 
 class Read:
