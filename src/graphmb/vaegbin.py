@@ -270,7 +270,7 @@ def run_gnn(dataset, args, logger):
     logger.info("concat features {}".format(concat_features))
     logger.info("cluster markers only {}".format(cluster_markers_only))
 
-    # tf.config.experimental_run_functions_eagerly(True)
+    tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.rawfeatures
@@ -308,6 +308,7 @@ def run_gnn(dataset, args, logger):
         all_same_idx=pos_pair_idx,
         use_ae=use_ae,
         latentdim=output_dim,
+        gnn_weight=float(args.gnn_alpha),
     )
     train_idx = np.arange(len(features))
     pbar = tqdm(range(epochs), disable=args.quiet)
@@ -319,7 +320,7 @@ def run_gnn(dataset, args, logger):
         if VAE:
             loss = th.train_unsupervised_vae(train_idx)
         else:
-            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx, gnn_alpha=float(args.gnn_alpha))
+            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
             # loss = th.train_unsupervised_v2(train_idx)
         loss = loss.numpy()
         pbar.set_description(
@@ -345,8 +346,8 @@ def run_gnn(dataset, args, logger):
                 k=k,
                 cuda=args.cuda,
             )
-            # print(f'--- EPOCH {e:d} ---')
-            # print(stats)
+            print(f'--- EPOCH {e:d} ---')
+            print(stats)
             scores.append(stats)
             all_cluster_labels.append(cluster_labels)
             model.adj = train_adj

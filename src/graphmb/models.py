@@ -11,7 +11,7 @@ from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 class TH:
     def __init__(
-        self, model, lr=0.01, lambda_vae=0.1, all_different_idx=None, all_same_idx=None, use_ae=False, latentdim=32
+        self, model, lr=0.01, lambda_vae=0.1, all_different_idx=None, all_same_idx=None, use_ae=False, latentdim=32, gnn_weight=1.0
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -31,9 +31,10 @@ class TH:
             self.features = self.model.features
             self.encoder = Dense(latentdim, activation="relu")
             self.decoder = Dense(self.model.features.shape[1], activation="relu")
+        self.gnn_weight = tf.constant(gnn_weight)
 
     @tf.function
-    def train_unsupervised(self, idx, gnn_alpha=1):
+    def train_unsupervised(self, idx):
         with tf.GradientTape() as tape:
             #
             # breakpoint()
@@ -83,7 +84,7 @@ class TH:
                 tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
             )
             gnn_loss = 0.5 * (pos_loss + neg_loss)
-            loss = (tf.constant(gnn_alpha) * gnn_loss) + recon_loss
+            loss = self.gnn_weight * gnn_loss + recon_loss
 
             if self.all_different_idx is not None:
                 ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
