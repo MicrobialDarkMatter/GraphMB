@@ -1,6 +1,7 @@
 from pathlib import Path
 import time
 import os
+import sys
 import pdb
 import itertools
 from collections import Counter
@@ -8,13 +9,15 @@ import networkx as nx
 import numpy as np
 from tqdm import tqdm
 import operator
-from vamb.cluster import cluster as vamb_cluster
-import dgl
+
+
+# import dgl
 import random
-import tensorflow
+#import tensorflow
 
 from graphmb.evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets, calculate_overall_prf
-import torch
+
+# import torch
 
 SEED = 0
 
@@ -54,11 +57,20 @@ colors = [
 
 
 def set_seed(seed=0):
-    dgl.random.seed(seed)
-    torch.manual_seed(seed)
+    if "dgl" in sys.modules:
+        import dgl
+        print("setting dgl seed")
+        dgl.random.seed(seed)
+    if "torch" in sys.modules:
+        import torch
+        print("setting torch seed")
+        torch.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
-    tensorflow.random.set_seed(seed)
+    if "tensorflow" in sys.modules:
+        import tensorflow
+        print("setting tf seed")
+        tensorflow.random.set_seed(seed)
 
 
 class Read:
@@ -389,6 +401,7 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
 def cluster_embs(node_embeddings, node_ids, clusteringalgo, kclusters, device="cpu", node_lens=None, seed=0):
     set_seed(seed)
     if clusteringalgo == "vamb":
+        from vamb.cluster import cluster as vamb_cluster
         it = vamb_cluster(
             node_embeddings, node_ids, cuda=(device == "cuda:0")
         )  # , seeds=seeds)  # contig_lens=node_lens)  #

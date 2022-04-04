@@ -3,6 +3,7 @@ import tensorflow as tf
 from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Activation
+from tensorflow.keras import Sequential
 from tensorflow.keras.layers import BatchNormalization, Lambda
 from tensorflow.keras.layers import Dropout, Layer, Add, Concatenate
 
@@ -11,7 +12,17 @@ from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 class TH:
     def __init__(
-        self, model, lr=0.01, lambda_vae=0.1, all_different_idx=None, all_same_idx=None, use_ae=False, latentdim=32, gnn_weight=1.0
+        self,
+        model,
+        lr=0.01,
+        lambda_vae=0.1,
+        all_different_idx=None,
+        all_same_idx=None,
+        use_ae=False,
+        latentdim=32,
+        gnn_weight=1.0,
+        kmer_dim=136,
+        kmer_alpha=0.5,
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -19,6 +30,8 @@ class TH:
         self.model = model
         # self.dense_adj = tf.sparse.to_dense(self.model.adj)
         self.adj_shape = self.model.adj.dense_shape
+        self.kmer_dim = kmer_dim
+        self.kmer_alpha = kmer_alpha
         S = tf.cast(tf.reduce_sum(self.model.adj.values), tf.float32)
         s0 = tf.cast(self.adj_shape[0], tf.float32)
 
@@ -29,8 +42,22 @@ class TH:
         self.use_ae = use_ae
         if self.use_ae:
             self.features = self.model.features
-            self.encoder = Dense(latentdim, activation="relu")
-            self.decoder = Dense(self.model.features.shape[1], activation="relu")
+            self.encoder = tf.keras.Sequential(
+                [
+                    Dense(256, activation="relu", name="encoder1"),
+                    BatchNormalization(),
+                    Dense(latentdim, activation=None, name="encoder2"),
+                ]
+            )
+            self.decoder = tf.keras.Sequential(
+                [
+                    Dense(256, activation="relu", name="decoder1"),
+                    BatchNormalization(),
+                    Dense(self.model.features.shape[1], activation=None, name="decoder2"),
+                ]
+            )
+            self.encoder.build(self.features.shape)
+            self.decoder.build((self.features.shape[0], latentdim))
         self.gnn_weight = tf.constant(gnn_weight)
 
     @tf.function
@@ -45,7 +72,12 @@ class TH:
             if self.use_ae:
                 recon_features = self.decoder(node_hat)
                 # assert recon_features.shape == self.features.shape
-                recon_loss = tf.keras.losses.MeanSquaredError()(self.features, recon_features)
+                # breakpoint()
+                kmer_recon = recon_features[:, : self.kmer_dim]
+                abund_recon = recon_features[:, self.kmer_dim :]
+                kmer_loss = tf.keras.losses.MeanSquaredError()(self.features, recon_features)
+                abund_loss = tf.keras.losses.MeanSquaredError()(self.features[:, self.kmer_dim :], abund_recon)
+                recon_loss = (self.kmer_alpha / self.kmer_dim) * kmer_loss + (1 - self.kmer_alpha) * abund_loss
             else:
                 recon_loss = 0
             pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)

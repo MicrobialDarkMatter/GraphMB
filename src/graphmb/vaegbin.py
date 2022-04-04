@@ -273,7 +273,7 @@ def run_gnn(dataset, args, logger):
     tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
-        dataset, use_edge_weights, use_disconnected, cluster_markers_only, args.rawfeatures
+        dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
     )
     logger.info("feat dim {}".format(X.shape))
     logger.info("SCG neg pairs {}".format(neg_pair_idx.shape))
@@ -310,6 +310,10 @@ def run_gnn(dataset, args, logger):
         latentdim=output_dim,
         gnn_weight=float(args.gnn_alpha),
     )
+    model.summary()
+    if gname.endswith("_ae"):
+        th.encoder.summary()
+        th.decoder.summary()
     train_idx = np.arange(len(features))
     pbar = tqdm(range(epochs), disable=args.quiet)
     scores = []
@@ -346,8 +350,9 @@ def run_gnn(dataset, args, logger):
                 k=k,
                 cuda=args.cuda,
             )
-            print(f'--- EPOCH {e:d} ---')
-            print(stats)
+            if args.quiet:
+                logger.info(f"--- EPOCH {e:d} ---")
+                logger.info(stats)
             scores.append(stats)
             all_cluster_labels.append(cluster_labels)
             model.adj = train_adj

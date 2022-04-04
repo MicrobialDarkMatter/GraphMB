@@ -14,15 +14,14 @@ import pickle
 import shutil
 import pdb
 import networkx as nx
-import os
-from graphmb.contigsdataset import AssemblyDataset
+
 from pathlib import Path
 import scipy.stats as stats
 from graphmb.evaluate import (
     evaluate_contig_sets,
     calculate_overall_prf,
 )
-
+from graphmb.contigsdataset import AssemblyDataset
 from graphmb.graph_functions import (
     plot_embs,
     cluster_embs,
@@ -558,10 +557,10 @@ def main():
 
         # DGL specific code
         elif args.model_name == "sage_lstm":
-            from graphmb.graphsage_unsupervised import train_graphsage, SAGE
+            #from graphmb.graphsage_unsupervised import train_graphsage, SAGE
             import torch
-            from graphmb.contigsdataset import DGLAssemblyDataset
-            torch.set_num_threads(args.numcores) 
+            from graphmb.dgl_dataset import DGLAssemblyDataset
+            torch.set_num_threads(args.numcores)
             dgl_dataset = DGLAssemblyDataset(dataset)
             # initialize empty features vector
             nodes_data = torch.FloatTensor(len(dataset.node_names), 0)
@@ -598,6 +597,8 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae"):
+            if "torch" in sys.modules:
+                sys.modules.pop('torch')
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
             import tensorflow as tf
 
