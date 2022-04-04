@@ -11,7 +11,7 @@ import networkx as nx
 from rich.console import Console
 from rich.table import Table
 from scipy.sparse import csr_matrix, diags
-from vamb.cluster import cluster as vamb_cluster
+
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH
 from graph_functions import set_seed
 
@@ -91,6 +91,7 @@ def compute_clusters_and_stats(
     clustering="vamb",
     cuda=False,
 ):
+    from vamb.cluster import cluster as vamb_cluster
     if clustering == "vamb":
         best_cluster_to_contig = {
             i: c for (i, (n, c)) in enumerate(vamb_cluster(X.astype(np.float32), node_names, cuda=cuda))

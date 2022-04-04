@@ -150,6 +150,7 @@ def get_activation(args):
 
 
 def run_graphmb(dataset, args, device, logger):
+    from graphmb.graphsage_unsupervised import train_graphsage, SAGE
     activation = get_activation(args)
     model = SAGE(
         dataset.graph.ndata["feat"].shape[1],
@@ -484,8 +485,7 @@ def main():
     # setup cuda and cpu
     logger.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
-    # logger.info(f"cuda available: {(device == 'cuda:0')} using {device}")
-
+    clustering_device = "cuda:0" if args.cuda else "cpu"
     logger.info("setting seed to {}".format(args.seed))
     set_seed(args.seed)
 
@@ -557,7 +557,6 @@ def main():
 
         # DGL specific code
         elif args.model_name == "sage_lstm":
-            #from graphmb.graphsage_unsupervised import train_graphsage, SAGE
             import torch
             from graphmb.dgl_dataset import DGLAssemblyDataset
             torch.set_num_threads(args.numcores)
@@ -601,7 +600,7 @@ def main():
                 sys.modules.pop('torch')
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
             import tensorflow as tf
-
+            clustering_device = "cpu" # avoid tf vs torch issues
             logging.getLogger("tensorflow").setLevel(logging.FATAL)
             if not args.cuda:
                 tf.config.set_visible_devices([], "GPU")
@@ -617,7 +616,7 @@ def main():
             args,
             logger,
             dataset,
-            device,
+            clustering_device,
             dataset.label_to_node,
             dataset.node_to_label,
             seed=args.seed,
