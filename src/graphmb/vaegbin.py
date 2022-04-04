@@ -348,7 +348,7 @@ def run_gnn(dataset, args, logger):
                 dataset.label_to_node,
                 clustering=clustering,
                 k=k,
-                cuda=args.cuda,
+                #cuda=args.cuda,
             )
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
@@ -378,7 +378,7 @@ def run_gnn(dataset, args, logger):
         dataset.label_to_node,
         clustering=clustering,
         k=k,
-        cuda=args.cuda,
+        #cuda=args.cuda,
     )
     scores.append(stats)
     # get best stats:
