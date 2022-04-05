@@ -13,6 +13,7 @@ from graphmb.layers import BiasLayer, LAF, GraphAttention
 class TH:
     def __init__(
         self,
+        input_features,
         model,
         lr=0.01,
         lambda_vae=0.1,
@@ -29,6 +30,7 @@ class TH:
         # self.opt = SGD(learning_rate=lr)
         self.lambda_vae = lambda_vae
         self.model = model
+        self.features = input_features
         # self.dense_adj = tf.sparse.to_dense(self.model.adj)
         self.adj_shape = self.model.adj.dense_shape
         self.kmer_dim = kmer_dim
@@ -43,7 +45,7 @@ class TH:
         self.norm = s0 * s0 / ((s0 * s0 - S) * 2.0)
         self.use_ae = use_ae
         if self.use_ae:
-            self.features = self.model.features
+            self.features = input_features
             self.encoder = tf.keras.Sequential(
                 [
                     Dense(256, activation="relu", name="encoder1"),
@@ -55,12 +57,13 @@ class TH:
                 [
                     Dense(256, activation="relu", name="decoder1"),
                     BatchNormalization(),
-                    Dense(self.model.features.shape[1], activation=None, name="decoder2"),
+                    Dense(input_features.shape[1], activation=None, name="decoder2"),
                 ]
             )
             self.encoder.build(self.features.shape)
             self.decoder.build((self.features.shape[0], latentdim))
-        self.gnn_weight = tf.constant(gnn_weight)
+        self.mse_loss = tf.keras.losses.MeanSquaredError()
+        self.gnn_weight = gnn_weight
 
     @tf.function
     def train_unsupervised(self, idx):
@@ -68,29 +71,27 @@ class TH:
             #
             # breakpoint()
             if self.use_ae:
-                encoded_features = self.encoder(self.features)
-                self.model.features = encoded_features
-            node_hat = self.model(idx)
+                features = self.encoder(self.features)
+            else:
+                features = self.features
+            node_hat = self.model(features, idx)
             if self.use_ae:
                 recon_features = self.decoder(node_hat)
                 # assert recon_features.shape == self.features.shape
-                # breakpoint()
+                #breakpoint()
                 kmer_recon = recon_features[:, : self.kmer_dim]
-                abund_recon = recon_features[:, self.kmer_dim :]
-                kmer_loss = tf.keras.losses.MeanSquaredError()(self.features, recon_features)
-                abund_loss = tf.keras.losses.MeanSquaredError()(self.features[:, self.kmer_dim :], abund_recon)
-                recon_loss = (self.kmer_alpha / self.kmer_dim) * kmer_loss + (1 - self.kmer_alpha) * abund_loss
+                abund_recon = recon_features[:, self.kmer_dim:]
+                kmer_loss = self.mse_loss(self.features[:, :self.kmer_dim], kmer_recon)
+                abund_loss = self.mse_loss(self.features[:, self.kmer_dim:], abund_recon)
+                recon_loss = (self.kmer_alpha / float(self.kmer_dim)) * kmer_loss + (1.0 - self.kmer_alpha) * abund_loss
             else:
                 recon_loss = 0
-            #pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
 
             diff_loss = 0
             same_loss = 0
 
-            #positive_pairwise = tf.gather_nd(pairwise_similarity, self.model.adj.indices)
-            #positive_pairwise = tf.gather(indices=self.model.adj.indices[:,0], params=node_hat)
-            row_embs = tf.gather(indices=self.model.adj.indices[:,0], params=node_hat)
-            col_embs = tf.gather(indices=self.model.adj.indices[:,1], params=node_hat)
+            row_embs = tf.gather(indices=self.model.adj.indices[:, 0], params=node_hat)
+            col_embs = tf.gather(indices=self.model.adj.indices[:, 1], params=node_hat)
             positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
 
             neg_idx = tf.random.uniform(
@@ -124,8 +125,8 @@ class TH:
             neg_loss = tf.reduce_mean(
                 tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
             )
-            gnn_loss = 0.5 * (pos_loss + neg_loss)
-            loss = self.gnn_weight * gnn_loss + recon_loss
+            gnn_loss = 0.5 * (pos_loss + neg_loss) #* self.gnn_weight 
+            loss =  gnn_loss + recon_loss
 
             if self.all_different_idx is not None:
                 ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
@@ -156,7 +157,7 @@ class TH:
 class GCN(Model):
     def __init__(
         self,
-        features,
+        features_shape,
         input_dim,
         labels,
         adj,
@@ -169,7 +170,7 @@ class GCN(Model):
     ):
         super(GCN, self).__init__()
         assert layers > 0
-        self.features = features
+        self.features_shape = features_shape
         self.labels = labels
         self.adj = adj
         self.adj_size = adj.dense_shape.numpy()
@@ -202,10 +203,10 @@ class GCN(Model):
                 x = Dense(n_labels, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([(features.shape[0], input_dim), tuple(self.adj_size)])
+        self.model.build([(features_shape[0], input_dim), tuple(self.adj_size)])
 
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
+    def call(self, features, idx, training=True):
+        output = self.model((features, self.adj), training=training)
         if idx is None:
             return output
         else:
