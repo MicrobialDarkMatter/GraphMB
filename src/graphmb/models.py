@@ -80,12 +80,16 @@ class TH:
                 recon_loss = (self.kmer_alpha / self.kmer_dim) * kmer_loss + (1 - self.kmer_alpha) * abund_loss
             else:
                 recon_loss = 0
-            pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
+            #pairwise_similarity = tf.matmul(node_hat, node_hat, transpose_b=True)
 
             diff_loss = 0
             same_loss = 0
 
-            positive_pairwise = tf.gather_nd(pairwise_similarity, self.model.adj.indices)
+            #positive_pairwise = tf.gather_nd(pairwise_similarity, self.model.adj.indices)
+            #positive_pairwise = tf.gather(indices=self.model.adj.indices[:,0], params=node_hat)
+            row_embs = tf.gather(indices=self.model.adj.indices[:,0], params=node_hat)
+            col_embs = tf.gather(indices=self.model.adj.indices[:,1], params=node_hat)
+            positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
 
             neg_idx = tf.random.uniform(
                 shape=(50 * len(self.model.adj.indices),),
@@ -103,7 +107,10 @@ class TH:
             ]
             neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
             try:
-                negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
+                #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
+                neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
+                neg_col_embs = tf.gather(indices=neg_idx_col, params=node_hat)
+                negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
             except:
                 breakpoint()
 
