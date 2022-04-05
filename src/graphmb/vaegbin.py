@@ -271,7 +271,7 @@ def run_gnn(dataset, args, logger):
     logger.info("concat features {}".format(concat_features))
     logger.info("cluster markers only {}".format(cluster_markers_only))
 
-    tf.config.experimental_run_functions_eagerly(True)
+    #tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
@@ -281,6 +281,7 @@ def run_gnn(dataset, args, logger):
     pname = ""
 
     scores = []
+    losses = {"total": [], "ae": [], "gnn": [], "scg": []}
     all_cluster_labels = []
     features = tf.constant(X.astype(np.float32))
     if not use_ae:
@@ -290,9 +291,8 @@ def run_gnn(dataset, args, logger):
     logger.info(f"input dim {input_dim}")
     logger.info(f"output clustering dim {output_dim}")
     S = []
-
     model = gmodel(
-        features=features,
+        features_shape=features.shape,
         input_dim=input_dim,
         labels=None,
         adj=train_adj,
@@ -302,6 +302,7 @@ def run_gnn(dataset, args, logger):
         conv_last=False,
     )  # , use_bn=True, use_vae=False)
     th = TH(
+        features,
         model,
         lr=lr,
         lambda_vae=0.01,
@@ -323,20 +324,27 @@ def run_gnn(dataset, args, logger):
     best_model = None
     best_hq = 0
     for e in pbar:
-        if VAE:
-            loss = th.train_unsupervised_vae(train_idx)
-        else:
-            loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
-            # loss = th.train_unsupervised_v2(train_idx)
-        loss = loss.numpy()
+        gnn_loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
+        gnn_loss = gnn_loss.numpy()
+        recon_loss = recon_loss.numpy()
+        diff_loss = diff_loss.numpy()
         gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         pbar.set_description(
-            f"[{gname} {nlayers}l {pname}] L={loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Max GPU mem={gpu_mem_alloc:.1f}"
+            f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Max GPU mem={gpu_mem_alloc:.1f}"
         )
+        total_loss = gnn_loss + diff_loss + recon_loss
+        losses["gnn"].append(gnn_loss)
+        losses["scg"].append(diff_loss)
+        losses["ae"].append(recon_loss)
+        losses["total"].append(total_loss)
+
         # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
         if (e + 1) % RESULT_EVERY == 0:
             model.adj = adj
-            node_new_features = model(None, training=False)
+            eval_features = features
+            if use_ae:
+                eval_features = th.encoder(features)
+            node_new_features = model(eval_features, None, training=False)
             node_new_features = node_new_features.numpy()
             node_new_features = node_new_features[:, :output_dim]
             # concat with original features
@@ -356,6 +364,7 @@ def run_gnn(dataset, args, logger):
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
                 logger.info(stats)
+            stats["epoch"] = e
             scores.append(stats)
             all_cluster_labels.append(cluster_labels)
             model.adj = train_adj
@@ -365,7 +374,9 @@ def run_gnn(dataset, args, logger):
                 best_embs = node_new_features
             # print('--- END ---')
     model.adj = adj
-    node_new_features = model(None, training=False)
+    if use_ae:
+        eval_features = th.encoder(features)
+    node_new_features = model(eval_features, None, training=False)
     node_new_features = node_new_features.numpy()
     node_new_features = node_new_features[:, :output_dim]
     # concat with original features
@@ -383,10 +394,12 @@ def run_gnn(dataset, args, logger):
         k=k,
         #cuda=args.cuda,
     )
+    stats["epoch"] = e
     scores.append(stats)
     # get best stats:
     # if concat_features:  # use HQ
     hqs = [s["hq"] for s in scores]
+    epoch_hqs = [s["epoch"] for s in scores]
     best_idx = np.argmax(hqs)
     # else:  # use F1
     #    f1s = [s["f1"] for s in scores]
@@ -398,11 +411,23 @@ def run_gnn(dataset, args, logger):
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
-    del loss, model, th
+    del model, th
     # res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
     # if gt_idx_label_to_node is not None:
     #    # save embs
     #    np.save(f"{dataset}_{gname}_{clustering}{k}_{nlayers}l_{pname}_embs.npy", node_new_features)
     # plot_clusters(node_new_features, features.numpy(), cluster_labels, f"{gname} VAMB {nlayers}l {pname}")
     # res_table.show()
+    #breakpoint()
+    #plt.plot(range(len(losses["total"])), losses["total"], label="total loss")
+    fig, ax1 = plt.subplots()
+    ax1.plot(range(len(losses["gnn"])), losses["gnn"], label="GNN loss")
+    ax1.plot(range(len(losses["scg"])), losses["scg"], label="SCG loss")
+    ax1.plot(range(len(losses["ae"])), losses["ae"], label="AE loss")
+    ax1.legend(loc='upper right')
+    ax2 = ax1.twinx()
+    ax2.plot(epoch_hqs, [hq/max(hqs) for hq in hqs], label="HQ")
+    plt.xlabel("epoch")
+    plt.legend(loc='upper left')
+    plt.show()
     return best_embs
