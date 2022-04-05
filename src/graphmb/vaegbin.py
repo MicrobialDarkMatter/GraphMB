@@ -310,6 +310,7 @@ def run_gnn(dataset, args, logger):
         use_ae=use_ae,
         latentdim=output_dim,
         gnn_weight=float(args.gnn_alpha),
+        num_negatives=args.negatives
     )
     model.summary()
     if gname.endswith("_ae"):

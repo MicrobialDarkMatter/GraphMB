@@ -23,6 +23,7 @@ class TH:
         gnn_weight=1.0,
         kmer_dim=136,
         kmer_alpha=0.5,
+        num_negatives=50
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -32,6 +33,7 @@ class TH:
         self.adj_shape = self.model.adj.dense_shape
         self.kmer_dim = kmer_dim
         self.kmer_alpha = kmer_alpha
+        self.num_negatives = num_negatives
         S = tf.cast(tf.reduce_sum(self.model.adj.values), tf.float32)
         s0 = tf.cast(self.adj_shape[0], tf.float32)
 
@@ -92,7 +94,7 @@ class TH:
             positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
 
             neg_idx = tf.random.uniform(
-                shape=(50 * len(self.model.adj.indices),),
+                shape=(self.num_negatives * len(self.model.adj.indices),),
                 minval=0,
                 maxval=self.adj_shape[0] * self.adj_shape[1] - 1,
                 dtype=tf.int64,
