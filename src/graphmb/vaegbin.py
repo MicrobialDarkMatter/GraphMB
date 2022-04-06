@@ -313,10 +313,11 @@ def run_gnn(dataset, args, logger):
         gnn_weight=float(args.gnn_alpha),
         num_negatives=args.negatives
     )
-    model.summary()
-    if gname.endswith("_ae"):
-        th.encoder.summary()
-        th.decoder.summary()
+    if not args.quiet:
+        model.summary()
+        if gname.endswith("_ae"):
+            th.encoder.summary()
+            th.decoder.summary()
     train_idx = np.arange(len(features))
     pbar = tqdm(range(epochs), disable=args.quiet)
     scores = []
@@ -420,14 +421,15 @@ def run_gnn(dataset, args, logger):
     # res_table.show()
     #breakpoint()
     #plt.plot(range(len(losses["total"])), losses["total"], label="total loss")
-    fig, ax1 = plt.subplots()
-    ax1.plot(range(len(losses["gnn"])), losses["gnn"], label="GNN loss")
-    ax1.plot(range(len(losses["scg"])), losses["scg"], label="SCG loss")
-    ax1.plot(range(len(losses["ae"])), losses["ae"], label="AE loss")
-    ax1.legend(loc='upper right')
-    ax2 = ax1.twinx()
-    ax2.plot(epoch_hqs, [hq/max(hqs) for hq in hqs], label="HQ")
-    plt.xlabel("epoch")
-    plt.legend(loc='upper left')
-    plt.show()
+    if not args.quiet:
+        fig, ax1 = plt.subplots()
+        ax1.plot(range(len(losses["gnn"])), losses["gnn"], label="GNN loss")
+        ax1.plot(range(len(losses["scg"])), losses["scg"], label="SCG loss")
+        ax1.plot(range(len(losses["ae"])), losses["ae"], label="AE loss")
+        ax1.legend(loc='upper right')
+        ax2 = ax1.twinx()
+        ax2.plot(epoch_hqs, [hq/max(hqs) for hq in hqs], label="HQ")
+        plt.xlabel("epoch")
+        plt.legend(loc='upper left')
+        plt.show()
     return best_embs
