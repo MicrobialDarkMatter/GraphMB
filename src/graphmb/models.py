@@ -50,14 +50,18 @@ class TH:
                 [
                     Dense(256, activation="relu", name="encoder1"),
                     BatchNormalization(),
-                    Dense(latentdim, activation=None, name="encoder2"),
+                    Dense(256, activation="relu", name="encoder2"),
+                    BatchNormalization(),
+                    Dense(latentdim, activation=None, name="encoder3"),
                 ]
             )
             self.decoder = tf.keras.Sequential(
                 [
                     Dense(256, activation="relu", name="decoder1"),
                     BatchNormalization(),
-                    Dense(input_features.shape[1], activation=None, name="decoder2"),
+                    Dense(256, activation="relu", name="decoder2"),
+                    BatchNormalization(),
+                    Dense(input_features.shape[1], activation=None, name="decoder3"),
                 ]
             )
             self.encoder.build(self.features.shape)
@@ -77,6 +81,8 @@ class TH:
             node_hat = self.model(features, idx)
             if self.use_ae:
                 recon_features = self.decoder(node_hat)
+                #recon_features = self.decoder(features)
+                #node_hat = features
                 # assert recon_features.shape == self.features.shape
                 #breakpoint()
                 kmer_recon = recon_features[:, : self.kmer_dim]
@@ -125,8 +131,8 @@ class TH:
             neg_loss = tf.reduce_mean(
                 tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
             )
-            gnn_loss = 0.5 * (pos_loss + neg_loss) #* self.gnn_weight 
-            loss =  gnn_loss + recon_loss
+            gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
+            loss = gnn_loss + recon_loss
 
             if self.all_different_idx is not None:
                 ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
