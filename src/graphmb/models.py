@@ -24,7 +24,8 @@ class TH:
         gnn_weight=1.0,
         kmer_dim=136,
         kmer_alpha=0.5,
-        num_negatives=50
+        num_negatives=50,
+        decoder_input="gnn"
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -38,7 +39,7 @@ class TH:
         self.num_negatives = num_negatives
         S = tf.cast(tf.reduce_sum(self.model.adj.values), tf.float32)
         s0 = tf.cast(self.adj_shape[0], tf.float32)
-
+        self.decoder_input = decoder_input
         self.all_different_idx = all_different_idx
         self.all_same_idx = all_same_idx
         self.pos_weight = (s0 * s0 - S) / S
@@ -80,8 +81,10 @@ class TH:
                 features = self.features
             node_hat = self.model(features, idx)
             if self.use_ae:
-                recon_features = self.decoder(node_hat)
-                #recon_features = self.decoder(features)
+                if self.decoder_input == "gnn":
+                    recon_features = self.decoder(node_hat)
+                elif self.decoder_input == "ae":
+                    recon_features = self.decoder(features)
                 #node_hat = features
                 # assert recon_features.shape == self.features.shape
                 #breakpoint()
@@ -147,8 +150,10 @@ class TH:
                 same_loss = -tf.reduce_mean(all_same_pairs)
                 loss = loss + same_loss
         tw = self.model.trainable_weights
-        grads = tape.gradient(loss, tw)
-        self.opt.apply_gradients(zip(grads, tw))
+        tw_encoder = self.encoder.trainable_weights
+        tw_decoder = self.decoder.trainable_weights
+        grads = tape.gradient(loss, tw + tw_encoder + tw_decoder)
+        self.opt.apply_gradients(zip(grads, tw + tw_encoder + tw_decoder))
         return gnn_loss, recon_loss, diff_loss
 
     @staticmethod
