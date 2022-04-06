@@ -311,7 +311,8 @@ def run_gnn(dataset, args, logger):
         use_ae=use_ae,
         latentdim=output_dim,
         gnn_weight=float(args.gnn_alpha),
-        num_negatives=args.negatives
+        num_negatives=args.negatives,
+        decoder_input=args.decoder_input
     )
     if not args.quiet:
         model.summary()
@@ -424,9 +425,9 @@ def run_gnn(dataset, args, logger):
     #plt.plot(range(len(losses["total"])), losses["total"], label="total loss")
     if not args.quiet:
         fig, ax1 = plt.subplots()
-        ax1.plot(range(len(losses["gnn"])), losses["gnn"], label="GNN loss")
-        ax1.plot(range(len(losses["scg"])), losses["scg"], label="SCG loss")
-        ax1.plot(range(len(losses["ae"])), losses["ae"], label="AE loss")
+        ax1.plot(range(5, len(losses["gnn"])), losses["gnn"][5:], label="GNN loss")
+        ax1.plot(range(5, len(losses["scg"])), losses["scg"][5:], label="SCG loss")
+        ax1.plot(range(5, len(losses["ae"])), losses["ae"][5:], label="AE loss")
         ax1.legend(loc='upper right')
         ax2 = ax1.twinx()
         ax2.plot(epoch_hqs, [hq/max(hqs) for hq in hqs], label="HQ")

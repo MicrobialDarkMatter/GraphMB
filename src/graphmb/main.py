@@ -403,6 +403,7 @@ def main():
     parser.add_argument("--kclusters", help="Number of clusters (only for some clustering methods)", default=None)
     # GraphSAGE params
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="lstm")
+    parser.add_argument("--decoder_input", help="What to use for input to the decoder", default="ae")
     parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=1, type=int)
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
