@@ -364,6 +364,7 @@ def run_gnn(dataset, args, logger):
             )
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
+                logger.info(f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Max GPU mem={gpu_mem_alloc:.1f}")
                 logger.info(stats)
             stats["epoch"] = e
             scores.append(stats)
