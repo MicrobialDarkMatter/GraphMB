@@ -399,6 +399,8 @@ def main():
     parser.add_argument("--dropout", type=float, help="dropout of the GNN", default=0.0)
     parser.add_argument("--lr", type=float, help="learning rate", default=0.00005)
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=1)
+    parser.add_argument("--ae_alpha", type=float, help="Coeficient for AE loss", default=1)
+    parser.add_argument("--scg_alpha", type=float, help="Coeficient for SCG loss", default=100)
     parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
     parser.add_argument("--kclusters", help="Number of clusters (only for some clustering methods)", default=None)
     # GraphSAGE params

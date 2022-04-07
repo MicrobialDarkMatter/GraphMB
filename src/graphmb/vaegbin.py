@@ -311,6 +311,8 @@ def run_gnn(dataset, args, logger):
         use_ae=use_ae,
         latentdim=output_dim,
         gnn_weight=float(args.gnn_alpha),
+        ae_weight=float(args.ae_alpha),
+        scg_weight=float(args.scg_alpha),
         num_negatives=args.negatives,
         decoder_input=args.decoder_input
     )
@@ -332,7 +334,7 @@ def run_gnn(dataset, args, logger):
         diff_loss = diff_loss.numpy()
         gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         pbar.set_description(
-            f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Max GPU mem={gpu_mem_alloc:.1f}"
+            f"[{gname} {nlayers}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} AE={recon_loss:.3f} BestHQ={best_hq} Max GPU mem={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss + recon_loss
         losses["gnn"].append(gnn_loss)

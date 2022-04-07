@@ -22,6 +22,8 @@ class TH:
         use_ae=False,
         latentdim=32,
         gnn_weight=1.0,
+        ae_weight=1.0,
+        scg_weight=100.0,
         kmer_dim=136,
         kmer_alpha=0.5,
         num_negatives=50,
@@ -69,17 +71,24 @@ class TH:
             self.decoder.build((self.features.shape[0], latentdim))
         self.mse_loss = tf.keras.losses.MeanSquaredError()
         self.gnn_weight = gnn_weight
+        self.ae_weight = ae_weight
+        self.scg_weight = scg_weight
 
     @tf.function
     def train_unsupervised(self, idx):
         with tf.GradientTape() as tape:
-            #
-            # breakpoint()
+            #breakpoint()
+            # run encoder first
             if self.use_ae:
                 features = self.encoder(self.features)
             else:
                 features = self.features
+
+            # run gnn model
             node_hat = self.model(features, idx)
+
+            # run decoder and compute AE loss
+            recon_loss = tf.constant(0, dtype=tf.float32)
             if self.use_ae:
                 if self.decoder_input == "gnn":
                     recon_features = self.decoder(node_hat)
@@ -93,12 +102,9 @@ class TH:
                 kmer_loss = self.mse_loss(self.features[:, :self.kmer_dim], kmer_recon)
                 abund_loss = self.mse_loss(self.features[:, self.kmer_dim:], abund_recon)
                 recon_loss = (self.kmer_alpha / float(self.kmer_dim)) * kmer_loss + (1.0 - self.kmer_alpha) * abund_loss
-            else:
-                recon_loss = 0
-
-            diff_loss = 0
-            same_loss = 0
-
+                recon_loss *= self.ae_weight
+            loss = recon_loss
+            # create random negatives for gnn_loss
             row_embs = tf.gather(indices=self.model.adj.indices[:, 0], params=node_hat)
             col_embs = tf.gather(indices=self.model.adj.indices[:, 1], params=node_hat)
             positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
@@ -135,26 +141,24 @@ class TH:
                 tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
             )
             gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
-            loss = gnn_loss + recon_loss
-
+            loss += gnn_loss
+            
+            # SCG loss
             if self.all_different_idx is not None:
                 ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
                 ns2 = tf.gather(node_hat, self.all_different_idx[:, 1])
                 all_diff_pairs = tf.math.exp(-0.5 * tf.reduce_sum((ns1 - ns2) ** 2, axis=-1))
-                diff_loss = tf.reduce_mean(all_diff_pairs) * 100
-                loss = loss + diff_loss
-            if self.all_same_idx is not None:
-                ns1 = tf.gather(node_hat, self.all_same_idx[:, 0])
-                ns2 = tf.gather(node_hat, self.all_same_idx[:, 1])
-                all_same_pairs = tf.math.exp(-0.5 * tf.reduce_sum((ns1 - ns2) ** 2, axis=-1))
-                same_loss = -tf.reduce_mean(all_same_pairs)
-                loss = loss + same_loss
+                scg_loss = tf.reduce_mean(all_diff_pairs) * self.scg_weight
+                loss += scg_loss
+
         tw = self.model.trainable_weights
-        tw_encoder = self.encoder.trainable_weights
-        tw_decoder = self.decoder.trainable_weights
-        grads = tape.gradient(loss, tw + tw_encoder + tw_decoder)
-        self.opt.apply_gradients(zip(grads, tw + tw_encoder + tw_decoder))
-        return gnn_loss, recon_loss, diff_loss
+        if self.use_ae:
+            tw_encoder = self.encoder.trainable_weights
+            tw_decoder = self.decoder.trainable_weights
+            tw += tw_encoder + tw_decoder
+        grads = tape.gradient(loss, tw)
+        self.opt.apply_gradients(zip(grads, tw))
+        return gnn_loss, recon_loss, scg_loss
 
     @staticmethod
     def sample_idx(idx, n):
