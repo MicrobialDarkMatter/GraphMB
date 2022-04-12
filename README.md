@@ -21,7 +21,7 @@ Can be found here: https://graphmb.readthedocs.io/en/latest/
 
 ### Option 1 - From wheel
 ```bash
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.4/graphmb-0.1.4-py3-none-any.whl
 ```
 
 ### Option 2 - From source
@@ -36,7 +36,7 @@ pip install .
 ```bash
 conda create -n graphmb -c conda-forge make cmake libgcc python=3.7 pip
 conda activate graphmb
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.4/graphmb-0.1.4-py3-none-any.whl
 ```
 
 ### Option 4 - Docker
