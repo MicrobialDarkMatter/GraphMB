@@ -203,7 +203,7 @@ def train_graphsage(
     epsilon=0.1,
     evalepochs=1,
 ):
-
+    train_start_time = time.time()
     nfeat = dataset.graph.ndata.pop("feat")
     model = model.to(device)
     # Create PyTorch DataLoader for constructing blocks
@@ -353,6 +353,8 @@ def train_graphsage(
     logger.info("saving last model")
     torch.save(last_model.state_dict(), os.path.join(dataset.assembly, "last_model_hq.pkl"))
     logger.info("Avg epoch time: {}".format(avg / (epoch - 4)))
+    logger.info("Total training time: {:.3f} seconds".format(time.time() - train_start_time))
+    logger.info("Peak memory usage: {} MB".format(torch.cuda.max_memory_allocated()/1000000))
     model.eval()
     logger.info(f"Best HQ {best_hq} epoch, {best_hq_epoch}")
     if total_steps == 0:
