@@ -674,8 +674,17 @@ def cluster_eval(
         #    dataset.label_to_node,
         #   contig_sizes={dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))},
         # )
-        calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
-    if dataset.ref_marker_sets is not None:
+        gs_metrics = calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
+        best_hq, best_hq_epoch, kmeans_loss
+        kmeans_loss = 0
+        if gs_metrics["f1"] > best_hq:
+            best_hq = gs_metrics["f1"]
+            best_hq_epoch = epoch
+            logger.info("new F1 best!!")
+            torch.save(model.state_dict(), os.path.join(dataset.assembly, "best_model_hq.pkl"))
+
+
+    elif dataset.ref_marker_sets is not None:
 
         results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
         hq, mq = calculate_bin_metrics(results, logger=logger)
@@ -683,7 +692,7 @@ def cluster_eval(
         if len(hq) > best_hq:
             best_hq = len(hq)
             best_hq_epoch = epoch
-            logger.info("new best!!")
+            logger.info("new HQ best!!")
             torch.save(model.state_dict(), os.path.join(dataset.assembly, "best_model_hq.pkl"))
 
         if clusteringloss:

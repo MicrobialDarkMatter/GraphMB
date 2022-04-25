@@ -310,7 +310,7 @@ def train_graphsage(
 
         if cluster_features:
             encoded = torch.cat((encoded, nfeat), axis=1)
-        if dataset.ref_marker_sets is not None and epoch % evalepochs == 0:
+        if (dataset.ref_marker_sets is not None or len(dataset.species) > 1) and epoch % evalepochs == 0:
             best_hq, best_hq_epoch, kmeans_loss, clusters = cluster_eval(
                 model=model,
                 dataset=dataset,

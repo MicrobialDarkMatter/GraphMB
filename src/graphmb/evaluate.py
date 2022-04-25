@@ -75,15 +75,16 @@ def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, l
             # breakpoint()
             total_binned += 1
             bins_species[clusters.index(contig_to_cluster[i])][labels.index(node_to_label[i])] += 1
-    breakpoint()
-    my_precision = getPrecision(bins_species, n_pred_labels, n_true_labels, total_binned)
-    my_recall = getRecall(
+
+    precision = getPrecision(bins_species, n_pred_labels, n_true_labels, total_binned)
+    recall = getRecall(
         bins_species, n_pred_labels, n_true_labels, total_binned, (ground_truth_count - total_binned)
     )
-    my_ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
-    my_f1 = getF1(my_precision, my_recall)
+    ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
+    f1 = getF1(precision, recall)
     print("### Evaluation {} cluster/{} labels:".format(n_pred_labels, n_true_labels))
-    print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (my_precision, my_recall, my_f1, my_ari))
+    print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (precision, recall, f1, ari))
+    return {"precision": precision, "recall": recall, "f1": f1, "ari": ari}
 
 
 def read_marker_gene_sets(lineage_file):
