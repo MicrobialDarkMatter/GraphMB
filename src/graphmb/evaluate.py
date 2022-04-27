@@ -26,7 +26,7 @@ def getRecall(mat, k, s, total, unclassified):
             if mat[j][i] > max_k:
                 max_k = mat[j][i]
         sum_s += max_k
-    return sum_s / total  # / (total + unclassified)
+    return sum_s / (total + unclassified)
 
 
 # Get ARI

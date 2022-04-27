@@ -326,6 +326,8 @@ def main():
 
     # Load labels from file (eg binning results)
     if args.labels:
+        unused_labels = 0
+        total_labeled_nodes = 0
         logging.info("loading labels from {}".format(args.labels))
         node_to_label = {c: "NA" for c in dataset.contig_names}
         labels = set(["NA"])
@@ -340,11 +342,14 @@ def main():
                     values = line.strip().split("\t")
                 node = values[0]
                 label = values[1]
+                total_labeled_nodes += 1
                 if node in node_to_label:
                     node_to_label[node] = label
                     labels.add(label)
                 else:
-                    print("unused label:", line.strip())
+                    #print("unused label:", line.strip())
+                    unused_labels += 1
+        print(f"{unused_labels}/{total_labeled_nodes} labels not used")
         labels = list(labels)
         label_to_node = {s: [] for s in labels}
         for n in node_to_label:
@@ -583,6 +588,7 @@ def main():
             # invert cluster_to_contig
             logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
             with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
+                f.write("@Version:0.9.0\n@SampleID:simHC+\n@@SEQUENCEID\tBINID\n")
                 for c in best_contig_to_bin:
                     f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
             last_contig_to_bin = {}
@@ -590,6 +596,7 @@ def main():
                 for contig in last_cluster_to_contig[bin]:
                     last_contig_to_bin[contig] = bin
             with open(args.outdir + f"/{args.outname}_last_contig2bin.tsv", "w") as f:
+                f.write("@Version:0.9.0\n@SampleID:simHC+\n@@SEQUENCEID\tBINID\n")
                 for c in last_contig_to_bin:
                     f.write(f"{str(c)}\t{str(last_contig_to_bin[c])}\n")
 
