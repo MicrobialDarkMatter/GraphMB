@@ -674,7 +674,8 @@ def cluster_eval(
         #    dataset.label_to_node,
         #   contig_sizes={dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))},
         # )
-        gs_metrics = calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
+        contig_sizes={dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))}
+        gs_metrics = calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node, contig_sizes)
         best_hq, best_hq_epoch, kmeans_loss
         kmeans_loss = 0
         if gs_metrics["f1"] > best_hq:

@@ -530,7 +530,7 @@ def main():
         if len(dataset.species) > 1:
             evaluate_binning(best_cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
             # calculate overall P/R/F
-            calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node)
+            calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node, contig_lens)
             calculate_overall_prf(
                 {
                     cluster: best_cluster_to_contig[cluster]
@@ -544,6 +544,7 @@ def main():
                 },
                 node_to_label,
                 label_to_node,
+                contig_lens
             )
         if "writebins" in args.post:
             print("writing bins to ", args.outdir + "/{}_bins/".format(args.outname))

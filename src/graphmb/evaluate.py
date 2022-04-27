@@ -2,6 +2,7 @@ import sys
 import ast
 import numpy as np
 import scipy
+import operator
 
 # code to run evaluation based on lineage.ms file (Bacteria) and marker_gene_stats.txt file
 
@@ -27,6 +28,25 @@ def getRecall(mat, k, s, total, unclassified):
                 max_k = mat[j][i]
         sum_s += max_k
     return sum_s / (total + unclassified)
+
+
+def getAveragePrecision(cluster_to_labels, cluster_sizes):
+    avg_precision = []
+    for c in cluster_to_labels:
+        #TP = cluster_to_labels[c][1]; TP+FP + cluster_sizes[c]
+        cluster_p = cluster_to_labels[c][1] / cluster_sizes[c]
+        avg_precision.append(cluster_p)
+    return round(sum(avg_precision) / len(avg_precision), 4)
+
+def getAverageRecall(label_to_cluster, cluster_to_contig, contig_sizes, label_to_node):
+    avg_recall = []
+    for label in label_to_cluster:
+        if label_to_cluster[label][0] == "NA":
+            avg_recall.append(0)
+        else:
+            cluster_r = label_to_cluster[label][1] / sum([contig_sizes.get(n, 1) for n in cluster_to_contig[label_to_cluster[label][0]]])
+            avg_recall.append(cluster_r)
+    return round(sum(avg_recall) / len(avg_recall), 4)
 
 
 # Get ARI
@@ -60,7 +80,7 @@ def getF1(prec, recall):
         return 2 * prec * recall / (prec + recall)
 
 
-def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, label_to_node):
+def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, label_to_node, contig_sizes):
     # calculate how many contigs are in the majority class of each cluster
     total_binned = 0
     # convert everything to ids
@@ -69,22 +89,49 @@ def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, l
     n_pred_labels = len(clusters)
     n_true_labels = len(labels)
     ground_truth_count = len(node_to_label)
-    bins_species = [[0 for x in range(n_true_labels)] for y in range(n_pred_labels)]
-    for i in contig_to_cluster:
-        if i in node_to_label:
+    cluster_to_labels = {}
+    cluster_sizes = {}
+    #bins_species = [[0 for x in range(n_true_labels)] for y in range(n_pred_labels)]
+    for c in cluster_to_contig:
+        cluster_labels = [node_to_label.get(n) for n in cluster_to_contig[c] if n in node_to_label]
+        cluster_counts = {}
+        for label in set(cluster_labels):
+            cluster_counts[label] = sum(
+                [contig_sizes[n] for n in cluster_to_contig[c] if node_to_label.get(n) == label]
+            )
+        if len(cluster_labels) == 0:  # we do not have labels for any of the elements of this cluster
+            continue
+        # get majority label:
+        # cluster_counter = collections.Counter(cluster_labels)
+        # cluster_majority = cluster_counter.most_common(1)
+        cluster_to_labels[c] = max(cluster_counts.items(), key=operator.itemgetter(1))
+        cluster_sizes[c] = sum([contig_sizes[n] for n in cluster_to_contig[c]])
+    #for i in contig_to_cluster:
+    #    if i in node_to_label:
             # breakpoint()
-            total_binned += 1
-            bins_species[clusters.index(contig_to_cluster[i])][labels.index(node_to_label[i])] += 1
+    #        total_binned += 1
+    #        bins_species[clusters.index(contig_to_cluster[i])][labels.index(node_to_label[i])] += 1
 
-    precision = getPrecision(bins_species, n_pred_labels, n_true_labels, total_binned)
-    recall = getRecall(
-        bins_species, n_pred_labels, n_true_labels, total_binned, (ground_truth_count - total_binned)
-    )
-    ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
-    f1 = getF1(precision, recall)
+    #precision = getPrecision(bins_species, n_pred_labels, n_true_labels, total_binned)
+    #recall = getRecall(
+    #    bins_species, n_pred_labels, n_true_labels, total_binned, (ground_truth_count - total_binned)
+    #)
+    #breakpoint()
+    label_to_cluster = {}
+    for label in labels:
+        clusters_with_label = {c: cluster_to_labels[c] for c in cluster_to_labels if cluster_to_labels[c][0] == label}
+        if len(clusters_with_label) == 0:
+            label_to_cluster[label] = ("NA", 0)
+        else:
+            label_to_cluster[label] = max(clusters_with_label.items(), key=operator.itemgetter(1))
+            label_to_cluster[label] = (label_to_cluster[label][0], label_to_cluster[label][1][1])
+    avg_precision = getAveragePrecision(cluster_to_labels, cluster_sizes)
+    avg_recall = getAverageRecall(label_to_cluster, cluster_to_contig, contig_sizes, label_to_node)   #ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
+    f1 = getF1(avg_precision, avg_recall)
     print("### Evaluation {} cluster/{} labels:".format(n_pred_labels, n_true_labels))
-    print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (precision, recall, f1, ari))
-    return {"precision": precision, "recall": recall, "f1": f1, "ari": ari}
+    #print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (precision, recall, f1, ari))
+    print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f" % (avg_precision, avg_recall, f1, ))
+    return {"precision": avg_precision, "recall": avg_recall, "f1": f1} #, "ari": ari}
 
 
 def read_marker_gene_sets(lineage_file):
