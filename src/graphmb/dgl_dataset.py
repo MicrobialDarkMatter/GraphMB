@@ -3,6 +3,7 @@ import torch
 os.environ["DGLBACKEND"] = "pytorch"
 import dgl
 from dgl.data import DGLDataset
+import networkx as nx
 
 class DGLAssemblyDataset(DGLDataset):
     def __init__(self, assembly):

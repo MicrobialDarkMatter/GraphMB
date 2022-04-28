@@ -641,6 +641,7 @@ def cluster_eval(
     :return: new best HQ and epoch, clustering loss, cluster to contig mapping
     :rtype: list
     """
+    import torch
     kmeans_loss = None
     t0_cluster = time.time()
     model.eval()

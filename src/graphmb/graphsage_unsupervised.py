@@ -149,8 +149,8 @@ class SAGE(nn.Module):
         # TODO: can we standardize this?
         for il, layer in enumerate(self.layers):
             y = torch.zeros(g.num_nodes(), self.n_hidden if il != len(self.layers) - 1 else self.n_classes)
-
             sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1)
+            
             dataloader = dgl.dataloading.NodeDataLoader(
                 g,
                 torch.arange(g.num_nodes()).to(g.device),
@@ -222,7 +222,6 @@ def train_graphsage(
 
     if batch_size == 0:
         batch_size = len(train_seeds)
-
     dataloader = dgl.dataloading.EdgeDataLoader(
         dataset.graph,
         train_seeds,
@@ -257,7 +256,7 @@ def train_graphsage(
         for step, (input_nodes, pos_graph, neg_graph, blocks) in enumerate(dataloader):
             batch_inputs = nfeat[input_nodes].to(device)
             d_step = time.time()
-            set_seed(seed)
+            #set_seed(seed)
             model.train()
             pos_graph = pos_graph.to(device)
             neg_graph = neg_graph.to(device)
