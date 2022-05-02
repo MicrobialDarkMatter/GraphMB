@@ -225,6 +225,7 @@ class AssemblyDataset:
         self.adj_matrix = scipy.sparse.coo_matrix(
             (self.edge_weights, (self.edges_src, self.edges_dst)), shape=(len(self.node_names), len(self.node_names))
         )
+        self.edge_weights = np.array(self.edge_weights)
 
     def read_depths(self):
         node_depths = {}
@@ -244,9 +245,10 @@ class AssemblyDataset:
                         self.logger.info("node name not found: {}".format(node_name))
             self.node_depths = np.array([node_depths[n] for n in self.node_names])
             if len(self.node_depths[0]) > 1:  # normalize depths
-                self.node_depths = stats.zscore(self.node_depths, axis=0)
                 depthssum = self.node_depths.sum(axis=1) + 1e-10
                 self.node_depths /= depthssum.reshape((-1, 1))
+            else:
+                self.node_depths = stats.zscore(self.node_depths, axis=0)
         else:
             self.node_depths = np.ones(len(self.node_names), 1)
 

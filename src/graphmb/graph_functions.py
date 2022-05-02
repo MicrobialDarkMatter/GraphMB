@@ -88,15 +88,18 @@ class ReadMapping:
         self.pos = pos
         self.mapq = mapq
 
-
+kernel = np.load("kernel.npz")['arr_0']
 def count_kmers(seq, k, kmer_to_id, canonical_k):
     # Used in case kmers are used as input features
     # https://stackoverflow.com/q/22428020
+    #breakpoint()
     kmers = [seq[i : i + k] for i in range(len(seq) - k + 1)]
     kmers = [kmer_to_id[k] for k in kmers if "N" not in k]
     kmer_counts = Counter(kmers)
     counts = np.array([kmer_counts[k] for k in range(canonical_k)])
     counts = counts / counts.sum()
+    counts += -(1/256)
+    counts = np.dot(counts, kernel)
     return counts
 
 
@@ -262,17 +265,18 @@ def augment_graph(graph, reads_dict, add_reads=False, min_mappings=0):
     return graph
 
 
-def get_kmer_to_id(kmer):
+def get_kmer_to_id(kmer, combine_revcomp=False):
     kmer_to_ids = {}
     BASE_COMPLEMENT = {"A": "T", "T": "A", "G": "C", "C": "G"}
-    all_kmers = itertools.product("ATCG", repeat=kmer)
+    all_kmers = itertools.product("ACGT", repeat=kmer)
     all_kmers = ["".join(k) for k in all_kmers]
     new_id = 0
     for kmer in all_kmers:
         if kmer not in kmer_to_ids:
             kmer_to_ids[kmer] = new_id
-            rev_compl = "".join(tuple([BASE_COMPLEMENT[x] for x in reversed(kmer)]))
-            kmer_to_ids[rev_compl] = new_id
+            if combine_revcomp:
+                rev_compl = "".join(tuple([BASE_COMPLEMENT[x] for x in reversed(kmer)]))
+                kmer_to_ids[rev_compl] = new_id
             new_id += 1
     return kmer_to_ids, new_id
 
@@ -399,7 +403,7 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
 
 
 def cluster_embs(node_embeddings, node_ids, clusteringalgo, kclusters, device="cpu", node_lens=None, seed=0):
-    set_seed(seed)
+    #set_seed(seed)
     if clusteringalgo == "vamb":
         from vamb.cluster import cluster as vamb_cluster
         it = vamb_cluster(
@@ -645,7 +649,7 @@ def cluster_eval(
     kmeans_loss = None
     t0_cluster = time.time()
     model.eval()
-    set_seed(seed)
+    #set_seed(seed)
     if torch.is_tensor(logits):
         embeds = logits.detach().numpy()
     else:
