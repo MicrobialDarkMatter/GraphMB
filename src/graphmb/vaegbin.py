@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 from scipy.sparse import csr_matrix, diags
 
-from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH
+from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, Autoencoder, VariationalAutoencoder
 from graph_functions import set_seed
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
@@ -177,8 +177,8 @@ def prepare_data_for_gnn(
     dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False
 ):
     if use_raw:
-        node_raw = np.hstack((dataset.node_kmers, dataset.node_depths))
-        node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
+        node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
+        #node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
         X = node_raw
     else:
         node_features = (dataset.node_embs - dataset.node_embs.mean(axis=0, keepdims=True)) / dataset.node_embs.std(
@@ -257,7 +257,7 @@ def run_gnn(dataset, args, logger):
     nlayers = args.layers
     VAE = False
     gname = args.model_name
-    gmodel = name_to_model[gname.split("_")[0].upper()]
+    gmodel_type = name_to_model[gname.split("_")[0].upper()]
     clustering = args.clusteringalgo
     k = args.kclusters
     use_edge_weights = True
@@ -265,18 +265,34 @@ def run_gnn(dataset, args, logger):
     cluster_markers_only = False
     decay = 0.5 ** (2.0 / epochs)
     concat_features = args.concat_features  # True to improve HQ
-    use_ae = gname.endswith("_ae")
+    use_ae = gname.endswith("_ae") or args.ae_only
     logger.info("using edge weights {}".format(use_edge_weights))
     logger.info("using disconnected {}".format(use_disconnected))
     logger.info("concat features {}".format(concat_features))
     logger.info("cluster markers only {}".format(cluster_markers_only))
 
-    #tf.config.experimental_run_functions_eagerly(True)
+    if use_ae:
+        args.rawfeatures = True
+    tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
     )
-    logger.info("feat dim {}".format(X.shape))
+    
+    # pre train clustering
+    cluster_labels, stats, _, _ = compute_clusters_and_stats(
+                X[cluster_mask],
+                node_names[cluster_mask],
+                dataset.ref_marker_sets,
+                dataset.contig_markers,
+                dataset.node_to_label,
+                dataset.label_to_node,
+                clustering=clustering,
+                k=k,
+                #cuda=args.cuda,
+            )
+    logger.info(stats)
+    logger.info("input feat dim {}".format(X.shape))
     logger.info("SCG neg pairs {}".format(neg_pair_idx.shape))
     pname = ""
 
@@ -288,69 +304,80 @@ def run_gnn(dataset, args, logger):
         input_dim = X.shape[1]
     else:
         input_dim = output_dim
-    logger.info(f"input dim {input_dim}")
+    logger.info(f"GNN input dim {input_dim}, use_ae: {use_ae}, run AE only: {args.ae_only}")
     logger.info(f"output clustering dim {output_dim}")
     S = []
-    model = gmodel(
-        features_shape=features.shape,
-        input_dim=input_dim,
-        labels=None,
-        adj=train_adj,
-        n_labels=output_dim,
-        hidden_units=hidden_units,
-        layers=nlayers,
-        conv_last=False,
-    )  # , use_bn=True, use_vae=False)
+    if not args.ae_only:
+        gnn_model = gmodel_type(
+            features_shape=features.shape,
+            input_dim=input_dim,
+            labels=None,
+            adj=train_adj,
+            n_labels=output_dim,
+            hidden_units=hidden_units,
+            layers=nlayers,
+            conv_last=False,
+        )  # , use_bn=True, use_vae=False)
+    else:
+        gnn_model = None
+    if use_ae:
+        # tf.keras.layers.LeakyReLU(alpha=0.01)
+        #ae_model = Autoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=None)
+        ae_model = VariationalAutoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=None)
+    else:
+        ae_model = None
     th = TH(
         features,
-        model,
+        gnn_model=gnn_model,
         lr=lr,
-        lambda_vae=0.01,
         all_different_idx=neg_pair_idx,
         all_same_idx=pos_pair_idx,
-        use_ae=use_ae,
+        ae_model=ae_model,
         latentdim=output_dim,
         gnn_weight=float(args.gnn_alpha),
         ae_weight=float(args.ae_alpha),
         scg_weight=float(args.scg_alpha),
         num_negatives=args.negatives,
-        decoder_input=args.decoder_input
+        decoder_input=args.decoder_input,
     )
     if not args.quiet:
-        model.summary()
-        if gname.endswith("_ae"):
-            th.encoder.summary()
-            th.decoder.summary()
+        if not args.ae_only:
+            gnn_model.summary()
+        #if gname.endswith("_ae"):
+        #    th.encoder.summary()
+        #    th.decoder.summary()
     train_idx = np.arange(len(features))
     pbar = tqdm(range(epochs), disable=args.quiet)
     scores = []
     best_embs = None
     best_model = None
     best_hq = 0
+    best_epoch = 0
     for e in pbar:
-        gnn_loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
-        gnn_loss = gnn_loss.numpy()
-        recon_loss = recon_loss.numpy()
-        diff_loss = diff_loss.numpy()
+        if not args.ae_only:
+            gnn_loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
+            gnn_loss = gnn_loss.numpy()
+            recon_loss = recon_loss.numpy()
+            diff_loss = diff_loss.numpy()
+        else:
+            gnn_loss, recon_loss, diff_loss = th.train_vae()
+            #gnn_loss, recon_loss, diff_loss = th.train_autoencoder()
+            recon_loss = recon_loss.numpy()
         gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
-        pbar.set_description(
-            f"[{gname} {nlayers}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} AE={recon_loss:.3f} BestHQ={best_hq} Max GPU mem={gpu_mem_alloc:.1f}"
-        )
-        total_loss = gnn_loss + diff_loss + recon_loss
-        losses["gnn"].append(gnn_loss)
-        losses["scg"].append(diff_loss)
-        losses["ae"].append(recon_loss)
-        losses["total"].append(total_loss)
+        
 
         # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
         if (e + 1) % RESULT_EVERY == 0:
-            model.adj = adj
+            if not args.ae_only:
+                th.gnn_model.adj = adj
             eval_features = features
             if use_ae:
-                eval_features = th.encoder(features)
-            node_new_features = model(eval_features, None, training=False)
-            node_new_features = node_new_features.numpy()
-            node_new_features = node_new_features[:, :output_dim]
+                eval_features = th.autoencoder.encoder.model(features)
+            if not args.ae_only:
+                node_new_features = th.gnn_model(eval_features, None, training=False)
+                node_new_features = node_new_features.numpy()
+            else:
+                node_new_features = eval_features.numpy()
             # concat with original features
             if concat_features:
                 node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
@@ -365,25 +392,39 @@ def run_gnn(dataset, args, logger):
                 k=k,
                 #cuda=args.cuda,
             )
-            if args.quiet:
-                logger.info(f"--- EPOCH {e:d} ---")
-                logger.info(f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Max GPU mem={gpu_mem_alloc:.1f}")
-                logger.info(stats)
+            
             stats["epoch"] = e
             scores.append(stats)
             all_cluster_labels.append(cluster_labels)
-            model.adj = train_adj
+            if not args.ae_only:
+                th.gnn_model.adj = train_adj
             if stats["hq"] > best_hq:
                 best_hq = stats["hq"]
-                best_model = model
+                best_model = th.gnn_model
                 best_embs = node_new_features
+                best_epoch = e
             # print('--- END ---')
-    model.adj = adj
+            if args.quiet:
+                logger.info(f"--- EPOCH {e:d} ---")
+                logger.info(f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+                logger.info(stats)
+
+        pbar.set_description(
+            f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+        )
+        total_loss = gnn_loss + diff_loss + recon_loss
+        losses["gnn"].append(gnn_loss)
+        losses["scg"].append(diff_loss)
+        losses["ae"].append(recon_loss)
+        losses["total"].append(total_loss)
+   
     if use_ae:
-        eval_features = th.encoder(features)
-    node_new_features = model(eval_features, None, training=False)
-    node_new_features = node_new_features.numpy()
-    node_new_features = node_new_features[:, :output_dim]
+        eval_features = th.autoencoder.encoder.model(features)
+    if not args.ae_only:
+        th.gnn_model.adj = adj
+        node_new_features = th.gnn_model(eval_features, None, training=False)
+        node_new_features = node_new_features.numpy()
+
     # concat with original features
     if concat_features:
         node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
@@ -416,7 +457,7 @@ def run_gnn(dataset, args, logger):
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
-    del model, th
+    del gnn_model, th
     # res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
     # if gt_idx_label_to_node is not None:
     #    # save embs

@@ -407,7 +407,7 @@ def main():
     # GraphSAGE params
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="lstm")
     parser.add_argument("--decoder_input", help="What to use for input to the decoder", default="gnn")
-    parser.add_argument("--no_gnn", help="Do not use GNN (ae model must be used and decoder input must be ae", action="store_true")
+    parser.add_argument("--ae_only", help="Do not use GNN (ae model must be used and decoder input must be ae", action="store_true")
     parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=1, type=int)
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
@@ -631,7 +631,7 @@ def main():
             from amber_eval import amber_eval
 
             amber_metrics, bin_counts = amber_eval(
-                args.labels, f"{args.outdir}/{args.outname}_best_contig2bin.tsv", ["graphmb"]
+                os.path.join(args.assembly, args.labels), f"{args.outdir}/{args.outname}_best_contig2bin.tsv", ["graphmb"]
             )
             hq = bin_counts["> 90% completeness"][1]
             mq = bin_counts["> 50% completeness"][1]
@@ -647,7 +647,7 @@ def main():
         values = [m[mname] for m in metrics_per_run]
         logger.info("{}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
     if args.labels is not None:
-        # amber_metrics_names = amber_metrics_per_run[0].keys()
+        #amber_metrics_names = amber_metrics_per_run[0].keys()
         amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "hq", "mq"]
         for mname in amber_metrics_names:
             values = [m[mname] for m in amber_metrics_per_run]
