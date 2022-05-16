@@ -61,8 +61,8 @@ though, you can just run the model for a number of epochs and pick the last mode
 By default, it runs with with early stopping.
 
 In summary, you need to have a directory with these files (names can be changed with arguments):
-- assembly.fasta: contig sequences
-- assembly_graph.fasta: assembly graph. it should have the sequences of assembly.fasta as nodes.
+- assembly.fasta: assembly graph edge sequences or contigs
+- assembly_graph.gfa: assembly graph. it should have the sequences of assembly.fasta as nodes.
 - assembly_depth.txt: output of `jgi_summarize_bam_contig_depths`
 - marker_gene_stats.csv (optional): output of CheckM for each contig
 
@@ -118,6 +118,10 @@ On this section we present an overview of how to get your data ready for GraphMB
 
 1. Assembly your reads with metaflye: ```flye -nano-raw <reads_file> -o <output> --meta```
 2. Filter and polish assembly if necessary (or extract edge sequences and polish edge sequences instead)
+```bash
+mv assembly.fasta contigs.fasta
+awk '/^S/{print ">"$2"\n"$3}' assembly_graph.gfa | fold > assembly.fasta
+```
 3. Convert assembly graph to contig-based graph if you want to use full contig instead of edges
 4. Run CheckM on sequences with Bacteria markers: 
 ```bash
