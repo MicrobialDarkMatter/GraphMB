@@ -27,6 +27,7 @@ class ContigsDataset(DGLDataset):
         markers=None,
         load_kmer=False,
         assembly_type="flye",
+        contig_nodes=False
     ):
         self.mode = "train"
         # self.save_dir = save_dir
@@ -56,6 +57,7 @@ class ContigsDataset(DGLDataset):
         self.kmer = kmer
         self.load_kmer = load_kmer
         self.assembly_type = assembly_type
+        self.contig_nodes = contig_nodes
         if self.load_kmer:
             self.kmer_to_ids, self.canonical_k = get_kmer_to_id(self.kmer)
 
@@ -84,7 +86,10 @@ class ContigsDataset(DGLDataset):
         self.read_seqs()
         print("read", len(self.contig_seqs), "seqs")
         print("processing GFA file", os.path.join(self.assembly, self.graph_file))
-        self.read_gfa()
+        if self.contig_nodes: # calculate contig k-mers
+          self.read_gfa_contigs()
+        else:
+            self.read_gfa_edges()
         print("read", len(self.edges_src), "edges")
         # self.filter_contigs()
         self.rename_nodes_to_index()
@@ -187,7 +192,64 @@ class ContigsDataset(DGLDataset):
                 else:
                     self.contig_seqs[contig_name] += line.strip()
 
-    def read_gfa(self):
+    
+    def read_gfa_contigs(self):
+        skipped_contigs = set()
+        for contig in self.contig_seqs:
+            contiglen = len(self.contig_seqs[contig])
+            if contiglen < self.min_contig_len:
+                skipped_contigs.add(contig)
+            else:
+                contiglen /= 1000000
+                self.contig_names.append(contig)
+                self.nodes_len.append([contiglen])
+                if self.load_kmer:
+                    kmers = count_kmers(self.contig_seqs[contig], self.kmer, self.kmer_to_ids, self.canonical_k)
+                    self.nodes_kmer.append(kmers)
+                self.nodes_data.append([])
+        print("skipped contigs", len(skipped_contigs), "<", self.min_contig_len)
+        edge_edge_links = {}
+        contig_edge_links = {}
+        with open(os.path.join(self.assembly, self.graph_file), "r") as f:
+            for line in f:
+                if line.startswith("L"): # edge links
+                    values = line.strip().split()  # TAG, SRC, SIGN, DEST, SIGN, 0M, RC
+                    edge_edge_links.setdefault(values[1],set()).add(values[3])
+                    edge_edge_links.setdefault(values[3],set()).add(values[1])
+                elif line.startswith("P"): # contig to edge links
+                    values = line.strip().split()
+                    if self.assembly_type == "spades":
+                        contig_name = "_".join(values[1].split("_")[:2])
+                    else:
+                        contig_name = values[1]
+                    if contig_name in skipped_contigs or contig_name not in self.contig_names:
+                        # skipped_edges.add((contig_names.index(values[1]), contig_names.index(values[3])))
+                        continue
+                    for edge in values[2].split(","):
+                        contig_edge_links.setdefault(contig_name,set()).add(edge[:-1])
+        # create graph, , and to linked to adjacent edges
+        # first create edge to contig index
+        edge_contig_links = {}
+        for contig in contig_edge_links:
+            for e in contig_edge_links[contig]:
+                edge_contig_links.setdefault(e, set()).add(contig)
+        for contig in contig_edge_links:
+            for edge in contig_edge_links[contig]:
+                # connect contigs linked to same edge
+                for contig2 in edge_contig_links[edge]:
+                    if contig2 != contig:
+                        self.edges_src.append(contig)
+                        self.edges_dst.append(contig2)
+                        self.edges_weight.append(1)
+                        # inverse is added when we get to contig2
+                for edge2 in edge_edge_links.get(edge, []):
+                    for contig2 in edge_contig_links.get(edge2, []):
+                        self.edges_src.append(contig)
+                        self.edges_dst.append(contig2)
+                        self.edges_weight.append(1)
+
+    
+    def read_gfa_edges(self):
         skipped_contigs = set()
         with open(os.path.join(self.assembly, self.graph_file), "r") as f:
             for line in f:
@@ -210,7 +272,7 @@ class ContigsDataset(DGLDataset):
                             kmers = count_kmers(contig_seq, self.kmer, self.kmer_to_ids, self.canonical_k)
                             self.nodes_kmer.append(kmers)
                         self.nodes_data.append([])
-                if line.startswith("L"):
+                elif line.startswith("L"): # edge links
                     values = line.strip().split()  # TAG, SRC, SIGN, DEST, SIGN, 0M, RC
                     if values[1] in skipped_contigs or values[3] in skipped_contigs:
                         # skipped_edges.add((contig_names.index(values[1]), contig_names.index(values[3])))
@@ -229,6 +291,7 @@ class ContigsDataset(DGLDataset):
                         self.edges_src.append(values[3])
                         self.edges_dst.append(values[1])
                         self.edges_weight.append(rc)
+
         print("skipped contigs", len(skipped_contigs), "<", self.min_contig_len)
 
     def read_depths(self, path):

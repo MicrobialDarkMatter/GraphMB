@@ -116,6 +116,7 @@ def main():
         "--outdir", "--outputdir", help="Output dir (same as input assembly dir if not defined", default=None
     )
     parser.add_argument("--assembly_type", help="flye or spades", default="flye")
+    parser.add_argument("--contignodes", help="Use contigs as nodes instead of edges", action="store_true")
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
     parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
     args = parser.parse_args()
@@ -194,6 +195,7 @@ def main():
         markers=args.markers,
         assembly_type=args.assembly_type,
         load_kmer=True,
+        contig_nodes=args.contignodes
     )
     dataset.assembly = args.assembly
 
