@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 from scipy.sparse import csr_matrix, diags
 
-from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, Autoencoder, VariationalAutoencoder
+from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder
 from graph_functions import set_seed
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
@@ -179,12 +179,16 @@ def prepare_data_for_gnn(
     if use_raw:
         node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
         #node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
+        ab_dim = dataset.node_depths.shape[1]
+        kmer_dim = dataset.node_kmers.shape[1]
         X = node_raw
     else:
         node_features = (dataset.node_embs - dataset.node_embs.mean(axis=0, keepdims=True)) / dataset.node_embs.std(
             axis=0, keepdims=True
         )
         X = node_features
+        ab_dim, kmer_dim = 0, 0
+
     depth = 2
     # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth)
     connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
@@ -243,7 +247,7 @@ def prepare_data_for_gnn(
     # neg_pair_idx = None
     pos_pair_idx = None
     print("train len edges:", train_adj.indices.shape[0])
-    return X, adj, train_adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
+    return X, adj, train_adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx, ab_dim, kmer_dim
 
 
 def run_gnn(dataset, args, logger):
@@ -275,7 +279,7 @@ def run_gnn(dataset, args, logger):
         args.rawfeatures = True
     tf.config.experimental_run_functions_eagerly(True)
 
-    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
+    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
     )
     
@@ -321,18 +325,26 @@ def run_gnn(dataset, args, logger):
     else:
         gnn_model = None
     if use_ae:
-        # tf.keras.layers.LeakyReLU(alpha=0.01)
-        #ae_model = Autoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=None)
-        ae_model = VariationalAutoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=None)
+        # tf.keras.layers.LeakyReLU()
+        #ae_model = Autoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=tf.keras.layers.LeakyReLU())
+        #ae_model = VariationalAutoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=tf.keras.layers.LeakyReLU())
+        encoder = VAEEncoder(ab_dim, kmer_dim, hidden_units, zdim=output_dim)
+        decoder = VAEDecoder(ab_dim, kmer_dim, hidden_units, zdim=output_dim)
+        th_vae = TrainHelperVAE(encoder, decoder)
+        ae_model = None
+
     else:
         ae_model = None
+        encoder = None
+        decoder = None
     th = TH(
         features,
         gnn_model=gnn_model,
         lr=lr,
         all_different_idx=neg_pair_idx,
         all_same_idx=pos_pair_idx,
-        ae_model=ae_model,
+        ae_encoder=encoder,
+        ae_decoder=decoder,
         latentdim=output_dim,
         gnn_weight=float(args.gnn_alpha),
         ae_weight=float(args.ae_alpha),
@@ -340,6 +352,7 @@ def run_gnn(dataset, args, logger):
         num_negatives=args.negatives,
         decoder_input=args.decoder_input,
     )
+    
     if not args.quiet:
         if not args.ae_only:
             gnn_model.summary()
@@ -347,32 +360,49 @@ def run_gnn(dataset, args, logger):
         #    th.encoder.summary()
         #    th.decoder.summary()
     train_idx = np.arange(len(features))
-    pbar = tqdm(range(epochs), disable=args.quiet)
+    features = np.array(features)
+    pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
     scores = []
     best_embs = None
     best_model = None
     best_hq = 0
     best_epoch = 0
-    for e in pbar:
+    batch_size = args.batchsize
+    batch_steps = [25, 75, 150, 300]
+    vae_losses = []
+    for e in pbar_epoch:
+        np.random.shuffle(train_idx)
+        recon_loss = 0
+        if use_ae:
+            # train VAE in batches
+            if e in batch_steps:
+                #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
+                batch_size = batch_size * 2
+            np.random.shuffle(train_idx)
+            pbar_vaebatch = tqdm(range(len(X)//batch_size), disable=args.quiet, position=1)
+            for b in pbar_vaebatch:
+                batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
+                loss = th_vae.train_step(X[batch_idx])
+                vae_losses.append(loss)
+                pbar_vaebatch.set_description(f'L={np.mean(vae_losses[-10:]):.4f}')
+                recon_loss = loss
+        
         if not args.ae_only:
-            gnn_loss, recon_loss, diff_loss = th.train_unsupervised(train_idx)
+            gnn_loss, diff_loss = th.train_unsupervised(train_idx)
             gnn_loss = gnn_loss.numpy()
-            recon_loss = recon_loss.numpy()
             diff_loss = diff_loss.numpy()
         else:
-            gnn_loss, recon_loss, diff_loss = th.train_vae()
-            #gnn_loss, recon_loss, diff_loss = th.train_autoencoder()
-            recon_loss = recon_loss.numpy()
+            gnn_loss = 0
+            diff_loss = 0
         gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
-        
 
-        # pbar.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
+        # pbar_epoch.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
         if (e + 1) % RESULT_EVERY == 0:
             if not args.ae_only:
                 th.gnn_model.adj = adj
             eval_features = features
             if use_ae:
-                eval_features = th.autoencoder.encoder.model(features)
+                eval_features = th.encoder(features)[0]
             if not args.ae_only:
                 node_new_features = th.gnn_model(eval_features, None, training=False)
                 node_new_features = node_new_features.numpy()
@@ -392,6 +422,7 @@ def run_gnn(dataset, args, logger):
                 k=k,
                 #cuda=args.cuda,
             )
+            #TODO plot tSNE
             
             stats["epoch"] = e
             scores.append(stats)
@@ -409,7 +440,7 @@ def run_gnn(dataset, args, logger):
                 logger.info(f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
                 logger.info(stats)
 
-        pbar.set_description(
+        pbar_epoch.set_description(
             f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss + recon_loss
@@ -419,7 +450,7 @@ def run_gnn(dataset, args, logger):
         losses["total"].append(total_loss)
    
     if use_ae:
-        eval_features = th.autoencoder.encoder.model(features)
+        eval_features = th.encoder(features)[0]
     if not args.ae_only:
         th.gnn_model.adj = adj
         node_new_features = th.gnn_model(eval_features, None, training=False)
@@ -468,13 +499,18 @@ def run_gnn(dataset, args, logger):
     #plt.plot(range(len(losses["total"])), losses["total"], label="total loss")
     if not args.quiet:
         fig, ax1 = plt.subplots()
-        ax1.plot(range(5, len(losses["gnn"])), losses["gnn"][5:], label="GNN loss")
-        ax1.plot(range(5, len(losses["scg"])), losses["scg"][5:], label="SCG loss")
-        ax1.plot(range(5, len(losses["ae"])), losses["ae"][5:], label="AE loss")
+        ax1.plot(range(1, len(losses["gnn"])), losses["gnn"][1:], label="GNN loss")
+        ax1.plot(range(1, len(losses["scg"])), losses["scg"][1:], label="SCG loss")
+        ax1.plot(range(1, len(losses["ae"])), losses["ae"][1:], label="AE loss")
         ax1.legend(loc='upper right')
+        ax1.set_ylim(0,1.5)
         ax2 = ax1.twinx()
-        ax2.plot(epoch_hqs, [hq/max(hqs) for hq in hqs], label="HQ")
+        #ax2.plot(epoch_hqs, [hq/max(hqs) for hq in hqs], label="HQ", color='red', marker='o')
+        ax2.plot(epoch_hqs, hqs, label="HQ", color='red', marker='o')
         plt.xlabel("epoch")
         plt.legend(loc='upper left')
+        plt.savefig(os.path.join(args.outdir,args.outname + "_training.png"), dpi=500)
         plt.show()
+        logger.info("saving figure to {}".format(os.path.join(args.outdir, args.outname + "_training.png")))
+        
     return best_embs

@@ -2,7 +2,7 @@ import tensorflow as tf
 
 from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense, Activation
+from tensorflow.keras.layers import Input, Dense, Activation, Softmax
 from tensorflow.keras import Sequential
 from tensorflow.keras.layers import BatchNormalization, Lambda, LeakyReLU
 from tensorflow.keras.layers import Dropout, Layer, Add, Concatenate
@@ -16,15 +16,11 @@ class Encoder(tf.keras.layers.Layer):
         super(Encoder, self).__init__()
         self.model =tf.keras.Sequential(
                 [
-                    Dense(intermediate_dim, activation=activation, name="encoder1"),
-                    #LeakyReLU(1e-2),
-                    #Dropout(0.2),
+                    Dense(intermediate_dim, activation=activation, name="encoder1", kernel_initializer='he_uniform'),
                     BatchNormalization(),
-                    Dense(intermediate_dim, activation=activation, name="encoder2"),
-                    #LeakyReLU(1e-2),
-                    #Dropout(0.2),
+                    Dense(intermediate_dim, activation=activation, name="encoder2", kernel_initializer='he_uniform'),
                     BatchNormalization(),
-                    #Dense(latentdim, activation=activation, name="encoder3"),
+                    Dense(latentdim, activation=None, name="encoder_output"),
                 ]
             )
         
@@ -37,13 +33,9 @@ class Decoder(tf.keras.layers.Layer):
     super(Decoder, self).__init__()
     self.model = tf.keras.Sequential(
                 [
-                    Dense(intermediate_dim, activation=activation,  name="decoder1"),
-                    #LeakyReLU(1e-2),
-                    #Dropout(0.2),
+                    Dense(intermediate_dim, activation=activation,  name="decoder1", kernel_initializer='he_uniform'),
                     BatchNormalization(),
-                    Dense(intermediate_dim, activation=activation,  name="decoder2"),
-                    #LeakyReLU(1e-2),
-                    #Dropout(0.2),
+                    Dense(intermediate_dim, activation=activation,  name="decoder2", kernel_initializer='he_uniform'),
                     BatchNormalization(),
                     Dense(original_dim, activation=None, name="output_layer"),
                 ]
@@ -51,6 +43,54 @@ class Decoder(tf.keras.layers.Layer):
   
   def call(self, code):
     return self.model(code)
+
+class VAEEncoder(Layer):
+    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64):
+        super(VAEEncoder, self).__init__()
+        self.abundance_dim = abundance_dim
+        self.kmers_dim = kmers_dim
+        in_ = Input(shape=(abundance_dim+kmers_dim,))
+        x = in_
+        for _ in range(2):
+            x = Dense(hiddendim, activation='linear')(x)
+            x = LeakyReLU()(x)
+            x = BatchNormalization()(x)
+        mu = Dense(zdim)(x)
+        logvar = Dense(zdim)(x)
+        self.model = Model(in_, [mu, logvar])
+ 
+    def call(self, x, training=False):
+        mu, sigma = self.model(x, training=training)
+        return mu, sigma
+    
+class VAEDecoder(Layer):
+    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64):
+        super(VAEDecoder, self).__init__()
+        self.abundance_dim = abundance_dim
+        self.kmers_dim = kmers_dim
+        in_ = Input(shape=(zdim,))
+        x = in_
+        for _ in range(2):
+            x = Dense(hiddendim, activation='linear')(x)
+            x = LeakyReLU()(x)
+            x = BatchNormalization()(x)
+            
+        # ORIGINAL VAMB PAPER
+        # x = Dense(abundance_dim+kmers_dim)(x)
+        
+        # IT IS BETTER TO SEPARATE THE LAYERS
+        # TO GET DIFFERENT BIASES
+        x1 = Dense(abundance_dim)(x)
+        x2 = Dense(kmers_dim)(x)
+        if self.abundance_dim > 1:
+            x1 = Softmax()(x1)
+        x = Concatenate()((x1,x2))
+        
+        self.model = Model(in_, x)
+ 
+    def call(self, z, training=False):
+        x_hat = self.model(z, training=training)
+        return x_hat
 
 
 class Autoencoder(tf.keras.Model):
@@ -65,28 +105,53 @@ class Autoencoder(tf.keras.Model):
     reconstructed = self.decoder(code)
     return code, reconstructed
 
-class VariationalAutoencoder(tf.keras.Model):
-    def __init__(self, hidden_dim, latent_dim, features_dim, activation):
-        super(VariationalAutoencoder, self).__init__()
-        #breakpoint()
-        self.encoder = Encoder(intermediate_dim=hidden_dim, latentdim=hidden_dim, activation=activation)
-        self.mu_layer = Dense(latent_dim, activation=None, name="mu_layer")
-        self.logsigma_layer = Dense(latent_dim, activation=None, name="logsigma_layer")
-        self.decoder = Decoder(intermediate_dim=hidden_dim, original_dim=features_dim, activation=activation)
 
+class TrainHelperVAE:
+    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.):
+        self.encoder = encoder
+        self.decoder = decoder
+        self.kld_weight = kld_weight
+        self.abundance_dim = self.encoder.abundance_dim
+        self.kmers_dim = self.encoder.kmers_dim
+        if self.abundance_dim > 1:
+            self.abundance_weight = 0.85 / tf.math.log(float(self.abundance_dim))
+            self.kmer_weight = 0.15
+        else:
+            self.abundance_weight = 0.5
+            self.kmer_weight = 0.5
+        self.opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        
+    def train_step(self, x):
+        loss = self._train_step(x)
+        loss = loss.numpy()
+        return loss
+    
+    @tf.function
+    def _train_step(self, x):
+        with tf.GradientTape() as tape:
+            mu, logvar = self.encoder(x, training=True)
+            
+            # ORIGINAL VAMB PAPER
+            # BAD TRICK - TRY TO AVOID IF POSSIBLE
+            # logvar = tf.math.softplus(logvar)
+            
+            epsilon = tf.random.normal(tf.shape(mu))
+            z = mu + epsilon * tf.math.exp(0.5 * logvar)
+            x_hat = self.decoder(z, training=True)
+            if self.abundance_dim > 1:
+                mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
+            else:
+                mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
+            mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
+            kld  = 0.5*tf.math.reduce_mean(tf.math.reduce_mean(1.0 + logvar - tf.math.pow(mu, 2) - tf.math.exp(logvar), axis=1))
+            kld  = kld * self.kld_weight
+            
+            loss = mse1 + mse2 - kld
+        tw = self.encoder.trainable_weights + self.decoder.trainable_weights    
+        grads = tape.gradient(loss, tw)
+        self.opt.apply_gradients(zip(grads, tw))
+        return loss
 
-    def call(self, input_features):
-        code = self.encoder(input_features)
-        mu = self.mu_layer(code)
-        logsigma = tf.math.softplus(self.logsigma_layer(code))
-        resampled = self.reparameterize(mu, logsigma)
-        reconstructed = self.decoder(code)
-        return mu, logsigma, reconstructed
-
-    def reparameterize(self, mu, logsigma):
-        epsilon = tf.random.normal(mu.shape)
-        latent = mu + epsilon * tf.math.exp(logsigma/2)
-        return latent
 
 class TH:
     def __init__(
@@ -96,7 +161,8 @@ class TH:
         lr=0.01,
         all_different_idx=None,
         all_same_idx=None,
-        ae_model=None,
+        ae_encoder=None,
+        ae_decoder=None,
         latentdim=32,
         gnn_weight=1.0,
         ae_weight=1.0,
@@ -127,62 +193,15 @@ class TH:
         self.all_different_idx = all_different_idx
         self.all_same_idx = all_same_idx
         
-        self.autoencoder = ae_model
-        self.use_ae = ae_model is not None
+        self.encoder = ae_encoder
+        self.decoder = ae_decoder
+        self.use_ae = ae_encoder is not None
         self.mse_loss = tf.keras.losses.MeanSquaredError()
         self.gnn_weight = gnn_weight
         self.ae_weight = ae_weight
         self.scg_weight = scg_weight
         self.no_gnn = gnn_model is None
-
-
-    def ae_loss(self, new_features, original_features):
-        #breakpoint()
-        #reconstruction_error = tf.reduce_mean(tf.square(tf.subtract(new_features, original_features)))
-        kmer_recon = new_features[:, self.ab_dim:]
-        abund_recon = new_features[:, :self.ab_dim]
-        abund_loss = tf.math.reduce_mean(tf.math.reduce_sum(tf.math.squared_difference(abund_recon, original_features[:, :self.ab_dim]), axis=1))
-        kmer_loss = self.mse_loss(original_features[:, self.ab_dim:], kmer_recon)
-        abund_dim = new_features.shape[1]-float(self.kmer_dim)
-        abund_w = (1-self.kmer_alpha)
-        if abund_dim > 1:
-            abund_w /= tf.math.log(abund_dim)
-        kmer_w = self.kmer_alpha/float(self.kmer_dim)
-        reconstruction_error = abund_loss*abund_w + kmer_loss*kmer_w
-        #print(abund_loss, abund_w, kmer_loss, kmer_w)
-        return reconstruction_error
-
-    def vae_loss(self, new_features, mu, logsigma, original_features,  kld_beta=200):
-        #reconstruction_error = tf.reduce_mean(tf.square(tf.subtract(new_features, original_features)))
-        #breakpoint()
-        reconstruction_error = self.ae_loss(new_features, original_features)
-        #kld_weight = 1 / (self.nlatent * kld_beta)
-        #kld = -0.5 * tf.math.reduce_mean(tf.math.reduce_sum(1 + logsigma - tf.math.pow(mu, 2) - tf.math.exp(logsigma), axis=1))
-        #reconstruction_error += kld*kld_weight
-        #print(kld, kld_weight, kld_beta, self.nlatent)
-        return reconstruction_error
-
-    @tf.function
-    def train_autoencoder(self):
-        with tf.GradientTape() as tape:
-            embs, recons = self.autoencoder(self.features)
-            recon_loss = self.ae_loss(recons, self.features)
-            gradients = tape.gradient(recon_loss, self.autoencoder.trainable_variables)
-            gradient_variables = zip(gradients, self.autoencoder.trainable_variables)
-            self.opt.apply_gradients(gradient_variables)
-        return 0, recon_loss, 0
-
-    @tf.function
-    def train_vae(self):
-        #breakpoint()
-        with tf.GradientTape() as tape:
-            mu, logsigma, recons = self.autoencoder(self.features)
-            recon_loss = self.vae_loss(recons, mu, logsigma, self.features)
-            gradients = tape.gradient(recon_loss, self.autoencoder.trainable_variables)
-            gradient_variables = zip(gradients, self.autoencoder.trainable_variables)
-            self.opt.apply_gradients(gradient_variables)
-        return 0, recon_loss, 0
-
+        self.train_ae = False
 
     @tf.function
     def train_unsupervised(self, idx):
@@ -190,7 +209,8 @@ class TH:
             #breakpoint()
             # run encoder first
             if self.use_ae:
-                ae_embs = self.autoencoder.encoder.model(self.features)
+                ae_embs = self.encoder(self.features)[0]
+
             else:
                 ae_embs = self.features
 
@@ -198,28 +218,14 @@ class TH:
             node_hat = self.gnn_model(ae_embs, idx)
 
             # run decoder and compute AE loss
-            recon_loss = tf.constant(0, dtype=tf.float32)
-            if self.use_ae:
-                if self.decoder_input == "gnn":
-                    recon_features = self.autoencoder.decoder.model(node_hat)
-                elif self.decoder_input == "ae":
-                    recon_features = self.autoencoder.decoder.model(ae_embs)
-                #node_hat = features
-                # assert recon_features.shape == self.features.shape
-                #breakpoint()
-                #kmer_recon = recon_features[:, : self.kmer_dim]
-                #abund_recon = recon_features[:, self.kmer_dim:]
-                #kmer_loss = self.mse_loss(self.features[:, :self.kmer_dim], kmer_recon)
-                #kmer_loss = tf.math.reduce_mean(tf.math.reduce_sum(tf.math.squared_difference(kmer_recon, self.features[:, :self.kmer_dim]), axis=1))
-                #abund_loss = self.mse_loss(self.features[:, self.kmer_dim:], abund_recon)
-                #abund_loss = tf.math.reduce_mean(np.sum(np.square(abund_recon - self.features[:, self.kmer_dim:]), axis=1))
-                #abund_loss = tf.math.reduce_mean(tf.math.reduce_sum(tf.math.squared_difference(abund_recon, self.features[:, self.kmer_dim:]), axis=1))
-                #recon_loss = (self.kmer_alpha / float(self.kmer_dim)) * kmer_loss + (1.0 - self.kmer_alpha) * abund_loss
-                #recon_loss = self.mse_loss(self.features, recon_features)
-                #recon_loss *= self.ae_weight
-                #recon_loss = kmer_loss
-                #recon_loss = self.ae_loss(recon_features, self.features)
-            loss = recon_loss
+            #recon_loss = tf.constant(0, dtype=tf.float32)
+            #if self.use_ae:
+            #    if self.decoder_input == "gnn":
+            #        recon_features = self.autoencoder.decoder.model(node_hat)
+            #    elif self.decoder_input == "ae":
+            #        recon_features = self.autoencoder.decoder.model(ae_embs)
+     
+            #loss = recon_loss
             gnn_loss = tf.constant(0, dtype=tf.float32)
             if not self.no_gnn:
                 # create random negatives for gnn_loss
@@ -259,7 +265,7 @@ class TH:
                     tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
                 )
                 gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
-                #loss += gnn_loss
+                loss = gnn_loss
             
             # SCG loss
             scg_loss = tf.constant(0, dtype=tf.float32)
@@ -270,19 +276,10 @@ class TH:
                 scg_loss = tf.reduce_mean(all_diff_pairs) * self.scg_weight
                 loss += scg_loss
 
-        """if self.no_gnn or self.use_ae:
-            tw_encoder = self.encoder.trainable_weights
-            tw_decoder = self.decoder.trainable_weights
-            if self.no_gnn:
-                tw = tw_encoder + tw_decoder
-        if not self.no_gnn:
-            tw = self.model.trainable_weights
-            if self.use_ae:
-                tw += tw_encoder + tw_decoder"""
         tw = self.gnn_model.trainable_weights
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
-        return gnn_loss, recon_loss, scg_loss
+        return gnn_loss, scg_loss
     
     @staticmethod
     def sample_idx(idx, n):
