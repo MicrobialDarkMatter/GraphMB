@@ -14,6 +14,7 @@ from scipy.sparse import csr_matrix, diags
 
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder
 from graph_functions import set_seed
+from graphmb.evaluate import calculate_overall_prf
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
 
@@ -108,47 +109,51 @@ def compute_clusters_and_stats(
         best_cluster_to_contig = {i: [] for i in range(k)}
         for i in range(len(node_names)):
             best_cluster_to_contig[labels[i]].append(node_names[i])
-    hq, positive_clusters = compute_hq(
-        reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
-    )
-    mq, _ = compute_hq(
-        reference_markers=reference_markers,
-        contig_genes=contig_genes,
-        node_names=node_names,
-        node_labels=labels,
-        comp_th=50,
-        cont_th=10,
-    )
-    non_comp, _ = compute_hq(
-        reference_markers=reference_markers,
-        contig_genes=contig_genes,
-        node_names=node_names,
-        node_labels=labels,
-        comp_th=0,
-        cont_th=10,
-    )
-    all_cont, _ = compute_hq(
-        reference_markers=reference_markers,
-        contig_genes=contig_genes,
-        node_names=node_names,
-        node_labels=labels,
-        comp_th=90,
-        cont_th=1000,
-    )
-    # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
-    positive_pairs = []
-    node_names_to_idx = {node_name: i for i, node_name in enumerate(node_names)}
-    for label in positive_clusters:
-        for (p1, p2) in itertools.combinations(best_cluster_to_contig[label], 2):
-            positive_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))
-    # print("found {} positive pairs".format(len(positive_pairs)))
-    positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
-    """if node_to_gt_idx_label is not None:
+    if contig_genes is not None:
+        hq, positive_clusters = compute_hq(
+            reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
+        )
+        mq, _ = compute_hq(
+            reference_markers=reference_markers,
+            contig_genes=contig_genes,
+            node_names=node_names,
+            node_labels=labels,
+            comp_th=50,
+            cont_th=10,
+        )
+        non_comp, _ = compute_hq(
+            reference_markers=reference_markers,
+            contig_genes=contig_genes,
+            node_names=node_names,
+            node_labels=labels,
+            comp_th=0,
+            cont_th=10,
+        )
+        all_cont, _ = compute_hq(
+            reference_markers=reference_markers,
+            contig_genes=contig_genes,
+            node_names=node_names,
+            node_labels=labels,
+            comp_th=90,
+            cont_th=1000,
+        )
+        # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
+        positive_pairs = []
+        node_names_to_idx = {node_name: i for i, node_name in enumerate(node_names)}
+        for label in positive_clusters:
+            for (p1, p2) in itertools.combinations(best_cluster_to_contig[label], 2):
+                positive_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))
+        # print("found {} positive pairs".format(len(positive_pairs)))
+        positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
+    else:
+        positive_pairs, positive_clusters = None, None
+        hq, mq = 0, 0
+    if node_to_gt_idx_label is not None:
         p, r, f1, ari = calculate_overall_prf(
             best_cluster_to_contig, best_contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )
-    else:"""
-    p, r, f1, ari = 0, 0, 0, 0
+    else:
+        p, r, f1, ari = 0, 0, 0, 0
 
     return (
         labels,
@@ -190,20 +195,19 @@ def prepare_data_for_gnn(
         ab_dim, kmer_dim = 0, 0
 
     depth = 2
-    # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth)
-    connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
-    nodes_with_markers = [
-        i
-        for i, n in enumerate(dataset.node_names)
-        if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
-    ]
-    cluster_mask = [True] * len(dataset.node_names)
-    adj_norm = normalize_adj_sparse(dataset.adj_matrix)
-    if cluster_markers_only:
+    # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth) 
+    if cluster_markers_only and dataset.contig_markers is not None:
+        connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
+        nodes_with_markers = [
+            i
+            for i, n in enumerate(dataset.node_names)
+            if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
+        ]
         # print("eval with ", len(nodes_with_markers), "contigds")
         cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
     else:
         cluster_mask = [True] * len(dataset.node_names)
+    adj_norm = normalize_adj_sparse(dataset.adj_matrix)
     if use_edge_weights:
         edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
             dataset.edge_weights.max() - dataset.edge_weights.min()
@@ -246,43 +250,50 @@ def prepare_data_for_gnn(
         train_adj = adj
     # neg_pair_idx = None
     pos_pair_idx = None
-    print("train len edges:", train_adj.indices.shape[0])
+    print("**** Num of edges:", train_adj.indices.shape[0])
     return X, adj, train_adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx, ab_dim, kmer_dim
 
 
-def run_gnn(dataset, args, logger):
+def run_model(dataset, args, logger):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
     hidden_units = args.hidden
     output_dim = args.embsize
     epochs = args.epoch
-    lr = args.lr  # 1e-2
+    lr = args.lr
     nlayers = args.layers
     VAE = False
     gname = args.model_name
-    gmodel_type = name_to_model[gname.split("_")[0].upper()]
+    if gname == "vae":
+        args.ae_only = True
+    else:
+        gmodel_type = name_to_model[gname.split("_")[0].upper()]
     clustering = args.clusteringalgo
     k = args.kclusters
     use_edge_weights = True
     use_disconnected = True
     cluster_markers_only = False
     decay = 0.5 ** (2.0 / epochs)
-    concat_features = args.concat_features  # True to improve HQ
-    use_ae = gname.endswith("_ae") or args.ae_only
-    logger.info("using edge weights {}".format(use_edge_weights))
-    logger.info("using disconnected {}".format(use_disconnected))
-    logger.info("concat features {}".format(concat_features))
-    logger.info("cluster markers only {}".format(cluster_markers_only))
+    concat_features = args.concat_features
+    use_ae = gname.endswith("_ae") or args.ae_only or gname == "vae"
+    logger.info("******* Running model: {} **********".format(gname))
+    logger.info("***** using edge weights: {} ******".format(use_edge_weights))
+    logger.info("***** using disconnected: {} ******".format(use_disconnected))
+    logger.info("***** concat features: {} *****".format(concat_features))
+    logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
 
     if use_ae:
         args.rawfeatures = True
+    logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
     tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
         dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
     )
-    
+    logger.info("***** input features dimension: {}".format(X.shape))
+    logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
+
     # pre train clustering
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
                 X[cluster_mask],
@@ -295,9 +306,8 @@ def run_gnn(dataset, args, logger):
                 k=k,
                 #cuda=args.cuda,
             )
-    logger.info(stats)
-    logger.info("input feat dim {}".format(X.shape))
-    logger.info("SCG neg pairs {}".format(neg_pair_idx.shape))
+    logger.info(f">>> Pre train stats: {str(stats)}")
+    
     pname = ""
 
     scores = []
@@ -308,8 +318,8 @@ def run_gnn(dataset, args, logger):
         input_dim = X.shape[1]
     else:
         input_dim = output_dim
-    logger.info(f"GNN input dim {input_dim}, use_ae: {use_ae}, run AE only: {args.ae_only}")
-    logger.info(f"output clustering dim {output_dim}")
+    logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim}, use_ae: {use_ae}, run AE only: {args.ae_only}")
+    logger.info(f"*** output clustering dim {output_dim}")
     S = []
     if not args.ae_only:
         gnn_model = gmodel_type(
@@ -324,19 +334,15 @@ def run_gnn(dataset, args, logger):
         )  # , use_bn=True, use_vae=False)
     else:
         gnn_model = None
+    
     if use_ae:
-        # tf.keras.layers.LeakyReLU()
-        #ae_model = Autoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=tf.keras.layers.LeakyReLU())
-        #ae_model = VariationalAutoencoder(hidden_dim=256, latent_dim=output_dim, features_dim=features.shape[1], activation=tf.keras.layers.LeakyReLU())
         encoder = VAEEncoder(ab_dim, kmer_dim, hidden_units, zdim=output_dim)
         decoder = VAEDecoder(ab_dim, kmer_dim, hidden_units, zdim=output_dim)
         th_vae = TrainHelperVAE(encoder, decoder)
-        ae_model = None
-
     else:
-        ae_model = None
         encoder = None
         decoder = None
+
     th = TH(
         features,
         gnn_model=gnn_model,
@@ -368,9 +374,15 @@ def run_gnn(dataset, args, logger):
     best_hq = 0
     best_epoch = 0
     batch_size = args.batchsize
+    if batch_size == 0:
+        batch_size = X.shape[0]
+    logger.info("**** initial batch size: {} ****".format(batch_size))
     batch_steps = [25, 75, 150, 300]
+    batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < X.shape[0]]
+    logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
     vae_losses = []
     for e in pbar_epoch:
+        vae_losses = []
         np.random.shuffle(train_idx)
         recon_loss = 0
         if use_ae:
@@ -379,13 +391,13 @@ def run_gnn(dataset, args, logger):
                 #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
                 batch_size = batch_size * 2
             np.random.shuffle(train_idx)
-            pbar_vaebatch = tqdm(range(len(X)//batch_size), disable=args.quiet, position=1)
+            pbar_vaebatch = tqdm(range(len(X)//batch_size), disable=(args.quiet or batch_size == X.shape[0] or len(X)//batch_size < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
                 loss = th_vae.train_step(X[batch_idx])
                 vae_losses.append(loss)
-                pbar_vaebatch.set_description(f'L={np.mean(vae_losses[-10:]):.4f}')
-                recon_loss = loss
+                pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_losses[-10:]):.4f}')
+            recon_loss = np.mean(vae_losses)
         
         if not args.ae_only:
             gnn_loss, diff_loss = th.train_unsupervised(train_idx)
@@ -396,7 +408,7 @@ def run_gnn(dataset, args, logger):
             diff_loss = 0
         gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
 
-        # pbar_epoch.set_description(f'[{i} {gname} {nlayers}l {pname}] L={loss:.3f}')
+        #pbar_epoch.set_description(f'[{gname} {nlayers}l {pname}] L={loss:.3f} BestHQ={best_hq} BestEpoch={best_epoch} MaxGPU_MB={gpu_mem_alloc:.1f}')
         if (e + 1) % RESULT_EVERY == 0:
             if not args.ae_only:
                 th.gnn_model.adj = adj
@@ -411,6 +423,7 @@ def run_gnn(dataset, args, logger):
             # concat with original features
             if concat_features:
                 node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+
             cluster_labels, stats, _, _ = compute_clusters_and_stats(
                 node_new_features[cluster_mask],
                 node_names[cluster_mask],
@@ -448,7 +461,7 @@ def run_gnn(dataset, args, logger):
         losses["scg"].append(diff_loss)
         losses["ae"].append(recon_loss)
         losses["total"].append(total_loss)
-   
+    
     if use_ae:
         eval_features = th.encoder(features)[0]
     if not args.ae_only:
@@ -459,7 +472,8 @@ def run_gnn(dataset, args, logger):
     # concat with original features
     if concat_features:
         node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
-
+    if best_embs is None:
+        best_embs = node_new_features
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
         node_new_features[cluster_mask],
         node_names[cluster_mask],
@@ -483,7 +497,7 @@ def run_gnn(dataset, args, logger):
     #    best_idx = np.argmax(f1s)
     # S.append(stats)
     S.append(scores[best_idx])
-    logger.info(f"best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]}")
+    logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
     with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers}l_{pname}_results.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):

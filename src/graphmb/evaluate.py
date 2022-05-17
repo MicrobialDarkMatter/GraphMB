@@ -81,8 +81,9 @@ def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, l
     )
     my_ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
     my_f1 = getF1(my_precision, my_recall)
-    print("### Evaluation {} cluster/{} labels:".format(n_pred_labels, n_true_labels))
-    print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (my_precision, my_recall, my_f1, my_ari))
+    #print("### Evaluation {} cluster/{} labels:".format(n_pred_labels, n_true_labels))
+    #print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (my_precision, my_recall, my_f1, my_ari))
+    return my_precision, my_recall, my_f1, my_ari
 
 
 def read_marker_gene_sets(lineage_file):

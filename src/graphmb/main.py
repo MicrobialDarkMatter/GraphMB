@@ -239,7 +239,7 @@ def write_bins(args, dataset, cluster_to_contig, logger):
                 binfile.write(dataset.node_seqs[contig] + "\n")
                 clustered_contigs.add(contig)
         # print("multi cluster", c, "size", cluster_size, "contigs", len(cluster_to_contig[c]))
-    logger.info("skipped {} clusters".format(skipped_clusters))
+    logger.info("### skipped {} clusters while writing to file".format(skipped_clusters))
     single_clusters = multi_contig_clusters
     left_over = set(dataset.node_names) - clustered_contigs - short_contigs
     for c in left_over:
@@ -250,13 +250,13 @@ def write_bins(args, dataset, cluster_to_contig, logger):
                 binfile.write(dataset.node_seqs[c] + "\n")
                 single_clusters += 1
             # print("contig", single_clusters, "size", len(dataset.contig_seqs[c]))
-    logger.info(f"wrote {single_clusters} clusters {multi_contig_clusters} >= #contig {args.mincomp}")
+    logger.info(f"### wrote {single_clusters} clusters {multi_contig_clusters} >= #contig {args.mincomp}")
 
 
 def run_post_processing(final_embs, args, logger, dataset, device, label_to_node, node_to_label, seed):
     metrics = {}
     if "cluster" in args.post or "kmeans" in args.post:
-        logger.info("clustering embs with {} ({})".format(args.clusteringalgo, args.kclusters))
+        logger.info("#### clustering embs with {} ({})".format(args.clusteringalgo, args.kclusters))
         # train_embs = last_train_embs
 
         if args.clusteringalgo is False:
@@ -302,8 +302,8 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
                     total_hq += 1
                 if results[binid]["comp"] > 50 and results[binid]["cont"] < 10:
                     total_mq += 1
-            logger.info("Total HQ {}".format(total_hq))
-            logger.info("Total MQ {}".format(total_mq))
+            logger.info("#### Total HQ {} ####".format(total_hq))
+            logger.info("#### Total MQ {} ####".format(total_mq))
             metrics["hq_bins"] = total_hq
             metrics["mq_bins"] = total_mq
         contig_lens = {dataset.node_names[i]: dataset.node_lengths[i] for i in range(len(dataset.node_names))}
@@ -326,11 +326,11 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
                 label_to_node,
             )
         if "writebins" in args.post:
-            logger.info(f"writing bins to {args.outdir}/{args.outname}_bins/")
+            logger.info(f"### writing bins to {args.outdir}/{args.outname}_bins/")
             write_bins(args, dataset, best_cluster_to_contig, logger)
         if "contig2bin" in args.post:
             # invert cluster_to_contig
-            logging.info("Writing contig2bin to {}/{}".format(args.outdir, args.outname))
+            logger.info("### Writing contig2bin to {}/{}".format(args.outdir, args.outname))
             with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
                 f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
                 for c in best_contig_to_bin:
@@ -362,11 +362,11 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
         )
 
     if "edges" in args.post:
-        logger.info(f"writing edges to {args.outdir + args.outname}_edges")
+        logger.info(f"### writing edges to {args.outdir + args.outname}_edges")
         write_edges(graph, os.path.join(args.outdir, args.outname + "_edges"))
 
     if "writeembs" in args.post:
-        logger.info("writing best and last embs to {}".format(args.outdir))
+        logger.info("### writing best and last embs to {}".format(args.outdir))
         write_embs(final_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_best_embs.pickle"))
         # write_embs(best_train_embs, dataset.node_names, os.path.join(args.outdir, f"{args.outname}_last_embs.pickle"))
     return metrics
@@ -600,7 +600,7 @@ def main():
             if model is None:
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
-        elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae"):
+        elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae", "vae"):
             if "torch" in sys.modules:
                 sys.modules.pop('torch')
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
@@ -609,12 +609,13 @@ def main():
             logging.getLogger("tensorflow").setLevel(logging.FATAL)
             if not args.cuda:
                 tf.config.set_visible_devices([], "GPU")
+            # load precomputed contigs with same SCGs (diff genomes)
             if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
                 dataset.neg_pairs_idx = np.load(f"{dataset.cache_dir}/all_different.npy")
             else:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            best_train_embs = vaegbin.run_gnn(dataset, args, logger)
+            best_train_embs = vaegbin.run_model(dataset, args, logger)
 
         metrics = run_post_processing(
             best_train_embs,
@@ -651,7 +652,7 @@ def main():
         amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "hq", "mq"]
         for mname in amber_metrics_names:
             values = [m[mname] for m in amber_metrics_per_run]
-            logger.info("{}: {:.4f} {:.4f}".format(mname, np.mean(values), np.std(values)))
+            logger.info("### label eval ###{}: {:.4f} {:.4f}".format(mname, np.mean(values), np.std(values)))
 
 
 if __name__ == "__main__":
