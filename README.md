@@ -137,9 +137,9 @@ checkm qa checkm_edges/Bacteria.ms checkm_edges/ -f checkm_edges_polished_result
 minimap2 -I 64GB -d assembly.mmi assembly.fasta # make index
 minimap2 -I 64GB -ax map-ont assembly.mmi <reads_file> > assembly.sam
 samtools sort assembly.sam > assembly.bam
-jgi_summarize_bam_contig_depths --outputDepth asseembly_depth.txt assembly.bam
+jgi_summarize_bam_contig_depths --outputDepth assembly_depth.txt assembly.bam
 ```
-6. Now you should have all the files to run GraphMB
+6. Now you should have all the files to run GraphMB: assembly.fasta, assembly_graph.gfa and assembly_depth.txt. The marker_gene_stats.csv file will be saved to checkm_edges/storage/.
 
 We have only tested GraphMB on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
 Depending on your setup, you need to either use the edges as contigs.
