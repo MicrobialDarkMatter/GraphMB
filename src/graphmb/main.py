@@ -346,7 +346,7 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
             centroids=centroids_2dim,
             hq_centroids=hq_bins,
             node_sizes=None,
-            outputname=args.outdir + args.outname + "_tsne_clusters.png",
+            outputname=os.path.join(args.outdir, args.outname + "_tsne_clusters.png"),
         )
 
         # node_sizes=[dataset.nodes_len[i][0] * 100 for i in range(len(dataset.contig_names))],
@@ -357,13 +357,13 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
             node_to_label,
             label_to_node,
             best_cluster_to_contig,
-            args.outdir + args.outname + "_graph.png",
+            os.path.join(args.outdir, args.outname + "_graph.png"),
             graph=graph,
         )
 
     if "edges" in args.post:
         logger.info(f"writing edges to {args.outdir + args.outname}_edges")
-        write_edges(graph, args.outdir + args.outname + "_edges")
+        write_edges(graph, os.path.join(args.outdir, args.outname + "_edges"))
 
     if "writeembs" in args.post:
         logger.info("writing best and last embs to {}".format(args.outdir))
