@@ -258,11 +258,14 @@ def run_model(dataset, args, logger):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
-    hidden_units = args.hidden
-    output_dim = args.embsize
+    hidden_gnn = args.hidden_gnn
+    hidden_vae = args.hidden_vae
+    output_dim_gnn = args.embsize_gnn
+    output_dim_vae = args.embsize_vae
     epochs = args.epoch
-    lr = args.lr
-    nlayers = args.layers
+    lr_vae = args.lr_vae
+    lr_gnn = args.lr_gnn
+    nlayers_gnn = args.layers_gnn
     VAE = False
     gname = args.model_name
     if gname == "vae":
@@ -315,30 +318,32 @@ def run_model(dataset, args, logger):
     all_cluster_labels = []
     features = tf.constant(X.astype(np.float32))
     if not use_ae:
-        input_dim = X.shape[1]
+        input_dim_gnn = X.shape[1]
     else:
-        input_dim = output_dim
-    logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim}, use_ae: {use_ae}, run AE only: {args.ae_only}")
-    logger.info(f"*** output clustering dim {output_dim}")
+        input_dim_gnn = output_dim_vae
+    logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim_gnn}, use_ae: {use_ae}, run AE only: {args.ae_only}")
+    
     S = []
     if not args.ae_only:
         gnn_model = gmodel_type(
             features_shape=features.shape,
-            input_dim=input_dim,
+            input_dim=input_dim_gnn,
             labels=None,
             adj=train_adj,
-            n_labels=output_dim,
-            hidden_units=hidden_units,
-            layers=nlayers,
+            n_labels=output_dim_gnn,
+            hidden_units=hidden_gnn,
+            layers=nlayers_gnn,
             conv_last=False,
         )  # , use_bn=True, use_vae=False)
+        logger.info(f"*** output clustering dim {output_dim_gnn}")
     else:
         gnn_model = None
+        logger.info(f"*** output clustering dim {output_dim_vae}")
     
     if use_ae:
-        encoder = VAEEncoder(ab_dim, kmer_dim, hidden_units, zdim=output_dim)
-        decoder = VAEDecoder(ab_dim, kmer_dim, hidden_units, zdim=output_dim)
-        th_vae = TrainHelperVAE(encoder, decoder)
+        encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae)
+        decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae)
+        th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae)
     else:
         encoder = None
         decoder = None
@@ -346,12 +351,12 @@ def run_model(dataset, args, logger):
     th = TH(
         features,
         gnn_model=gnn_model,
-        lr=lr,
+        lr=lr_gnn,
         all_different_idx=neg_pair_idx,
         all_same_idx=pos_pair_idx,
         ae_encoder=encoder,
         ae_decoder=decoder,
-        latentdim=output_dim,
+        latentdim=output_dim_gnn,
         gnn_weight=float(args.gnn_alpha),
         ae_weight=float(args.ae_alpha),
         scg_weight=float(args.scg_alpha),
@@ -450,11 +455,11 @@ def run_model(dataset, args, logger):
             # print('--- END ---')
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
-                logger.info(f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+                logger.info(f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
                 logger.info(stats)
 
         pbar_epoch.set_description(
-            f"[{gname} {nlayers}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+            f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss + recon_loss
         losses["gnn"].append(gnn_loss)
@@ -498,7 +503,7 @@ def run_model(dataset, args, logger):
     # S.append(stats)
     S.append(scores[best_idx])
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
-    with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers}l_{pname}_results.tsv", "w") as f:
+    with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_{pname}_results.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")

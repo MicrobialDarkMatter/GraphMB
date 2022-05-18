@@ -138,7 +138,7 @@ def get_activation(args):
     # pick activation function
     import torch.nn as nn
     if args.activation == "prelu":
-        activation = nn.PReLU(args.hidden)
+        activation = nn.PReLU(args.hidden_gnn)
     elif args.activation == "relu":
         activation = nn.ReLU()
     elif args.activation == "tanh":
@@ -155,9 +155,9 @@ def run_graphmb(dataset, args, device, logger):
     activation = get_activation(args)
     model = SAGE(
         dataset.graph.ndata["feat"].shape[1],
-        args.hidden,
-        args.embsize,
-        args.layers,
+        args.hidden_gnn,
+        args.embsize_gnn,
+        args.layers_gnn,
         activation,
         args.dropout,
         agg=args.aggtype,
@@ -406,12 +406,15 @@ def main():
     parser.add_argument(
         "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
     )
-    parser.add_argument("--layers", type=int, help="Number of layers of the GNN", default=3)
-    parser.add_argument("--hidden", type=int, help="Dimension of hidden layers of GNN", default=512)
-    parser.add_argument("--embsize", type=int, help="Output embedding dimension of GNN", default=64)
-    parser.add_argument("--batchsize", type=int, help="batchsize to train the GNN", default=0)
+    parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=3)
+    parser.add_argument("--hidden_gnn", type=int, help="Dimension of hidden layers of GNN", default=512)
+    parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of GNN", default=512)
+    parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=64)
+    parser.add_argument("--embsize_vae", "--zl", type=int, help="Output embedding dimension of VAE", default=64)
+    parser.add_argument("--batchsize", type=int, help="batchsize to train the VAE", default=0)
     parser.add_argument("--dropout", type=float, help="dropout of the GNN", default=0.0)
-    parser.add_argument("--lr", type=float, help="learning rate", default=0.00005)
+    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=0.00005)
+    parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=1)
     parser.add_argument("--ae_alpha", type=float, help="Coeficient for AE loss", default=1)
     parser.add_argument("--scg_alpha", type=float, help="Coeficient for SCG loss", default=100)
@@ -658,13 +661,13 @@ def main():
     metrics_names = metrics_per_run[0].keys()
     for mname in metrics_names:
         values = [m[mname] for m in metrics_per_run]
-        logger.info("{}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
+        logger.info("### SCG {}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
     if args.labels is not None:
         #amber_metrics_names = amber_metrics_per_run[0].keys()
         amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "hq", "mq"]
         for mname in amber_metrics_names:
             values = [m[mname] for m in amber_metrics_per_run]
-            logger.info("### label eval ###{}: {:.4f} {:.4f}".format(mname, np.mean(values), np.std(values)))
+            logger.info("### label eval {}: {:.4f} {:.4f} ###".format(mname, np.mean(values), np.std(values)))
 
 
 if __name__ == "__main__":
