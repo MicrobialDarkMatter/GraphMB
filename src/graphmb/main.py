@@ -372,6 +372,19 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
     return metrics
 
 
+class LoadFromFile (argparse.Action):
+    def __call__ (self, parser, namespace, values, option_string = None):
+        with values as f:
+            contents = f.read()
+        # parse arguments in the file and store them in a blank namespace
+        data = parser.parse_args(contents.split(), namespace=None)
+        for k, v in vars(data).items():
+            # set arguments in the target namespace if they haven’t been set yet
+            #if getattr(namespace, k, None) is None:
+            #print(f"using args {k}={v}")
+            setattr(namespace, k, v)
+            
+
 def main():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
     # input files
@@ -455,6 +468,7 @@ def main():
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
     parser.add_argument("--quiet", "-q", help="Do not output epoch progress", action="store_true")
     parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
+    parser.add_argument('--configfile', type=open, action=LoadFromFile)
     args = parser.parse_args()
 
     if args.version:
@@ -472,7 +486,7 @@ def main():
     print("logging to {}".format(logfile))
     stdout_handler = logging.StreamHandler(sys.stdout)
     logger.addHandler(output_file_handler)
-    logger.info(args)
+    
     logger.addHandler(stdout_handler)
     logging.getLogger("matplotlib.font_manager").disabled = True
 
@@ -486,7 +500,7 @@ def main():
     sys.excepthook = handle_exception
 
     logger.info(f"Running GraphMB {__version__}")
-
+    logger.info(args)
     # setup cuda and cpu
     logger.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
@@ -531,8 +545,6 @@ def main():
     # filter graph by components
     # dataset.connected = [c for c in dataset.connected if len(c) >= args.mincomp]
 
-    # select features to use
-    # this code wont be used for now but next version will train AE from these features
     # zscore Kmer features (kmer are already loaded from reading the dataset)
     # dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
 
