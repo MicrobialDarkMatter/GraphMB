@@ -123,7 +123,7 @@ def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
         node_embeddings_2dim = all_embs[: embs.shape[0]]
     else:
         centroids_2dim = None
-        node_embeddings_2dim = tsne.fit_transform(torch.tensor(embs))
+        node_embeddings_2dim = tsne.fit_transform(embs)
     return node_embeddings_2dim, centroids_2dim
 
 def draw_nx_graph(graph, node_to_label, labels_to_node, basename, contig_sizes=None, node_titles=None):
@@ -356,16 +356,16 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
     labels_to_node = {label: labels_to_node[label] for label in labels_to_node if len(labels_to_node[label]) > 0}
     labels_to_plot = sorted(labels_to_node, key=lambda key: len(labels_to_node[key]), reverse=True)[
         : len(colors) * len(markers)
-    ]
+    ][:20]
     # print("ploting these labels", [l, colors[il], len(labels_to_node[l]) for il, l in enumerate(labels_to_plot)])
     x_to_plot = []
     y_to_plot = []
     colors_to_plot = []
     sizes_to_plot = []
     markers_to_plot = []
-    print(labels_to_plot)
+    #print(labels_to_plot)
     plt.figure()
-    print(" LABEL  COLOR  SIZE   DOTS")
+    #print(" LABEL  COLOR  SIZE   DOTS")
     for i, l in enumerate(labels_to_plot):
         valid_nodes = 0
         if len(labels_to_node) == 0:
@@ -385,7 +385,7 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
             colors_to_plot.append(colors[i % len(colors)])
             markers_to_plot.append(markers[i // len(colors)])
         # breakpoint()
-        # print("plotting", l, colors[i % len(colors)], markers[i // len(colors)], len(labels_to_node[l]), valid_nodes)
+        #print("plotting", l, colors[i % len(colors)], markers[i // len(colors)], len(labels_to_node[l]), valid_nodes)
         # plt.scatter(x_to_plot, y_to_plot, s=sizes_to_plot, c=colors[i], label=l)  # , alpha=0.5)
         sc = plt.scatter(
             x_to_plot,
@@ -417,11 +417,10 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
 
     # for n in node_embeddings:
     # plt.scatter(x_to_plot, y_to_plot, c=colors_to_plot) #, alpha=0.5)
-    plt.legend()
     if outputname is not None:
-        plt.savefig(outputname, bbox_inches="tight", dpi=1200)
+        plt.savefig(outputname, bbox_inches="tight", dpi=400)
     else:
-        
+        plt.legend()
         plt.show()
 
 

@@ -535,6 +535,10 @@ def main():
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
 
+    # reload labels from file anyway
+    if args.labels is not None:
+        dataset.read_labels()
+    
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
     # if args.no_edges:

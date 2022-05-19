@@ -147,6 +147,7 @@ def compute_clusters_and_stats(
         positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
     else:
         positive_pairs, positive_clusters = None, None
+        # TODO use p/r/ to get positive_clusters
         hq, mq = 0, 0
     if node_to_gt_idx_label is not None:
         p, r, f1, ari = calculate_overall_prf(
@@ -313,7 +314,7 @@ def run_model(dataset, args, logger):
     
 
     # pre train clustering
-    cluster_labels, stats, _, _ = compute_clusters_and_stats(
+    cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                 X[cluster_mask],
                 node_names[cluster_mask],
                 dataset.ref_marker_sets,
@@ -324,6 +325,18 @@ def run_model(dataset, args, logger):
                 k=k,
                 #cuda=args.cuda,
             )
+    if args.tsne:
+        cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
+        node_embeddings_2dim, centroids_2dim = run_tsne(X, dataset, cluster_to_contig, hq_bins, centroids=None)
+        plot_embs(
+            dataset.node_names,
+            node_embeddings_2dim,
+            dataset.label_to_node.copy(),
+            centroids=centroids_2dim,
+            hq_centroids=hq_bins,
+            node_sizes=None,
+            outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_notrain.png"),
+        )
     logger.info(f">>> Pre train stats: {str(stats)}")
     
     pname = ""
@@ -463,7 +476,7 @@ def run_model(dataset, args, logger):
                 plot_embs(
                     dataset.node_names,
                     node_embeddings_2dim,
-                    dataset.label_to_node,
+                    dataset.label_to_node.copy(),
                     centroids=centroids_2dim,
                     hq_centroids=hq_bins,
                     node_sizes=None,
