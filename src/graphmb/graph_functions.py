@@ -104,6 +104,28 @@ def count_kmers(seq, k, kmer_to_id, canonical_k):
     return counts
 
 
+def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
+    from sklearn.manifold import TSNE
+
+    SEED = 0
+    print("running tSNE")
+    # filter only good clusters
+    tsne = TSNE(n_components=2, random_state=SEED)
+    if len(dataset.labels) == 1:
+        label_to_node = {c: cluster_to_contig[c] for c in hq_bins}
+        label_to_node["mq/lq"] = []
+        for c in cluster_to_contig:
+            if c not in hq_bins:
+                label_to_node["mq/lq"] += list(cluster_to_contig[c])
+    if centroids is not None:
+        all_embs = tsne.fit_transform(torch.cat((torch.tensor(embs), torch.tensor(centroids)), dim=0))
+        centroids_2dim = all_embs[embs.shape[0] :]
+        node_embeddings_2dim = all_embs[: embs.shape[0]]
+    else:
+        centroids_2dim = None
+        node_embeddings_2dim = tsne.fit_transform(torch.tensor(embs))
+    return node_embeddings_2dim, centroids_2dim
+
 def draw_nx_graph(graph, node_to_label, labels_to_node, basename, contig_sizes=None, node_titles=None):
     # draw graph with pybiz library, creates an HTML file with graph
     # del labels_to_node["NA"]
@@ -395,11 +417,11 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
 
     # for n in node_embeddings:
     # plt.scatter(x_to_plot, y_to_plot, c=colors_to_plot) #, alpha=0.5)
-
+    plt.legend()
     if outputname is not None:
         plt.savefig(outputname, bbox_inches="tight", dpi=1200)
     else:
-        plt.legend()
+        
         plt.show()
 
 

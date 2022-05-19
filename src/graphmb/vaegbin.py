@@ -13,7 +13,7 @@ from rich.table import Table
 from scipy.sparse import csr_matrix, diags
 
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder
-from graph_functions import set_seed
+from graph_functions import set_seed, run_tsne, plot_embs
 from graphmb.evaluate import calculate_overall_prf
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
@@ -445,7 +445,7 @@ def run_model(dataset, args, logger):
             if concat_features:
                 node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
 
-            cluster_labels, stats, _, _ = compute_clusters_and_stats(
+            cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                 node_new_features[cluster_mask],
                 node_names[cluster_mask],
                 dataset.ref_marker_sets,
@@ -457,14 +457,33 @@ def run_model(dataset, args, logger):
                 #cuda=args.cuda,
             )
             #TODO plot tSNE
+            if args.tsne:
+                cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
+                node_embeddings_2dim, centroids_2dim = run_tsne(node_new_features, dataset, cluster_to_contig, hq_bins, centroids=None)
+                plot_embs(
+                    dataset.node_names,
+                    node_embeddings_2dim,
+                    dataset.label_to_node,
+                    centroids=centroids_2dim,
+                    hq_centroids=hq_bins,
+                    node_sizes=None,
+                    outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{e}.png"),
+                )
             
             stats["epoch"] = e
             scores.append(stats)
+            logger.info(stats)
             all_cluster_labels.append(cluster_labels)
             if not args.ae_only:
                 th.gnn_model.adj = train_adj
-            if stats["hq"] > best_hq:
+
+            if dataset.contig_markers is not None and stats["hq"] > best_hq:
                 best_hq = stats["hq"]
+                #best_model = th.gnn_model
+                best_embs = node_new_features
+                best_epoch = e
+            elif dataset.contig_markers is None and stats["f1"] > best_hq:
+                best_hq = stats["f1"]
                 #best_model = th.gnn_model
                 best_embs = node_new_features
                 best_epoch = e

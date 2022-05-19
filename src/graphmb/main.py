@@ -29,33 +29,11 @@ from graphmb.graph_functions import (
     calculate_bin_metrics,
     draw_nx_graph,
     set_seed,
+    run_tsne
 )
 
 import vaegbin
 from graphmb.version import __version__
-
-
-def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
-    from sklearn.manifold import TSNE
-
-    SEED = 0
-    print("running tSNE")
-    # filter only good clusters
-    tsne = TSNE(n_components=2, random_state=SEED)
-    if len(dataset.labels) == 1:
-        label_to_node = {c: cluster_to_contig[c] for c in hq_bins}
-        label_to_node["mq/lq"] = []
-        for c in cluster_to_contig:
-            if c not in hq_bins:
-                label_to_node["mq/lq"] += list(cluster_to_contig[c])
-    if centroids is not None:
-        all_embs = tsne.fit_transform(torch.cat((torch.tensor(embs), torch.tensor(centroids)), dim=0))
-        centroids_2dim = all_embs[embs.shape[0] :]
-        node_embeddings_2dim = all_embs[: embs.shape[0]]
-    else:
-        centroids_2dim = None
-        node_embeddings_2dim = tsne.fit_transform(torch.tensor(embs))
-    return node_embeddings_2dim, centroids_2dim
 
 
 def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
@@ -461,6 +439,7 @@ def main():
     parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
+    parser.add_argument("--tsne", help="Plot tsne at checkpoints", action="store_true")
     parser.add_argument("--vambdim", help="VAE latent dim", default=32)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
     parser.add_argument(
