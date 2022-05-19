@@ -552,7 +552,7 @@ def main():
 
     vamb_emb_exists = os.path.exists(features_dir)
 
-    if not args.rawfeatures and (args.vamb or not vamb_emb_exists):
+    if not args.rawfeatures and (args.vamb or not vamb_emb_exists) and args.model_name != "vae":
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
 
@@ -563,7 +563,8 @@ def main():
     # elif args.read_edges or args.depth:
     # if args.edge_threshold is not None:
     #    dataset.filter_edges(int(args.edge_threshold))
-    dataset.read_features()
+    if not args.rawfeatures and args.model_name != "vae":
+        dataset.read_features()
     metrics_per_run = []
     amber_metrics_per_run = []
     for n in range(args.nruns):
@@ -626,7 +627,7 @@ def main():
             # load precomputed contigs with same SCGs (diff genomes)
             if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
                 dataset.neg_pairs_idx = np.load(f"{dataset.cache_dir}/all_different.npy")
-            else:
+            elif args.markers is not None:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
             best_train_embs = vaegbin.run_model(dataset, args, logger)

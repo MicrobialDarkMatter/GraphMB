@@ -244,20 +244,26 @@ class AssemblyDataset:
     def read_depths(self):
         node_depths = {}
         if self.depthfile is not None:
-            with open(os.path.join(self.data_dir, self.depthfile)) as f:
-                header = next(f)
-                depth_i = [i + 3 for i, n in enumerate(header.split("\t")[3:]) if "-var" not in n]
-                # var_i = [i + 3 for i, n in enumerate(header.split("\t")[3:]) if "-var" in n]
-                for line in f:
-                    values = line.strip().split()
-                    node_name = process_node_name(values[0], self.assembly_type)
-                    # if self.assembly_type == "spades":
-                    #    node_name = "_".join(node_name.split("_")[:2])
-                    if node_name in self.node_names:
-                        node_depths[node_name] = np.array([float(values[i]) for i in depth_i])
-                    else:
-                        self.logger.info("node name not found: {}".format(node_name))
-            self.node_depths = np.array([node_depths[n] for n in self.node_names])
+            if self.depthfile.endswith(".npz"):
+                self.node_depths = np.load(open(os.path.join(self.data_dir, self.depthfile), "rb"))["arr_0"]
+                if self.node_depths.shape[0] != len(self.node_names):
+                    print("depth npz file mismatch:")
+                    breakpoint()
+            else:
+                with open(os.path.join(self.data_dir, self.depthfile)) as f:
+                    header = next(f)
+                    depth_i = [i + 3 for i, n in enumerate(header.split("\t")[3:]) if "-var" not in n]
+                    # var_i = [i + 3 for i, n in enumerate(header.split("\t")[3:]) if "-var" in n]
+                    for line in f:
+                        values = line.strip().split()
+                        node_name = process_node_name(values[0], self.assembly_type)
+                        # if self.assembly_type == "spades":
+                        #    node_name = "_".join(node_name.split("_")[:2])
+                        if node_name in self.node_names:
+                            node_depths[node_name] = np.array([float(values[i]) for i in depth_i])
+                        else:
+                            self.logger.info("node name not found: {}".format(node_name))
+                self.node_depths = np.array([node_depths[n] for n in self.node_names])
             if len(self.node_depths[0]) > 1:  # normalize depths
                 depthssum = self.node_depths.sum(axis=1) + 1e-10
                 self.node_depths /= depthssum.reshape((-1, 1))
@@ -394,10 +400,14 @@ class AssemblyDataset:
     def read_features(self):
         node_embs = {}
         self.logger.info("loading features from {}".format(self.featuresfile))
-        with open(self.featuresfile, "r") as ffile:
-            for line in ffile:
-                values = line.strip().split()
-                node_embs[values[0]] = [float(x) for x in values[1:]]
+        if self.featuresfile.endswith(".tsv"):
+            with open(self.featuresfile, "r") as ffile:
+                for line in ffile:
+                    values = line.strip().split()
+                    node_embs[values[0]] = [float(x) for x in values[1:]]
+        elif self.featuresfile.endswith(".pickle"):
+            with open(self.featuresfile, "r") as ffile:
+                node_embs = pickle.load(ffile)
         self.logger.info("loaded {} features/ {} nodes".format(len(node_embs), len(self.node_names)))
         self.node_embs = [
             node_embs.get(n, np.random.uniform(10e-5, 1.0, len(values[1:]))) for n in self.node_names

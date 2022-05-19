@@ -10,40 +10,6 @@ import numpy as np
 from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 
-
-class Encoder(tf.keras.layers.Layer):
-    def __init__(self, intermediate_dim, latentdim, activation):
-        super(Encoder, self).__init__()
-        self.model =tf.keras.Sequential(
-                [
-                    Dense(intermediate_dim, activation=activation, name="encoder1", kernel_initializer='he_uniform'),
-                    BatchNormalization(),
-                    Dense(intermediate_dim, activation=activation, name="encoder2", kernel_initializer='he_uniform'),
-                    BatchNormalization(),
-                    Dense(latentdim, activation=None, name="encoder_output"),
-                ]
-            )
-        
-    def call(self, input_features):
-       return self.model(input_features)
-
-
-class Decoder(tf.keras.layers.Layer):
-  def __init__(self, intermediate_dim, original_dim, activation):
-    super(Decoder, self).__init__()
-    self.model = tf.keras.Sequential(
-                [
-                    Dense(intermediate_dim, activation=activation,  name="decoder1", kernel_initializer='he_uniform'),
-                    BatchNormalization(),
-                    Dense(intermediate_dim, activation=activation,  name="decoder2", kernel_initializer='he_uniform'),
-                    BatchNormalization(),
-                    Dense(original_dim, activation=None, name="output_layer"),
-                ]
-            )
-  
-  def call(self, code):
-    return self.model(code)
-
 class VAEEncoder(Layer):
     def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64):
         super(VAEEncoder, self).__init__()
@@ -93,19 +59,6 @@ class VAEDecoder(Layer):
         return x_hat
 
 
-class Autoencoder(tf.keras.Model):
-  def __init__(self, hidden_dim, latent_dim, features_dim, activation):
-    super(Autoencoder, self).__init__()
-    #breakpoint()
-    self.encoder = Encoder(intermediate_dim=hidden_dim, latentdim=latent_dim, activation=activation)
-    self.decoder = Decoder(intermediate_dim=hidden_dim, original_dim=features_dim, activation=activation)
-  
-  def call(self, input_features):
-    code = self.encoder(input_features)
-    reconstructed = self.decoder(code)
-    return code, reconstructed
-
-
 class TrainHelperVAE:
     def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.):
         self.encoder = encoder
@@ -133,7 +86,7 @@ class TrainHelperVAE:
             
             # ORIGINAL VAMB PAPER
             # BAD TRICK - TRY TO AVOID IF POSSIBLE
-            # logvar = tf.math.softplus(logvar)
+            #logvar = tf.math.softplus(logvar)
             
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)

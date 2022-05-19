@@ -93,12 +93,13 @@ def count_kmers(seq, k, kmer_to_id, canonical_k):
     # Used in case kmers are used as input features
     # https://stackoverflow.com/q/22428020
     #breakpoint()
-    kmers = [seq[i : i + k] for i in range(len(seq) - k + 1)]
-    kmers = [kmer_to_id[k] for k in kmers if "N" not in k]
+    kmer_letters = set(["A", "T", "C", "G"])
+    kmers = [seq[i : i + k] for i in range(len(seq) - k + 1) if set(seq[i : i + k]).issubset(kmer_letters)]
+    kmers = [kmer_to_id[k] for k in kmers]
     kmer_counts = Counter(kmers)
     counts = np.array([kmer_counts[k] for k in range(canonical_k)])
     counts = counts / counts.sum()
-    counts += -(1/256)
+    counts += -(1/(4**k))
     counts = np.dot(counts, kernel)
     return counts
 
