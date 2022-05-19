@@ -178,6 +178,15 @@ def filter_disconnected(adj, node_names, markers):
     return set(graph.nodes())
 
 
+
+def prepare_data_for_vae(dataset):
+    # less preparation necessary than for GNN
+    node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
+    ab_dim = dataset.node_depths.shape[1]
+    kmer_dim = dataset.node_kmers.shape[1]
+    X = node_raw
+    return X, ab_dim, kmer_dim
+
 def prepare_data_for_gnn(
     dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False
 ):
@@ -291,11 +300,17 @@ def run_model(dataset, args, logger):
     logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
     tf.config.experimental_run_functions_eagerly(True)
 
-    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-        dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
-    )
+    if not args.ae_only:
+        X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
+        )
+        logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
+    else:
+        X, ab_dim, kmer_dim = prepare_data_for_vae(dataset)
+        cluster_mask = [True] * len(dataset.node_names)
+
     logger.info("***** input features dimension: {}".format(X.shape))
-    logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
+    
 
     # pre train clustering
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
@@ -348,21 +363,22 @@ def run_model(dataset, args, logger):
         encoder = None
         decoder = None
 
-    th = TH(
-        features,
-        gnn_model=gnn_model,
-        lr=lr_gnn,
-        all_different_idx=neg_pair_idx,
-        all_same_idx=pos_pair_idx,
-        ae_encoder=encoder,
-        ae_decoder=decoder,
-        latentdim=output_dim_gnn,
-        gnn_weight=float(args.gnn_alpha),
-        ae_weight=float(args.ae_alpha),
-        scg_weight=float(args.scg_alpha),
-        num_negatives=args.negatives,
-        decoder_input=args.decoder_input,
-    )
+    if not args.ae_only:
+        th = TH(
+            features,
+            gnn_model=gnn_model,
+            lr=lr_gnn,
+            all_different_idx=neg_pair_idx,
+            all_same_idx=pos_pair_idx,
+            ae_encoder=encoder,
+            ae_decoder=decoder,
+            latentdim=output_dim_gnn,
+            gnn_weight=float(args.gnn_alpha),
+            ae_weight=float(args.ae_alpha),
+            scg_weight=float(args.scg_alpha),
+            num_negatives=args.negatives,
+            decoder_input=args.decoder_input,
+        )
     
     if not args.quiet:
         if not args.ae_only:
@@ -419,7 +435,7 @@ def run_model(dataset, args, logger):
                 th.gnn_model.adj = adj
             eval_features = features
             if use_ae:
-                eval_features = th.encoder(features)[0]
+                eval_features = encoder(features)[0]
             if not args.ae_only:
                 node_new_features = th.gnn_model(eval_features, None, training=False)
                 node_new_features = node_new_features.numpy()
@@ -449,7 +465,7 @@ def run_model(dataset, args, logger):
                 th.gnn_model.adj = train_adj
             if stats["hq"] > best_hq:
                 best_hq = stats["hq"]
-                best_model = th.gnn_model
+                #best_model = th.gnn_model
                 best_embs = node_new_features
                 best_epoch = e
             # print('--- END ---')
@@ -468,7 +484,7 @@ def run_model(dataset, args, logger):
         losses["total"].append(total_loss)
     
     if use_ae:
-        eval_features = th.encoder(features)[0]
+        eval_features = encoder(features)[0]
     if not args.ae_only:
         th.gnn_model.adj = adj
         node_new_features = th.gnn_model(eval_features, None, training=False)
@@ -507,7 +523,7 @@ def run_model(dataset, args, logger):
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
-    del gnn_model, th
+    #del gnn_model, th
     # res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
     # if gt_idx_label_to_node is not None:
     #    # save embs

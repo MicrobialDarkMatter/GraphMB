@@ -92,12 +92,13 @@ class AssemblyDataset:
         np.save(os.path.join(self.cache_dir, "node_lengths.npy"), self.node_lengths)
         np.save(os.path.join(self.cache_dir, "node_attributes_kmer.npy"), self.node_kmers.astype(float))
         pickle.dump(self.node_seqs, open(os.path.join(self.cache_dir, "node_seqs.pkl"), "wb"))
-        self.logger.info("processing GFA file {}".format(os.path.join(self.data_dir, self.graphfile)))
-        self.read_gfa()
-        self.logger.info(f"read {len(self.edges_src)}, edges")
-        np.save(os.path.join(self.cache_dir, "edge_weights.npy"), self.edge_weights)
-        scipy.sparse.save_npz(os.path.join(self.cache_dir, "adj_sparse.npz"), self.adj_matrix)
-        np.save(os.path.join(self.cache_dir, "graph_nodes.npy"), self.graph_nodes)
+        if os.path.exists(os.path.join(self.data_dir, self.graphfile)):
+            self.logger.info("processing GFA file {}".format(os.path.join(self.data_dir, self.graphfile)))
+            self.read_gfa()
+            self.logger.info(f"read {len(self.edges_src)}, edges")
+            np.save(os.path.join(self.cache_dir, "edge_weights.npy"), self.edge_weights)
+            scipy.sparse.save_npz(os.path.join(self.cache_dir, "adj_sparse.npz"), self.adj_matrix)
+            np.save(os.path.join(self.cache_dir, "graph_nodes.npy"), self.graph_nodes)
         # self.filter_contigs()
         # self.rename_nodes_to_index()
         # self.nodes_depths = np.array(self.nodes_depths)
@@ -113,40 +114,53 @@ class AssemblyDataset:
         # print("reading SCGs")
         # self.read_scgs()
 
-    def read_cache(self):
+    def read_cache(self, load_graph=True):
         prefix = os.path.join(self.cache_dir, "{}")
         self.node_names = list(np.load(prefix.format("node_names.npy")))
         self.node_seqs = pickle.load(open(prefix.format("node_seqs.pkl"), "rb"))
         # graph nodes
         self.node_lengths = np.load(prefix.format("node_lengths.npy"))
-        self.graph_nodes = np.load(prefix.format("graph_nodes.npy"))
+        if load_graph:
+            self.graph_nodes = np.load(prefix.format("graph_nodes.npy"))
+            self.adj_matrix = scipy.sparse.load_npz(prefix.format("adj_sparse.npz"))
+            self.edge_weights = self.adj_matrix.data
+            self.edges_src = self.adj_matrix.row
+            self.edges_dst = self.adj_matrix.col
         self.node_kmers = np.load(prefix.format("node_attributes_kmer.npy"))
         self.node_depths = np.load(prefix.format("node_attributes_depth.npy"))
         # self.edge_weights = np.load(prefix.format("edge_weights.npy"))
-        self.adj_matrix = scipy.sparse.load_npz(prefix.format("adj_sparse.npz"))
-        self.edge_weights = self.adj_matrix.data
-        self.edges_src = self.adj_matrix.row
-        self.edges_dst = self.adj_matrix.col
+        
         # labels
         self.node_to_label = np.load("{}/node_to_label.npy".format(self.cache_dir), allow_pickle=True)[()]
         self.label_to_node = np.load("{}/label_to_node.npy".format(self.cache_dir), allow_pickle=True)[()]
         self.labels = list(np.load("{}/labels.npy".format(self.cache_dir)))
 
-    def check_cache(self):
+    def check_cache(self, require_graph=True):
         """check if all necessary files exist in cache"""
         prefix = os.path.join(self.cache_dir, "{}")
-        return (
-            os.path.exists(prefix.format("node_names.npy"))
-            and os.path.exists(prefix.format("node_lengths.npy"))
-            and os.path.exists(prefix.format("node_attributes_kmer.npy"))
-            and os.path.exists(prefix.format("node_attributes_depth.npy"))
-            and os.path.exists(prefix.format("edge_weights.npy"))
-            and os.path.exists(prefix.format("adj_sparse.npz"))
-            and os.path.exists(prefix.format("graph_nodes.npy"))
-            and os.path.exists(prefix.format("node_to_label.npy"))
-            and os.path.exists(prefix.format("label_to_node.npy"))
-            and os.path.exists(prefix.format("labels.npy"))
-        )
+        if require_graph:
+            return (
+                os.path.exists(prefix.format("node_names.npy"))
+                and os.path.exists(prefix.format("node_lengths.npy"))
+                and os.path.exists(prefix.format("node_attributes_kmer.npy"))
+                and os.path.exists(prefix.format("node_attributes_depth.npy"))
+                and os.path.exists(prefix.format("edge_weights.npy"))
+                and os.path.exists(prefix.format("adj_sparse.npz"))
+                and os.path.exists(prefix.format("graph_nodes.npy"))
+                and os.path.exists(prefix.format("node_to_label.npy"))
+                and os.path.exists(prefix.format("label_to_node.npy"))
+                and os.path.exists(prefix.format("labels.npy"))
+            )
+        else:
+            return (
+                os.path.exists(prefix.format("node_names.npy"))
+                and os.path.exists(prefix.format("node_lengths.npy"))
+                and os.path.exists(prefix.format("node_attributes_kmer.npy"))
+                and os.path.exists(prefix.format("node_attributes_depth.npy"))
+                and os.path.exists(prefix.format("node_to_label.npy"))
+                and os.path.exists(prefix.format("label_to_node.npy"))
+                and os.path.exists(prefix.format("labels.npy"))
+            )
 
     def read_seqs(self):
         """Read sequences from fasta file, write to self.node_seqs"""
@@ -282,7 +296,8 @@ class AssemblyDataset:
             self.labels = labels
             self.label_to_node = label_to_node
             # calculate homophily
-            self.calculate_homophily()
+            if len(self.edge_weights) > 1:
+                self.calculate_homophily()
         else:
             self.labels = ["NA"]
             self.label_to_node = {"NA": self.node_names}

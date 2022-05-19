@@ -123,7 +123,6 @@ def check_dirs(args, use_features=True):
     # check if other dirs exists
     if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
         print(f"Assembly Graph file {args.graph_file} not found")
-        exit()
     if not os.path.exists(os.path.join(args.assembly, args.features)) or not use_features:
         # needs assembly files to calculate features
         if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
@@ -402,7 +401,7 @@ def main():
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
 
     # model specification
-    parser.add_argument("--model_name", type=str, help="only sage for now", default="sage_lstm")
+    parser.add_argument("--model_name", type=str, help="One of the implemented models", default="sage_lstm")
     parser.add_argument(
         "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
     )
@@ -510,7 +509,7 @@ def main():
     clustering_device = "cuda:0" if args.cuda else "cpu"
     logger.info("setting seed to {}".format(args.seed))
     set_seed(args.seed)
-
+    use_graph = os.path.exists(os.path.join(args.assembly, args.graph_file))
     # specify data properties for caching
     if args.features is None:
         if args.assembly != "":
@@ -534,8 +533,8 @@ def main():
         args.outdir,
         min_contig_length=args.mincontig,
     )
-    if dataset.check_cache() and not args.reload:
-        dataset.read_cache()
+    if dataset.check_cache(use_graph) and not args.reload:
+        dataset.read_cache(use_graph)
     else:
         check_dirs(args, use_features=False)
         dataset.read_assembly()
@@ -668,7 +667,7 @@ def main():
         for mname in amber_metrics_names:
             values = [m[mname] for m in amber_metrics_per_run]
             logger.info("### label eval {}: {:.4f} {:.4f} ###".format(mname, np.mean(values), np.std(values)))
-
+    print("Total run time: {}".format(datetime.now() - now))
 
 if __name__ == "__main__":
     main()
