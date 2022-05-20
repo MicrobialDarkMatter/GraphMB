@@ -405,13 +405,16 @@ class AssemblyDataset:
                 for line in ffile:
                     values = line.strip().split()
                     node_embs[values[0]] = [float(x) for x in values[1:]]
+            self.logger.info("loaded {} features/ {} nodes from tsv".format(len(node_embs), len(self.node_names)))
         elif self.featuresfile.endswith(".pickle"):
-            with open(self.featuresfile, "r") as ffile:
+            with open(self.featuresfile, "rb") as ffile:
                 node_embs = pickle.load(ffile)
-        self.logger.info("loaded {} features/ {} nodes".format(len(node_embs), len(self.node_names)))
+            self.logger.info("loaded {} features/ {} nodes from pickle".format(len(node_embs), len(self.node_names)))
         self.node_embs = [
-            node_embs.get(n, np.random.uniform(10e-5, 1.0, len(values[1:]))) for n in self.node_names
-        ]  # deal with missing embs
+                node_embs.get(n, np.random.uniform(10e-5, 1.0, len(node_embs[list(node_embs.keys())[0]]))) for n in self.node_names
+            ]  # deal with missing embs
         self.node_embs = np.array(self.node_embs)
+        
+       
 
 
