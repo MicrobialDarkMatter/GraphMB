@@ -11,7 +11,7 @@ from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 
 class VAEEncoder(Layer):
-    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64):
+    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0):
         super(VAEEncoder, self).__init__()
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
@@ -20,6 +20,8 @@ class VAEEncoder(Layer):
         for _ in range(2):
             x = Dense(hiddendim, activation='linear')(x)
             x = LeakyReLU()(x)
+            if dropout > 0:
+                x = Dropout(dropout)(x)
             x = BatchNormalization()(x)
         mu = Dense(zdim)(x)
         logvar = Dense(zdim)(x)
@@ -30,7 +32,7 @@ class VAEEncoder(Layer):
         return mu, sigma
     
 class VAEDecoder(Layer):
-    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64):
+    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0):
         super(VAEDecoder, self).__init__()
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
@@ -39,6 +41,8 @@ class VAEDecoder(Layer):
         for _ in range(2):
             x = Dense(hiddendim, activation='linear')(x)
             x = LeakyReLU()(x)
+            if dropout > 0:
+                x = Dropout(dropout)(x)
             x = BatchNormalization()(x)
             
         # ORIGINAL VAMB PAPER
@@ -86,7 +90,7 @@ class TrainHelperVAE:
             
             # ORIGINAL VAMB PAPER
             # BAD TRICK - TRY TO AVOID IF POSSIBLE
-            #logvar = tf.math.softplus(logvar)
+            logvar = tf.math.softplus(logvar)
             
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)

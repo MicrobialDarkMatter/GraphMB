@@ -136,7 +136,7 @@ def run_graphmb(dataset, args, device, logger):
         args.embsize_gnn,
         args.layers_gnn,
         activation,
-        args.dropout,
+        args.dropout_gnn,
         agg=args.aggtype,
     )
     model = model.to(device)
@@ -384,13 +384,14 @@ def main():
         "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
     )
     parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=3)
-    parser.add_argument("--hidden_gnn", type=int, help="Dimension of hidden layers of GNN", default=512)
+    parser.add_argument("--hidden_gnn", type=int, help="Dimension of hidden layers of GNN", default=128)
     parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of GNN", default=512)
     parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=64)
     parser.add_argument("--embsize_vae", "--zl", type=int, help="Output embedding dimension of VAE", default=64)
     parser.add_argument("--batchsize", type=int, help="batchsize to train the VAE", default=0)
-    parser.add_argument("--dropout", type=float, help="dropout of the GNN", default=0.0)
-    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=0.00005)
+    parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.0)
+    parser.add_argument("--dropout_vae", type=float, help="dropout of the VAE", default=0.0)
+    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-2)
     parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=1)
     parser.add_argument("--ae_alpha", type=float, help="Coeficient for AE loss", default=1)
@@ -598,6 +599,7 @@ def main():
             if model is None:
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
+        
         elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae", "vae"):
             if "torch" in sys.modules:
                 sys.modules.pop('torch')

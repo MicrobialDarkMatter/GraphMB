@@ -369,8 +369,8 @@ def run_model(dataset, args, logger):
         logger.info(f"*** output clustering dim {output_dim_vae}")
     
     if use_ae:
-        encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae)
-        decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae)
+        encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+        decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
         th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae)
     else:
         encoder = None
@@ -469,7 +469,7 @@ def run_model(dataset, args, logger):
                 k=k,
                 #cuda=args.cuda,
             )
-            #TODO plot tSNE
+            #plot tSNE
             if args.tsne:
                 cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
                 node_embeddings_2dim, centroids_2dim = run_tsne(node_new_features, dataset, cluster_to_contig, hq_bins, centroids=None)
@@ -528,7 +528,7 @@ def run_model(dataset, args, logger):
     if best_embs is None:
         best_embs = node_new_features
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        node_new_features[cluster_mask],
+        best_embs[cluster_mask],
         node_names[cluster_mask],
         dataset.ref_marker_sets,
         dataset.contig_markers,
