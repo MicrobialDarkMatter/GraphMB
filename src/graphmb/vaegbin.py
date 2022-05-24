@@ -4,6 +4,7 @@ import os
 from tqdm import tqdm
 import itertools
 import numpy as np
+import datetime
 import tensorflow as tf
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -314,30 +315,31 @@ def run_model(dataset, args, logger):
     
 
     # pre train clustering
-    cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
-                X[cluster_mask],
-                node_names[cluster_mask],
-                dataset.ref_marker_sets,
-                dataset.contig_markers,
-                dataset.node_to_label,
-                dataset.label_to_node,
-                clustering=clustering,
-                k=k,
-                #cuda=args.cuda,
+    if not args.skip_preclustering:
+        cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+                    X[cluster_mask],
+                    node_names[cluster_mask],
+                    dataset.ref_marker_sets,
+                    dataset.contig_markers,
+                    dataset.node_to_label,
+                    dataset.label_to_node,
+                    clustering=clustering,
+                    k=k,
+                    #cuda=args.cuda,
+                )
+        if args.tsne:
+            cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
+            node_embeddings_2dim, centroids_2dim = run_tsne(X, dataset, cluster_to_contig, hq_bins, centroids=None)
+            plot_embs(
+                dataset.node_names,
+                node_embeddings_2dim,
+                dataset.label_to_node.copy(),
+                centroids=centroids_2dim,
+                hq_centroids=hq_bins,
+                node_sizes=None,
+                outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_notrain.png"),
             )
-    if args.tsne:
-        cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
-        node_embeddings_2dim, centroids_2dim = run_tsne(X, dataset, cluster_to_contig, hq_bins, centroids=None)
-        plot_embs(
-            dataset.node_names,
-            node_embeddings_2dim,
-            dataset.label_to_node.copy(),
-            centroids=centroids_2dim,
-            hq_centroids=hq_bins,
-            node_sizes=None,
-            outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_notrain.png"),
-        )
-    logger.info(f">>> Pre train stats: {str(stats)}")
+        logger.info(f">>> Pre train stats: {str(stats)}")
     
     pname = ""
 
@@ -392,7 +394,11 @@ def run_model(dataset, args, logger):
             num_negatives=args.negatives,
             decoder_input=args.decoder_input,
         )
-    
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
+    summary_writer = tf.summary.create_file_writer(train_log_dir)
+
+
     if not args.quiet:
         if not args.ae_only:
             gnn_model.summary()
@@ -415,6 +421,7 @@ def run_model(dataset, args, logger):
     batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < X.shape[0]]
     logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
     vae_losses = []
+    step = 0
     for e in pbar_epoch:
         vae_losses = []
         np.random.shuffle(train_idx)
@@ -425,12 +432,15 @@ def run_model(dataset, args, logger):
                 #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
                 batch_size = batch_size * 2
             np.random.shuffle(train_idx)
-            pbar_vaebatch = tqdm(range(len(X)//batch_size), disable=(args.quiet or batch_size == X.shape[0] or len(X)//batch_size < 100), position=1, ascii=' =')
+            n_batches = len(X)//batch_size
+            pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == X.shape[0] or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
-                loss = th_vae.train_step(X[batch_idx])
+                loss = th_vae.train_step(X[batch_idx], summary_writer, step)
+                #ae_loss(loss)
                 vae_losses.append(loss)
                 pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_losses[-10:]):.4f}')
+                step += 1
             recon_loss = np.mean(vae_losses)
         
         if not args.ae_only:
@@ -442,7 +452,6 @@ def run_model(dataset, args, logger):
             diff_loss = 0
         gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
 
-        #pbar_epoch.set_description(f'[{gname} {nlayers}l {pname}] L={loss:.3f} BestHQ={best_hq} BestEpoch={best_epoch} MaxGPU_MB={gpu_mem_alloc:.1f}')
         if (e + 1) % RESULT_EVERY == 0:
             if not args.ae_only:
                 th.gnn_model.adj = adj
@@ -486,6 +495,8 @@ def run_model(dataset, args, logger):
             stats["epoch"] = e
             scores.append(stats)
             logger.info(stats)
+            with summary_writer.as_default():
+                tf.summary.scalar('hq_bins',  stats["hq"], step=step)
             all_cluster_labels.append(cluster_labels)
             if not args.ae_only:
                 th.gnn_model.adj = train_adj
@@ -514,13 +525,15 @@ def run_model(dataset, args, logger):
         losses["scg"].append(diff_loss)
         losses["ae"].append(recon_loss)
         losses["total"].append(total_loss)
-    
+
     if use_ae:
         eval_features = encoder(features)[0]
     if not args.ae_only:
         th.gnn_model.adj = adj
         node_new_features = th.gnn_model(eval_features, None, training=False)
         node_new_features = node_new_features.numpy()
+    else:
+        node_new_features = eval_features.numpy()
 
     # concat with original features
     if concat_features:

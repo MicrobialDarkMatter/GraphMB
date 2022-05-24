@@ -77,11 +77,23 @@ class TrainHelperVAE:
             self.abundance_weight = 0.5
             self.kmer_weight = 0.5
         self.opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        self.logvar = None
+        self.mu = None
+        self.z = None
         
-    def train_step(self, x):
-        loss = self._train_step(x)
-        loss = loss.numpy()
-        return loss
+    def train_step(self, x, writer=None, epoch=0):
+        #breakpoint()
+        losses = self._train_step(x)
+        if writer is not None:
+            with writer.as_default():
+                tf.summary.scalar('loss', losses[0], step=epoch)
+                tf.summary.scalar('kmer_loss', losses[1], step=epoch)
+                tf.summary.scalar('ab_loss', losses[2], step=epoch)
+                tf.summary.scalar('kld_loss', losses[3], step=epoch)
+                tf.summary.scalar('mean logvar', self.logvar.numpy().mean(), step=epoch)
+                tf.summary.scalar('mean mu', self.mu.numpy().mean(), step=epoch)
+        ##losses = [loss.numpy() for loss in losses]
+        return losses[0].numpy()
     
     @tf.function
     def _train_step(self, x):
@@ -91,7 +103,9 @@ class TrainHelperVAE:
             # ORIGINAL VAMB PAPER
             # BAD TRICK - TRY TO AVOID IF POSSIBLE
             # logvar = tf.math.softplus(logvar)
-            logvar = tf.nn.relu(logvar+7.0)-7.0
+            #logvar = tf.nn.relu(logvar+7.0)-7.0
+            self.logvar = logvar
+            self.mu = mu
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)
             x_hat = self.decoder(z, training=True)
@@ -104,10 +118,11 @@ class TrainHelperVAE:
             kld  = kld * self.kld_weight
             
             loss = mse1 + mse2 - kld
+
         tw = self.encoder.trainable_weights + self.decoder.trainable_weights    
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
-        return loss
+        return loss, mse2, mse1, kld
 
 
 class TH:
