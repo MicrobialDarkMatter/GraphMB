@@ -90,8 +90,8 @@ class TrainHelperVAE:
             
             # ORIGINAL VAMB PAPER
             # BAD TRICK - TRY TO AVOID IF POSSIBLE
-            logvar = tf.math.softplus(logvar)
-            
+            # logvar = tf.math.softplus(logvar)
+            logvar = tf.nn.relu(logvar+7.0)-7.0
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)
             x_hat = self.decoder(z, training=True)
