@@ -10,7 +10,7 @@ import numpy as np
 from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 
-class VAEEncoder(Layer):
+class VAEEncoder(Model):
     def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0):
         super(VAEEncoder, self).__init__()
         self.abundance_dim = abundance_dim
@@ -31,7 +31,7 @@ class VAEEncoder(Layer):
         mu, sigma = self.model(x, training=training)
         return mu, sigma
     
-class VAEDecoder(Layer):
+class VAEDecoder(Model):
     def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0):
         super(VAEDecoder, self).__init__()
         self.abundance_dim = abundance_dim
@@ -64,7 +64,7 @@ class VAEDecoder(Layer):
 
 
 class TrainHelperVAE:
-    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.):
+    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/2.):
         self.encoder = encoder
         self.decoder = decoder
         self.kld_weight = kld_weight

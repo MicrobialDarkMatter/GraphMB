@@ -264,6 +264,14 @@ def prepare_data_for_gnn(
     print("**** Num of edges:", train_adj.indices.shape[0])
     return X, adj, train_adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx, ab_dim, kmer_dim
 
+def save_model(args, epoch, th, th_vae):
+    if th_vae is not None:
+        # save encoder and decoder
+        th_vae.encoder.save(os.path.join(args.outdir, args.outname + "_best_encoder"))
+        th_vae.decoder.save(os.path.join(args.outdir, args.outname + "_best_decoder"))
+    if th is not None:
+        th.gnn_model.save(os.path.join(args.outdir, args.outname + "_best_gnn"))
+
 
 def run_model(dataset, args, logger):
     set_seed(args.seed)
@@ -377,6 +385,7 @@ def run_model(dataset, args, logger):
     else:
         encoder = None
         decoder = None
+        th_vae = None
 
     if not args.ae_only:
         th = TH(
@@ -394,6 +403,8 @@ def run_model(dataset, args, logger):
             num_negatives=args.negatives,
             decoder_input=args.decoder_input,
         )
+    else:
+        th = None
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
     summary_writer = tf.summary.create_file_writer(train_log_dir)
@@ -442,9 +453,13 @@ def run_model(dataset, args, logger):
                 pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_losses[-10:]):.4f}')
                 step += 1
             recon_loss = np.mean(vae_losses)
-        
+        with summary_writer.as_default():
+            tf.summary.scalar('epoch', e, step=step)
         if not args.ae_only:
             gnn_loss, diff_loss = th.train_unsupervised(train_idx)
+            with summary_writer.as_default():
+                tf.summary.scalar('gnn loss', gnn_loss, step=step)
+                tf.summary.scalar('SCG loss', gnn_loss, step=step)
             gnn_loss = gnn_loss.numpy()
             diff_loss = diff_loss.numpy()
         else:
@@ -506,11 +521,14 @@ def run_model(dataset, args, logger):
                 #best_model = th.gnn_model
                 best_embs = node_new_features
                 best_epoch = e
+                save_model(args, e, th, th_vae)
+
             elif dataset.contig_markers is None and stats["f1"] > best_hq:
                 best_hq = stats["f1"]
                 #best_model = th.gnn_model
                 best_embs = node_new_features
                 best_epoch = e
+                save_model(args, e, th, th_vae)
             # print('--- END ---')
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
@@ -540,8 +558,9 @@ def run_model(dataset, args, logger):
         node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
     if best_embs is None:
         best_embs = node_new_features
+    
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        best_embs[cluster_mask],
+        node_new_features[cluster_mask],
         node_names[cluster_mask],
         dataset.ref_marker_sets,
         dataset.contig_markers,

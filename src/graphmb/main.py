@@ -440,6 +440,7 @@ def main():
     parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
+    parser.add_argument("--savemodel", help="Save best model to disk", action="store_true")
     parser.add_argument("--tsne", help="Plot tsne at checkpoints", action="store_true")
     parser.add_argument("--vambdim", help="VAE latent dim", default=32)
     parser.add_argument("--numcores", help="Number of cores to use", default=1, type=int)
