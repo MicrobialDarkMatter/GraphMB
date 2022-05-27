@@ -394,6 +394,7 @@ def main():
     parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-2)
     parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=1)
+    parser.add_argument("--kld_alpha", type=float, help="Coeficient for KLD loss", default=200)
     parser.add_argument("--ae_alpha", type=float, help="Coeficient for AE loss", default=1)
     parser.add_argument("--scg_alpha", type=float, help="Coeficient for SCG loss", default=100)
     parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")

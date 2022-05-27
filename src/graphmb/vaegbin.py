@@ -82,6 +82,13 @@ def compute_hq(reference_markers, contig_genes, node_names, node_labels, comp_th
     return hq, positive_clusters
 
 
+
+def run_kmedoids(X):
+    import kmedoids
+    breakpoint()
+    #D = tf.math.sum((X[:,None]-X[None])**2, axis=-1)
+    D = 0.5 - tf.math.multiply(X, X)
+
 def compute_clusters_and_stats(
     X,
     node_names,
@@ -103,6 +110,14 @@ def compute_clusters_and_stats(
             for contig in best_cluster_to_contig[b]:
                 best_contig_to_bin[contig] = b
         labels = np.array([best_contig_to_bin[n] for n in node_names])
+    elif clustering == "kmedoids":
+        import kmedoids
+        breakpoint()
+        # TODO do this on gpu if avail
+        D = np.sum((X[:,None]-X[None])**2, axis=-1)
+        # TODO find best k
+        km = kmedoids.KMedoids(20, method='fasterpam')
+        cluster_labels = km.fit_predict(D).astype(np.int64)
     elif clustering == "kmeans":
         clf = KMeans(k, random_state=1234)
         labels = clf.fit_predict(X)
@@ -381,7 +396,7 @@ def run_model(dataset, args, logger):
     if use_ae:
         encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
         decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
-        th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae)
+        th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae, kld_weight=1/args.kld_alpha)
     else:
         encoder = None
         decoder = None

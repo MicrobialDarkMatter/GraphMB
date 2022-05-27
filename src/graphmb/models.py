@@ -64,7 +64,7 @@ class VAEDecoder(Model):
 
 
 class TrainHelperVAE:
-    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/2.):
+    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.):
         self.encoder = encoder
         self.decoder = decoder
         self.kld_weight = kld_weight
