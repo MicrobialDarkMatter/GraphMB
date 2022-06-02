@@ -360,7 +360,7 @@ class LoadFromFile (argparse.Action):
             #if getattr(namespace, k, None) is None:
             #print(f"using args {k}={v}")
             setattr(namespace, k, v)
-            
+
 
 def main():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
@@ -403,7 +403,7 @@ def main():
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="lstm")
     parser.add_argument("--decoder_input", help="What to use for input to the decoder", default="gnn")
     parser.add_argument("--ae_only", help="Do not use GNN (ae model must be used and decoder input must be ae", action="store_true")
-    parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=1, type=int)
+    parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=10, type=int)
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
     )
@@ -470,7 +470,6 @@ def main():
     print("logging to {}".format(logfile))
     stdout_handler = logging.StreamHandler(sys.stdout)
     logger.addHandler(output_file_handler)
-    
     logger.addHandler(stdout_handler)
     logging.getLogger("matplotlib.font_manager").disabled = True
 

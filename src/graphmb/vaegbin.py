@@ -3,9 +3,11 @@ import sys
 import os
 from tqdm import tqdm
 import itertools
+import logging
 import numpy as np
 import datetime
 import tensorflow as tf
+from tensorflow.keras.callbacks import TensorBoard
 import pandas as pd
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -288,6 +290,19 @@ def save_model(args, epoch, th, th_vae):
         th.gnn_model.save(os.path.join(args.outdir, args.outname + "_best_gnn"))
 
 
+    
+class TensorboardLogger(logging.StreamHandler):
+    def __init__(self, file_writer, runname=""):
+        logging.StreamHandler.__init__(self)
+        self.file_writer = file_writer
+        self.runname = runname
+        self.step = 0
+
+    def emit(self, msg):
+        with self.file_writer.as_default():
+            tf.summary.text(self.runname, msg.msg, step=self.step)
+        self.step += 1
+
 def run_model(dataset, args, logger):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
@@ -314,6 +329,15 @@ def run_model(dataset, args, logger):
     decay = 0.5 ** (2.0 / epochs)
     concat_features = args.concat_features
     use_ae = gname.endswith("_ae") or args.ae_only or gname == "vae"
+
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
+    summary_writer = tf.summary.create_file_writer(train_log_dir)
+    print("logging to tensorboard")
+    tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
+    logger.addHandler(tb_handler)
+    #tf.summary.trace_on(graph=True)
+
     logger.info("******* Running model: {} **********".format(gname))
     logger.info("***** using edge weights: {} ******".format(use_edge_weights))
     logger.info("***** using disconnected: {} ******".format(use_disconnected))
@@ -420,10 +444,6 @@ def run_model(dataset, args, logger):
         )
     else:
         th = None
-    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
-    summary_writer = tf.summary.create_file_writer(train_log_dir)
-
 
     if not args.quiet:
         if not args.ae_only:
@@ -462,12 +482,15 @@ def run_model(dataset, args, logger):
             pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == X.shape[0] or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
-                loss = th_vae.train_step(X[batch_idx], summary_writer, step)
+                loss = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
                 #ae_loss(loss)
                 vae_losses.append(loss)
                 pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_losses[-10:]):.4f}')
                 step += 1
             recon_loss = np.mean(vae_losses)
+        else:
+            step += 1
+            
         with summary_writer.as_default():
             tf.summary.scalar('epoch', e, step=step)
         if not args.ae_only:
@@ -480,8 +503,9 @@ def run_model(dataset, args, logger):
         else:
             gnn_loss = 0
             diff_loss = 0
-        gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
-
+        #if 
+        #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
+        gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
         if (e + 1) % RESULT_EVERY == 0:
             if not args.ae_only:
                 th.gnn_model.adj = adj
@@ -524,7 +548,7 @@ def run_model(dataset, args, logger):
             
             stats["epoch"] = e
             scores.append(stats)
-            logger.info(stats)
+            logger.info(str(stats))
             with summary_writer.as_default():
                 tf.summary.scalar('hq_bins',  stats["hq"], step=step)
             all_cluster_labels.append(cluster_labels)
@@ -536,19 +560,19 @@ def run_model(dataset, args, logger):
                 #best_model = th.gnn_model
                 best_embs = node_new_features
                 best_epoch = e
-                save_model(args, e, th, th_vae)
+                #save_model(args, e, th, th_vae)
 
             elif dataset.contig_markers is None and stats["f1"] > best_hq:
                 best_hq = stats["f1"]
                 #best_model = th.gnn_model
                 best_embs = node_new_features
                 best_epoch = e
-                save_model(args, e, th, th_vae)
+                #save_model(args, e, th, th_vae)
             # print('--- END ---')
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
                 logger.info(f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
-                logger.info(stats)
+                logger.info(str(stats))
 
         pbar_epoch.set_description(
             f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
@@ -558,6 +582,11 @@ def run_model(dataset, args, logger):
         losses["scg"].append(diff_loss)
         losses["ae"].append(recon_loss)
         losses["total"].append(total_loss)
+        #if e == 1:
+            #breakpoint()
+        #    with summary_writer.as_default():
+        #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
+        #        summary_writer.flush()
 
     if use_ae:
         eval_features = encoder(features)[0]
