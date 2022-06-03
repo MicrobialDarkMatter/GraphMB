@@ -616,9 +616,9 @@ def main():
             elif args.markers is not None:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            best_train_embs = vaegbin.run_model(dataset, args, logger)
+            best_train_embs, metrics = vaegbin.run_model(dataset, args, logger)
 
-        metrics = run_post_processing(
+        """metrics = run_post_processing(
             best_train_embs,
             args,
             logger,
@@ -627,7 +627,7 @@ def main():
             dataset.label_to_node,
             dataset.node_to_label,
             seed=args.seed,
-        )
+        )"""
 
         if args.labels is not None:
             from amber_eval import amber_eval

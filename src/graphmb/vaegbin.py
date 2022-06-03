@@ -235,6 +235,7 @@ def prepare_data_for_gnn(
         cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
     else:
         cluster_mask = [True] * len(dataset.node_names)
+        connected_marker_nodes = set(range(len(dataset.node_names)))
     adj_norm = normalize_adj_sparse(dataset.adj_matrix)
     if use_edge_weights:
         edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
@@ -315,7 +316,6 @@ def run_model(dataset, args, logger):
     lr_vae = args.lr_vae
     lr_gnn = args.lr_gnn
     nlayers_gnn = args.layers_gnn
-    VAE = False
     gname = args.model_name
     if gname == "vae":
         args.ae_only = True
@@ -324,8 +324,8 @@ def run_model(dataset, args, logger):
     clustering = args.clusteringalgo
     k = args.kclusters
     use_edge_weights = True
-    use_disconnected = True
-    cluster_markers_only = False
+    use_disconnected = False
+    cluster_markers_only = True
     decay = 0.5 ** (2.0 / epochs)
     concat_features = args.concat_features
     use_ae = gname.endswith("_ae") or args.ae_only or gname == "vae"
@@ -358,7 +358,7 @@ def run_model(dataset, args, logger):
         X, ab_dim, kmer_dim = prepare_data_for_vae(dataset)
         cluster_mask = [True] * len(dataset.node_names)
 
-    logger.info("***** input features dimension: {}".format(X.shape))
+    logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
     
 
     # pre train clustering
@@ -462,10 +462,11 @@ def run_model(dataset, args, logger):
     batch_size = args.batchsize
     if batch_size == 0:
         batch_size = X.shape[0]
-    logger.info("**** initial batch size: {} ****".format(batch_size))
-    batch_steps = [25, 75, 150, 300]
-    batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < X.shape[0]]
-    logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
+    if use_ae:
+        logger.info("**** initial batch size: {} ****".format(batch_size))
+        batch_steps = [25, 75, 150, 300]
+        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < X.shape[0]]
+        logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
     vae_losses = []
     step = 0
     for e in pbar_epoch:
@@ -483,7 +484,6 @@ def run_model(dataset, args, logger):
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
                 loss = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
-                #ae_loss(loss)
                 vae_losses.append(loss)
                 pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_losses[-10:]):.4f}')
                 step += 1
@@ -494,10 +494,11 @@ def run_model(dataset, args, logger):
         with summary_writer.as_default():
             tf.summary.scalar('epoch', e, step=step)
         if not args.ae_only:
-            gnn_loss, diff_loss = th.train_unsupervised(train_idx)
+            total_loss, gnn_loss, diff_loss = th.train_unsupervised(train_idx)
             with summary_writer.as_default():
                 tf.summary.scalar('gnn loss', gnn_loss, step=step)
-                tf.summary.scalar('SCG loss', gnn_loss, step=step)
+                tf.summary.scalar('SCG loss', diff_loss, step=step)
+                tf.summary.scalar('Total loss', total_loss, step=step)
             gnn_loss = gnn_loss.numpy()
             diff_loss = diff_loss.numpy()
         else:
@@ -517,6 +518,10 @@ def run_model(dataset, args, logger):
                 node_new_features = node_new_features.numpy()
             else:
                 node_new_features = eval_features.numpy()
+
+            with summary_writer.as_default():
+                tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
+                tf.summary.scalar('Embs std', np.std(node_new_features), step=step)
             # concat with original features
             if concat_features:
                 node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
@@ -588,7 +593,7 @@ def run_model(dataset, args, logger):
         #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
         #        summary_writer.flush()
 
-    if use_ae:
+    """if use_ae:
         eval_features = encoder(features)[0]
     if not args.ae_only:
         th.gnn_model.adj = adj
@@ -599,12 +604,12 @@ def run_model(dataset, args, logger):
 
     # concat with original features
     if concat_features:
-        node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+        node_new_features = tf.concat([features, node_new_features], axis=1).numpy()"""
     if best_embs is None:
         best_embs = node_new_features
     
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        node_new_features[cluster_mask],
+        best_embs[cluster_mask],
         node_names[cluster_mask],
         dataset.ref_marker_sets,
         dataset.contig_markers,
@@ -656,4 +661,4 @@ def run_model(dataset, args, logger):
         plt.show()
         logger.info("saving figure to {}".format(os.path.join(args.outdir, args.outname + "_training.png")))
         
-    return best_embs
+    return best_embs, scores[best_idx]

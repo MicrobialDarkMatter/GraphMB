@@ -81,9 +81,9 @@ class TrainHelperVAE:
         self.mu = None
         self.z = None
         
-    def train_step(self, x, writer=None, epoch=0):
+    def train_step(self, x, writer=None, epoch=0, vae=True):
         #breakpoint()
-        losses = self._train_step(x)
+        losses = self._train_step(x, vae=vae)
         if writer is not None:
             with writer.as_default():
                 tf.summary.scalar('loss', losses[0], step=epoch)
@@ -96,26 +96,31 @@ class TrainHelperVAE:
         return losses[0].numpy()
     
     @tf.function
-    def _train_step(self, x):
+    def _train_step(self, x, vae=True):
         with tf.GradientTape() as tape:
             mu, logvar = self.encoder(x, training=True)
             
             # ORIGINAL VAMB PAPER
             # BAD TRICK - TRY TO AVOID IF POSSIBLE
-            # logvar = tf.math.softplus(logvar)
-            #logvar = tf.nn.relu(logvar+7.0)-7.0
+            #logvar = tf.math.softplus(logvar)
+            #logvar = tf.nn.relu(logvar+2.0)-2.0
             self.logvar = logvar
             self.mu = mu
-            epsilon = tf.random.normal(tf.shape(mu))
-            z = mu + epsilon * tf.math.exp(0.5 * logvar)
+            if vae:
+                epsilon = tf.random.normal(tf.shape(mu))
+                z = mu + epsilon * tf.math.exp(0.5 * logvar)
+                kld  = 0.5*tf.math.reduce_mean(tf.math.reduce_mean(1.0 + logvar - tf.math.pow(mu, 2) - tf.math.exp(logvar), axis=1))
+                kld  = kld * self.kld_weight
+            else:
+                z = mu
+                kld = 0
             x_hat = self.decoder(z, training=True)
             if self.abundance_dim > 1:
                 mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
             else:
                 mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
             mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
-            kld  = 0.5*tf.math.reduce_mean(tf.math.reduce_mean(1.0 + logvar - tf.math.pow(mu, 2) - tf.math.exp(logvar), axis=1))
-            kld  = kld * self.kld_weight
+            
             
             loss = mse1 + mse2 - kld
 
@@ -251,7 +256,7 @@ class TH:
         tw = self.gnn_model.trainable_weights
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
-        return gnn_loss, scg_loss
+        return loss, gnn_loss, scg_loss
     
     @staticmethod
     def sample_idx(idx, n):
