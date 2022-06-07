@@ -1,6 +1,7 @@
 from sklearn.cluster import KMeans
 import sys
 import os
+import random
 from tqdm import tqdm
 import itertools
 import logging
@@ -393,7 +394,8 @@ def run_model(dataset, args, logger):
     scores = []
     losses = {"total": [], "ae": [], "gnn": [], "scg": []}
     all_cluster_labels = []
-    features = tf.constant(X.astype(np.float32))
+    X = X.astype(np.float32)
+    features = tf.constant(X)
     if not use_ae:
         input_dim_gnn = X.shape[1]
     else:
@@ -451,7 +453,13 @@ def run_model(dataset, args, logger):
         #if gname.endswith("_ae"):
         #    th.encoder.summary()
         #    th.decoder.summary()
-    train_idx = np.arange(len(features))
+    if args.eval_split == 0:
+        train_idx = np.arange(len(features))
+        eval_idx = []
+    else:
+        train_idx = np.array(random.sample(list(range(len(features))), int(len(features)*(1-args.eval_split))))
+        eval_idx = np.array([x for x in np.arange(len(features)) if x not in train_idx])
+        logging.info(f"**** using {len(train_idx)} for training and {len(eval_idx)} for eval")
     features = np.array(features)
     pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
     scores = []
@@ -461,11 +469,11 @@ def run_model(dataset, args, logger):
     best_epoch = 0
     batch_size = args.batchsize
     if batch_size == 0:
-        batch_size = X.shape[0]
+        batch_size = len(train_idx)
     if use_ae:
         logger.info("**** initial batch size: {} ****".format(batch_size))
         batch_steps = [25, 75, 150, 300]
-        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < X.shape[0]]
+        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
     vae_losses = []
     step = 0
@@ -479,14 +487,25 @@ def run_model(dataset, args, logger):
                 #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
                 batch_size = batch_size * 2
             np.random.shuffle(train_idx)
-            n_batches = len(X)//batch_size
-            pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == X.shape[0] or n_batches < 100), position=1, ascii=' =')
+            n_batches = len(train_idx)//batch_size
+            pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
                 loss = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
                 vae_losses.append(loss)
                 pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_losses[-10:]):.4f}')
                 step += 1
+            if args.eval_split > 0:
+                eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
+                eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
+                eval_loss = eval_mse1 + eval_mse2 - eval_kld
+                with summary_writer.as_default():
+                    tf.summary.scalar('eval loss', eval_loss, step=step)
+                    tf.summary.scalar('eval kmer loss', eval_mse2, step=step)
+                    tf.summary.scalar('eval ab loss', eval_mse1, step=step)
+                    tf.summary.scalar('eval kld loss', eval_kld, step=step)
+            else:
+                eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
             recon_loss = np.mean(vae_losses)
         else:
             step += 1

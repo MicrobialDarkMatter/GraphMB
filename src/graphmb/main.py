@@ -411,6 +411,7 @@ def main():
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
     parser.add_argument("--evalepochs", type=int, help="Epoch interval to run eval", default=10)
+    parser.add_argument("--eval_split", type=float, help="Percentage of dataset to use for eval", default=0.0)
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--rawfeatures", help="Use raw features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")

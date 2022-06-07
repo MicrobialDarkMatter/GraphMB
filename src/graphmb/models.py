@@ -90,11 +90,30 @@ class TrainHelperVAE:
                 tf.summary.scalar('kmer_loss', losses[1], step=epoch)
                 tf.summary.scalar('ab_loss', losses[2], step=epoch)
                 tf.summary.scalar('kld_loss', losses[3], step=epoch)
-                tf.summary.scalar('mean logvar', self.logvar.numpy().mean(), step=epoch)
-                tf.summary.scalar('mean mu', self.mu.numpy().mean(), step=epoch)
+                tf.summary.scalar('mean logvar', self.logvar, step=epoch)
+                tf.summary.scalar('mean mu', self.mu, step=epoch)
         ##losses = [loss.numpy() for loss in losses]
         return losses[0].numpy()
     
+    @tf.function
+    def loss(self, x, mu, logvar, vae, training=True):
+        if vae:
+            epsilon = tf.random.normal(tf.shape(mu))
+            z = mu + epsilon * tf.math.exp(0.5 * logvar)
+            kld  = 0.5*tf.math.reduce_mean(tf.math.reduce_mean(1.0 + logvar - tf.math.pow(mu, 2) - tf.math.exp(logvar), axis=1))
+            kld  = kld * self.kld_weight
+        else:
+            z = mu
+            kld = 0
+        x_hat = self.decoder(z, training=training)
+        if self.abundance_dim > 1:
+            mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
+        else:
+            mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
+        mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
+
+        return mse1, mse2, kld
+
     @tf.function
     def _train_step(self, x, vae=True):
         with tf.GradientTape() as tape:
@@ -103,25 +122,10 @@ class TrainHelperVAE:
             # ORIGINAL VAMB PAPER
             # BAD TRICK - TRY TO AVOID IF POSSIBLE
             #logvar = tf.math.softplus(logvar)
-            #logvar = tf.nn.relu(logvar+2.0)-2.0
-            self.logvar = logvar
-            self.mu = mu
-            if vae:
-                epsilon = tf.random.normal(tf.shape(mu))
-                z = mu + epsilon * tf.math.exp(0.5 * logvar)
-                kld  = 0.5*tf.math.reduce_mean(tf.math.reduce_mean(1.0 + logvar - tf.math.pow(mu, 2) - tf.math.exp(logvar), axis=1))
-                kld  = kld * self.kld_weight
-            else:
-                z = mu
-                kld = 0
-            x_hat = self.decoder(z, training=True)
-            if self.abundance_dim > 1:
-                mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
-            else:
-                mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
-            mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
-            
-            
+            logvar = tf.nn.relu(logvar+2.0)-2.0
+            self.logvar = tf.cast(tf.math.reduce_mean(logvar), float)
+            self.mu = tf.cast(tf.math.reduce_mean(mu), float)
+            mse1, mse2, kld = self.loss(x, mu, logvar, vae, training=True)
             loss = mse1 + mse2 - kld
 
         tw = self.encoder.trainable_weights + self.decoder.trainable_weights    
