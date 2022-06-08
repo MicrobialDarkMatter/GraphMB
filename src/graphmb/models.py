@@ -86,14 +86,14 @@ class TrainHelperVAE:
         losses = self._train_step(x, vae=vae)
         if writer is not None:
             with writer.as_default():
-                tf.summary.scalar('loss', losses[0], step=epoch)
-                tf.summary.scalar('kmer_loss', losses[1], step=epoch)
-                tf.summary.scalar('ab_loss', losses[2], step=epoch)
-                tf.summary.scalar('kld_loss', losses[3], step=epoch)
+                #tf.summary.scalar('loss', losses[0], step=epoch)
+                #tf.summary.scalar('kmer_loss', losses[1], step=epoch)
+                #tf.summary.scalar('ab_loss', losses[2], step=epoch)
+                #tf.summary.scalar('kld_loss', losses[3], step=epoch)
                 tf.summary.scalar('mean logvar', self.logvar, step=epoch)
                 tf.summary.scalar('mean mu', self.mu, step=epoch)
-        ##losses = [loss.numpy() for loss in losses]
-        return losses[0].numpy()
+        losses = [loss.numpy() for loss in losses]
+        return losses
     
     @tf.function
     def loss(self, x, mu, logvar, vae, training=True):

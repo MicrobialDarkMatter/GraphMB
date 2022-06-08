@@ -478,7 +478,7 @@ def run_model(dataset, args, logger):
     vae_losses = []
     step = 0
     for e in pbar_epoch:
-        vae_losses = []
+        vae_epoch_losses = {"kld": [], "total": [], "kmer": [], "abundance": []}
         np.random.shuffle(train_idx)
         recon_loss = 0
         if use_ae:
@@ -491,10 +491,18 @@ def run_model(dataset, args, logger):
             pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
-                loss = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
-                vae_losses.append(loss)
-                pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_losses[-10:]):.4f}')
+                vae_losses = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
+                vae_epoch_losses["total"].append(vae_losses[0])
+                vae_epoch_losses["kmer"].append(vae_losses[1])
+                vae_epoch_losses["abundance"].append(vae_losses[2])
+                vae_epoch_losses["kld"].append(vae_losses[3])
+                pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_epoch_losses["total"][-10:]):.4f}')
                 step += 1
+            with summary_writer.as_default():
+                tf.summary.scalar('train loss', np.mean(vae_epoch_losses["total"]), step=step)
+                tf.summary.scalar('train kmer loss', np.mean(vae_epoch_losses["kmer"]), step=step)
+                tf.summary.scalar('train ab loss', np.mean(vae_epoch_losses["abundance"]), step=step)
+                tf.summary.scalar('train kld loss', np.mean(vae_epoch_losses["kld"]), step=step)
             if args.eval_split > 0:
                 eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
                 eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
@@ -506,7 +514,7 @@ def run_model(dataset, args, logger):
                     tf.summary.scalar('eval kld loss', eval_kld, step=step)
             else:
                 eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
-            recon_loss = np.mean(vae_losses)
+            recon_loss = np.mean(vae_epoch_losses["total"])
         else:
             step += 1
             
