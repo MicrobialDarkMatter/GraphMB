@@ -19,12 +19,12 @@ class VAEEncoder(Model):
         x = in_
         for _ in range(2):
             x = Dense(hiddendim, activation='linear')(x)
-            x = LeakyReLU()(x)
+            x = LeakyReLU(0.01)(x)
             if dropout > 0:
                 x = Dropout(dropout)(x)
             x = BatchNormalization()(x)
         mu = Dense(zdim)(x)
-        logvar = Dense(zdim)(x)
+        logvar = Dense(zdim, kernel_initializer='zeros')(x)
         self.model = Model(in_, [mu, logvar])
  
     def call(self, x, training=False):
@@ -40,7 +40,7 @@ class VAEDecoder(Model):
         x = in_
         for _ in range(2):
             x = Dense(hiddendim, activation='linear')(x)
-            x = LeakyReLU()(x)
+            x = LeakyReLU(0.01)(x)
             if dropout > 0:
                 x = Dropout(dropout)(x)
             x = BatchNormalization()(x)
@@ -83,7 +83,7 @@ class TrainHelperVAE:
         
     def train_step(self, x, writer=None, epoch=0, vae=True):
         #breakpoint()
-        losses = self._train_step(x, vae=vae)
+        losses = self._train_step(x, vae=vae, writer=writer, epoch=epoch)
         if writer is not None:
             with writer.as_default():
                 #tf.summary.scalar('loss', losses[0], step=epoch)
@@ -96,7 +96,7 @@ class TrainHelperVAE:
         return losses
     
     @tf.function
-    def loss(self, x, mu, logvar, vae, training=True):
+    def loss(self, x, mu, logvar, vae, training=True, writer=None, epoch=0):
         if vae:
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)
@@ -106,6 +106,9 @@ class TrainHelperVAE:
             z = mu
             kld = 0
         x_hat = self.decoder(z, training=training)
+        if writer is not None:
+            with writer.as_default():
+                tf.summary.scalar('min ab', tf.reduce_min(x_hat[:, :self.abundance_dim]), step=epoch)
         if self.abundance_dim > 1:
             mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
         else:
@@ -115,22 +118,32 @@ class TrainHelperVAE:
         return mse1, mse2, kld
 
     @tf.function
-    def _train_step(self, x, vae=True):
+    def _train_step(self, x, vae=True, writer=None, epoch=0):
         with tf.GradientTape() as tape:
             mu, logvar = self.encoder(x, training=True)
             
             # ORIGINAL VAMB PAPER
             # BAD TRICK - TRY TO AVOID IF POSSIBLE
             #logvar = tf.math.softplus(logvar)
-            logvar = tf.nn.relu(logvar+2.0)-2.0
+            #logvar = tf.nn.relu(logvar+2.0)-2.0
+            logvar = tf.clip_by_value(logvar, -2, 2)
             self.logvar = tf.cast(tf.math.reduce_mean(logvar), float)
             self.mu = tf.cast(tf.math.reduce_mean(mu), float)
-            mse1, mse2, kld = self.loss(x, mu, logvar, vae, training=True)
+            mse1, mse2, kld = self.loss(x, mu, logvar, vae, training=True, writer=writer, epoch=epoch)
             loss = mse1 + mse2 - kld
 
-        tw = self.encoder.trainable_weights + self.decoder.trainable_weights    
+        tw = self.encoder.trainable_weights + self.decoder.trainable_weights   
         grads = tape.gradient(loss, tw)
-        self.opt.apply_gradients(zip(grads, tw))
+        grad_norm = tf.linalg.global_norm(grads)
+        clip_grads, _ = tf.clip_by_global_norm(grads, 5,  use_norm=grad_norm)
+        new_grad_norm = tf.linalg.global_norm(clip_grads)
+        self.opt.apply_gradients(zip(clip_grads, tw))
+
+        if writer is not None:
+            with writer.as_default():
+                tf.summary.scalar('grad norm', grad_norm, step=epoch)
+                tf.summary.scalar('clipped grad norm', new_grad_norm, step=epoch)
+
         return loss, mse2, mse1, kld
 
 
