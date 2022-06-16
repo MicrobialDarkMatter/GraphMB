@@ -24,6 +24,7 @@ name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF,
 
 
 def normalize_adj_sparse(A):
+    #breakpoint()
     # https://github.com/tkipf/gcn/blob/master/gcn/utils.py
     A.setdiag(1)
     rowsum = np.array(A.sum(1))
@@ -208,7 +209,7 @@ def prepare_data_for_vae(dataset):
     return X, ab_dim, kmer_dim
 
 def prepare_data_for_gnn(
-    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False
+    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False, binarize=False,
 ):
     if use_raw:
         node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
@@ -237,11 +238,28 @@ def prepare_data_for_gnn(
     else:
         cluster_mask = [True] * len(dataset.node_names)
         connected_marker_nodes = set(range(len(dataset.node_names)))
+
+    if binarize:
+        # both dataset.adj_matrix and dataset.edge_weights
+        breakpoint()
+        threshold = np.percentile(dataset.edge_weights, 50)
+        print(f"using this threshold (90 percentile) {threshold}")
+        #dataset.adj_matrix = dataset.adj_matrix
+        dataset.adj_matrix.data[dataset.adj_matrix.data < threshold] = 0
+        dataset.adj_matrix.data[dataset.adj_matrix.data >= threshold] = 1
+        dataset.adj_matrix.eliminate_zeros()
+        #dataset.edge_weights = dataset.edge_weights[dataset.edge_weights >= threshold] 
+        dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
+        
+
     adj_norm = normalize_adj_sparse(dataset.adj_matrix)
     if use_edge_weights:
-        edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
-            dataset.edge_weights.max() - dataset.edge_weights.min()
-        )
+        if not binarize:
+            edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
+                dataset.edge_weights.max() - dataset.edge_weights.min()
+            )
+        else:
+            edge_features = dataset.edge_weights
         old_rows, old_cols = dataset.adj_matrix.row, dataset.adj_matrix.col
         old_idx_to_edge_idx = {(r, c): i for i, (r, c) in enumerate(zip(old_rows, old_cols))}
         old_values = adj_norm.data.astype(np.float32)
@@ -278,6 +296,7 @@ def prepare_data_for_gnn(
 
     else:
         train_adj = adj
+
     # neg_pair_idx = None
     pos_pair_idx = None
     print("**** Num of edges:", train_adj.indices.shape[0])
@@ -515,8 +534,11 @@ def run_model(dataset, args, logger):
             else:
                 eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
             recon_loss = np.mean(vae_epoch_losses["total"])
+            if not args.ae_only:
+                th.encoder = th_vae.encoder
         else:
             step += 1
+        
             
         with summary_writer.as_default():
             tf.summary.scalar('epoch', e, step=step)
@@ -534,24 +556,24 @@ def run_model(dataset, args, logger):
         #if 
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
-        if (e + 1) % RESULT_EVERY == 0:
+        if (e + 1) % RESULT_EVERY == 0: # and e > 150:
             if not args.ae_only:
                 th.gnn_model.adj = adj
-            eval_features = features
+            gnn_input_features = features
             if use_ae:
-                eval_features = encoder(features)[0]
+                gnn_input_features = encoder(features)[0]
             if not args.ae_only:
-                node_new_features = th.gnn_model(eval_features, None, training=False)
+                node_new_features = th.gnn_model(gnn_input_features, None, training=False)
                 node_new_features = node_new_features.numpy()
             else:
-                node_new_features = eval_features.numpy()
+                node_new_features = gnn_input_features.numpy()
 
             with summary_writer.as_default():
                 tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
                 tf.summary.scalar('Embs std', np.std(node_new_features), step=step)
             # concat with original features
             if concat_features:
-                node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
+                node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
 
             cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                 node_new_features[cluster_mask],
