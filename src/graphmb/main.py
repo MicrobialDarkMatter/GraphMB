@@ -391,7 +391,7 @@ def main():
     parser.add_argument("--batchsize", type=int, help="batchsize to train the VAE", default=0)
     parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.0)
     parser.add_argument("--dropout_vae", type=float, help="dropout of the VAE", default=0.0)
-    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-2)
+    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-4)
     parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=1)
     parser.add_argument("--kld_alpha", type=float, help="Coeficient for KLD loss", default=200)
@@ -437,7 +437,7 @@ def main():
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
     parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval", default=None)
-    parser.add_argument("--post", help="Output options", default="cluster_contig2bins_writeembs_writebins")
+    parser.add_argument("--post", help="Output options", default="writeembs")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
@@ -619,7 +619,7 @@ def main():
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
             best_train_embs, metrics = vaegbin.run_model(dataset, args, logger)
 
-        """metrics = run_post_processing(
+        run_post_processing(
             best_train_embs,
             args,
             logger,
@@ -628,7 +628,7 @@ def main():
             dataset.label_to_node,
             dataset.node_to_label,
             seed=args.seed,
-        )"""
+        )
 
         if args.labels is not None:
             from amber_eval import amber_eval
