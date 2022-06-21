@@ -1,12 +1,16 @@
 import tensorflow as tf
 
-from tensorflow.keras.optimizers import Adam, SGD
+from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense, Activation, Softmax
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import BatchNormalization, Lambda, LeakyReLU
-from tensorflow.keras.layers import Dropout, Layer, Add, Concatenate
+from tensorflow.keras.layers import Input, Dense, Activation, Softmax, Embedding, LayerNormalization
+#from tensorflow.keras import Sequential
+from tensorflow.keras.layers import BatchNormalization, Lambda, LeakyReLU, Flatten
+from tensorflow.keras.layers import Dropout, Add, Concatenate
 import numpy as np
+from tensorflow.keras.regularizers import l2
+
+#from spektral.layers import GCNConv
+
 from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 
@@ -86,10 +90,6 @@ class TrainHelperVAE:
         losses = self._train_step(x, vae=vae, writer=writer, epoch=epoch)
         if writer is not None:
             with writer.as_default():
-                #tf.summary.scalar('loss', losses[0], step=epoch)
-                #tf.summary.scalar('kmer_loss', losses[1], step=epoch)
-                #tf.summary.scalar('ab_loss', losses[2], step=epoch)
-                #tf.summary.scalar('kld_loss', losses[3], step=epoch)
                 tf.summary.scalar('mean logvar', self.logvar, step=epoch)
                 tf.summary.scalar('mean mu', self.mu, step=epoch)
         losses = [loss.numpy() for loss in losses]
@@ -210,16 +210,6 @@ class TH:
 
             # run gnn model
             node_hat = self.gnn_model(ae_embs, idx)
-
-            # run decoder and compute AE loss
-            #recon_loss = tf.constant(0, dtype=tf.float32)
-            #if self.use_ae:
-            #    if self.decoder_input == "gnn":
-            #        recon_features = self.autoencoder.decoder.model(node_hat)
-            #    elif self.decoder_input == "ae":
-            #        recon_features = self.autoencoder.decoder.model(ae_embs)
-     
-            #loss = recon_loss
             gnn_loss = tf.constant(0, dtype=tf.float32)
             if not self.no_gnn:
                 # create random negatives for gnn_loss
@@ -283,6 +273,114 @@ class TH:
         s_idx = tf.gather_nd(idx, random_idx)
         return s_idx
 
+
+class VGAE(Model):
+    def __init__(self, emb_dim, embeddings=None, 
+                 hidden_dim1=None, hidden_dim2=None,
+                 dropout=None, l2_reg=None,
+                 freeze_embeddings=False, lr=1e-02):
+        
+        super(VGAE, self).__init__()
+        
+        N = emb_dim[0] # Number of nodes in the graph
+        F = emb_dim[1] # Original size of node features
+        self.freeze_embeddings = freeze_embeddings
+
+        x_in = Input(shape=(1,), dtype=tf.int64)
+        a_in = Input((N,), dtype=tf.float32)
+        if embeddings is not None:
+            x = Embedding(N, F, weights=[embeddings], 
+                          trainable=not freeze_embeddings)(x_in)
+        else:
+            x = Embedding(N, F, trainable=not freeze_embeddings)(x_in)
+        x = Flatten()(x)
+        x_orig = x
+        
+#         for _ in range(2):
+#             x = Dense(256)(x)
+#             x = LeakyReLU()(x)
+#             x = BatchNormalization(epsilon=1e-3)(x)
+        
+
+        x = GCNConv( hidden_dim1,
+                     activation=None,
+                     kernel_regularizer=l2(l2_reg))([x, a_in])
+        x = LeakyReLU()(x)
+        x = LayerNormalization(epsilon=1e-6)(x)
+        x = Dropout(dropout)(x)
+
+        z_mean = GCNConv(
+            hidden_dim2,
+            activation=None,
+            kernel_regularizer=l2(l2_reg),
+        )([x, a_in])
+        
+        z_log_std = GCNConv(
+            hidden_dim2,
+            activation=None,
+            kernel_regularizer=l2(l2_reg),
+        )([x, a_in])
+        
+        self.encoder = Model([x_in, a_in], [z_mean, z_log_std, x_orig])
+        self.encoder.build([ (None,1), (None,N) ])
+        
+        z_in = Input(shape=(hidden_dim2,))
+        x = z_in
+        for _ in range(2):
+            x = Dense(256)(x)
+            x = LeakyReLU()(x)
+            x = BatchNormalization(epsilon=1e-6)(x)
+        x = Dense(emb_dim[1])(x)
+        
+        
+        self.decoder = Model(z_in, x)
+        self.decoder.build((None, hidden_dim2))
+        
+        self.optimizer = Adam(learning_rate=lr)#, clipnorm=1.0)
+    
+    def call(self, x, training=True):
+        x,a = x
+        z_mean, z_log_std, x_orig = self.encoder((x,a), training=training)
+        #z_log_std = tf.nn.softplus(z_log_std)
+        z_log_std = tf.clip_by_value(z_log_std, -2, 2)
+        z_sample = tf.random.normal(tf.shape(z_mean)) * tf.exp(z_log_std)
+        if training:
+            z = z_mean + z_sample
+        else:
+            z = z_mean
+        out = tf.matmul(z, tf.transpose(z))
+        out = tf.nn.sigmoid(out)
+        return out, z, z_mean, z_log_std, x_orig
+    
+    def train_step(self, x, a, y, pos_weight, norm):
+        loss = self._train_step(x, a, y, pos_weight, norm)
+        return loss.numpy()
+    
+    @tf.function
+    def _train_step(self, x, a, y, pos_weight, norm):
+        with tf.GradientTape() as tape:
+            predictions, z, model_z_mean, model_z_log_std, x_orig = self((x, a), training=True)
+            y = tf.reshape(y, [-1])
+            predictions = tf.reshape(predictions, [-1])
+            rec_loss = norm*tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(logits=predictions, labels=y, pos_weight=pos_weight))
+
+            # latent loss
+            kl_loss = (0.5 / tf.cast(tf.shape(x)[-1], tf.float32)) * tf.reduce_mean(tf.reduce_sum(
+            1. + 2. * model_z_log_std - tf.square(model_z_mean) - tf.square(tf.exp(model_z_log_std)), 1
+            ))
+            
+            loss = rec_loss - kl_loss + tf.reduce_sum(self.encoder.losses)
+            ## Add reconstruction loss
+            if self.freeze_embeddings:
+                x_hat = self.decoder(z, training=True)
+                loss = loss + 0.5*tf.reduce_mean((x_hat - x_orig)**2)
+                
+        tw =      self.encoder.trainable_weights
+        if self.freeze_embeddings:
+            tw += self.decoder.trainable_weights
+        gradients = tape.gradient(loss,tw)
+        self.optimizer.apply_gradients(zip(gradients, tw))
+        return loss
 
 class GCN(Model):
     def __init__(
