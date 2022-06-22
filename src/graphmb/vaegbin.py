@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from rich.console import Console
 from rich.table import Table
-from scipy.sparse import csr_matrix, diags
+from scipy.sparse import coo_matrix, diags
 
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder
 from graph_functions import set_seed, run_tsne, plot_embs
@@ -209,9 +209,9 @@ def prepare_data_for_vae(dataset):
     return X, ab_dim, kmer_dim
 
 def prepare_data_for_gnn(
-    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False, binarize=False,
+    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False, binarize=False, remove_edges=False
 ):
-    if use_raw:
+    if use_raw: # use raw features instead of precomputed embeddings
         node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
         #node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
         ab_dim = dataset.node_depths.shape[1]
@@ -241,16 +241,21 @@ def prepare_data_for_gnn(
 
     if binarize:
         # both dataset.adj_matrix and dataset.edge_weights
-        breakpoint()
+        #breakpoint()
         threshold = np.percentile(dataset.edge_weights, 50)
-        print(f"using this threshold (90 percentile) {threshold}")
+        print(f"using this threshold (90 percentile) {threshold} on adj matrix with {len(dataset.adj_matrix.row)} edges")
         #dataset.adj_matrix = dataset.adj_matrix
         dataset.adj_matrix.data[dataset.adj_matrix.data < threshold] = 0
         dataset.adj_matrix.data[dataset.adj_matrix.data >= threshold] = 1
         dataset.adj_matrix.eliminate_zeros()
         #dataset.edge_weights = dataset.edge_weights[dataset.edge_weights >= threshold] 
         dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
-        
+        print(f"reduce matrix to {len(dataset.edge_weights)} edges")
+    elif remove_edges:
+        # create self loops only sparse adj matrix
+        n = len(dataset.node_names)
+        dataset.adj_matrix = coo_matrix((np.ones(n), (np.array(range(n)), np.array(range(n)))), shape=(n,n))
+        dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
 
     adj_norm = normalize_adj_sparse(dataset.adj_matrix)
     if use_edge_weights:
@@ -363,7 +368,8 @@ def run_model(dataset, args, logger):
     logger.info("***** using disconnected: {} ******".format(use_disconnected))
     logger.info("***** concat features: {} *****".format(concat_features))
     logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
-
+    logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
+    logger.info("***** self edges only: {} *****".format(args.noedges))
     if use_ae:
         args.rawfeatures = True
     logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
@@ -371,8 +377,8 @@ def run_model(dataset, args, logger):
 
     if not args.ae_only:
         X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures
-        )
+            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures,
+            binarize=args.binarize, remove_edges=args.noedges)
         logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     else:
         X, ab_dim, kmer_dim = prepare_data_for_vae(dataset)
@@ -548,6 +554,8 @@ def run_model(dataset, args, logger):
                 tf.summary.scalar('gnn loss', gnn_loss, step=step)
                 tf.summary.scalar('SCG loss', diff_loss, step=step)
                 tf.summary.scalar('Total loss', total_loss, step=step)
+                tf.summary.scalar('GNN  LR', th.opt.learning_rate, step=step)
+
             gnn_loss = gnn_loss.numpy()
             diff_loss = diff_loss.numpy()
         else:
@@ -556,7 +564,7 @@ def run_model(dataset, args, logger):
         #if 
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
-        if (e + 1) % RESULT_EVERY == 0: # and e > 150:
+        if (e + 1) % RESULT_EVERY == 0 and e > 350:
             if not args.ae_only:
                 th.gnn_model.adj = adj
             gnn_input_features = features
