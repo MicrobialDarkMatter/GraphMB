@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.table import Table
 from scipy.sparse import coo_matrix, diags
 
-from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder
+from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder, VGAE
 from graph_functions import set_seed, run_tsne, plot_embs
 from graphmb.evaluate import calculate_overall_prf
 
@@ -96,14 +96,17 @@ def run_kmedoids(X):
 def compute_clusters_and_stats(
     X,
     node_names,
-    reference_markers,
-    contig_genes,
-    node_to_gt_idx_label,
-    gt_idx_label_to_node,
+    dataset,
     k=0,
     clustering="vamb",
     cuda=False,
+    tsne=False
 ):
+    reference_markers = dataset.ref_marker_sets
+    contig_genes = dataset.contig_markers
+    node_to_gt_idx_label = dataset.node_to_label
+    gt_idx_label_to_node = dataset.label_to_node
+
     from vamb.cluster import cluster as vamb_cluster
     if clustering == "vamb":
         best_cluster_to_contig = {
@@ -176,6 +179,19 @@ def compute_clusters_and_stats(
     else:
         p, r, f1, ari = 0, 0, 0, 0
 
+    #plot tSNE
+    if tsne:
+        cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
+        node_embeddings_2dim, centroids_2dim = run_tsne(node_new_features, dataset, cluster_to_contig, hq_bins, centroids=None)
+        plot_embs(
+            dataset.node_names,
+            node_embeddings_2dim,
+            dataset.label_to_node.copy(),
+            centroids=centroids_2dim,
+            hq_centroids=hq_bins,
+            node_sizes=None,
+            outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{e}.png"),
+        )
     return (
         labels,
         {"precision": p, "recall": r, "f1": f1, "ari": ari, "hq": hq, "mq": mq, "n_clusters": len(np.unique(labels))},
@@ -190,12 +206,14 @@ def filter_disconnected(adj, node_names, markers):
     # breakpoint()
     nodes_to_remove = set()
     for n1 in graph.nodes:
-        if len(list(graph.neighbors(n1))) == 0 and (
+        if len(list(graph.neighbors(n1))) == 0 or (
             node_names[n1] not in markers or len(markers[node_names[n1]]) == 0
         ):
             nodes_to_remove.add(n1)
+
     graph.remove_nodes_from(list(nodes_to_remove))
-    print(len(nodes_to_remove), "out of", len(node_names), "nodes without edges and markers")
+    assert len(graph.nodes()) == (len(node_names)-len(nodes_to_remove))
+    print(f"{len(nodes_to_remove)} without edges nor markers, keeping {len(graph.nodes())} nodes edges")
     return set(graph.nodes())
 
 
@@ -209,7 +227,8 @@ def prepare_data_for_vae(dataset):
     return X, ab_dim, kmer_dim
 
 def prepare_data_for_gnn(
-    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False, binarize=False, remove_edges=False
+    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False,
+    binarize=False, remove_edges=False
 ):
     if use_raw: # use raw features instead of precomputed embeddings
         node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
@@ -233,7 +252,7 @@ def prepare_data_for_gnn(
             for i, n in enumerate(dataset.node_names)
             if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
         ]
-        # print("eval with ", len(nodes_with_markers), "contigds")
+        print("eval with ", len(nodes_with_markers), "contigds")
         cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
     else:
         cluster_mask = [True] * len(dataset.node_names)
@@ -242,8 +261,9 @@ def prepare_data_for_gnn(
     if binarize:
         # both dataset.adj_matrix and dataset.edge_weights
         #breakpoint()
-        threshold = np.percentile(dataset.edge_weights, 50)
-        print(f"using this threshold (90 percentile) {threshold} on adj matrix with {len(dataset.adj_matrix.row)} edges")
+        percentile = 50
+        threshold = np.percentile(dataset.edge_weights, percentile)
+        print(f"using this threshold ({percentile} percentile) {threshold} on adj matrix with {len(dataset.adj_matrix.row)} edges")
         #dataset.adj_matrix = dataset.adj_matrix
         dataset.adj_matrix.data[dataset.adj_matrix.data < threshold] = 0
         dataset.adj_matrix.data[dataset.adj_matrix.data >= threshold] = 1
@@ -251,20 +271,21 @@ def prepare_data_for_gnn(
         #dataset.edge_weights = dataset.edge_weights[dataset.edge_weights >= threshold] 
         dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
         print(f"reduce matrix to {len(dataset.edge_weights)} edges")
-    elif remove_edges:
+    if remove_edges:
         # create self loops only sparse adj matrix
         n = len(dataset.node_names)
         dataset.adj_matrix = coo_matrix((np.ones(n), (np.array(range(n)), np.array(range(n)))), shape=(n,n))
         dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
+        print(f"reduce matrix to {len(dataset.edge_weights)} edges")
 
     adj_norm = normalize_adj_sparse(dataset.adj_matrix)
     if use_edge_weights:
-        if not binarize:
-            edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
-                dataset.edge_weights.max() - dataset.edge_weights.min()
-            )
-        else:
-            edge_features = dataset.edge_weights
+        #if not binarize:
+        edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
+            dataset.edge_weights.max() - dataset.edge_weights.min()
+        )
+        #else:
+        #edge_features = dataset.edge_weights
         old_rows, old_cols = dataset.adj_matrix.row, dataset.adj_matrix.col
         old_idx_to_edge_idx = {(r, c): i for i, (r, c) in enumerate(zip(old_rows, old_cols))}
         old_values = adj_norm.data.astype(np.float32)
@@ -330,6 +351,534 @@ class TensorboardLogger(logging.StreamHandler):
         self.step += 1
 
 def run_model(dataset, args, logger):
+    if args.model_name.endswith("_ae"):
+        return run_model_vaegnn(dataset, args, logger)
+    elif args.model_name == "vae":
+        return run_model_vae(dataset, args, logger)
+    elif args.model_name in ("gcn", "sage", "gat"):
+        return run_model_gnn(dataset, args, logger)
+    elif args.model_name == "vgae":
+        return run_model_vgae(dataset, args, logger)
+
+
+def run_model_vgae(dataset, args, logger):
+    node_names = np.array(dataset.node_names)
+    RESULT_EVERY = args.evalepochs
+    hidden_gnn = args.hidden_gnn
+    hidden_vae = args.hidden_vae
+    output_dim_gnn = args.embsize_gnn
+    output_dim_vae = args.embsize_vae
+    epochs = args.epoch
+    lr_vae = args.lr_vae
+    lr_gnn = args.lr_gnn
+    nlayers_gnn = args.layers_gnn
+    clustering = args.clusteringalgo
+    k = args.kclusters
+    use_edge_weights = True
+    use_disconnected = not args.quick
+    cluster_markers_only = args.quick
+    decay = 0.5 ** (2.0 / epochs)
+    concat_features = args.concat_features
+
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
+    summary_writer = tf.summary.create_file_writer(train_log_dir)
+    print("logging to tensorboard")
+    tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
+    logger.addHandler(tb_handler)
+    #tf.summary.trace_on(graph=True)
+
+    logger.info("******* Running model: VGAE **********")
+    logger.info("***** using edge weights: {} ******".format(use_edge_weights))
+    logger.info("***** using disconnected: {} ******".format(use_disconnected))
+    logger.info("***** concat features: {} *****".format(concat_features))
+    logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
+    logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
+    logger.info("***** self edges only: {} *****".format(args.noedges))
+    logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
+    tf.config.experimental_run_functions_eagerly(True)
+
+
+    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=True,
+            binarize=args.binarize, remove_edges=args.noedges)
+    logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
+    logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
+    # pre train clustering
+    if not args.skip_preclustering:
+        cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+                    X[cluster_mask], node_names[cluster_mask],
+                    dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+                )
+        logger.info(f">>> Pre train stats: {str(stats)}")
+
+
+    model = VGAE(X.shape, hidden_dim1=hidden_gnn, hidden_dim2=output_dim_gnn, dropout=0.1,
+             l2_reg=1e-5, embeddings=X, freeze_embeddings=True, lr=lr_gnn)
+    X_train = np.arange(len(X))[:,None].astype(np.int64)
+    A_train = tf.sparse.to_dense(train_adj)
+    labels = dataset.adj_matrix.toarray()
+    #pos_weight = float((float(train_adj.shape[0] * train_adj.shape[0] - tf.reduce_sum(train_adj)) / tf.reduce_sum(train_adj)).astype(np.float32))
+    pos_weight = (train_adj.shape[0] * train_adj.shape[0] - tf.sparse.reduce_sum(train_adj)) / tf.sparse.reduce_sum(train_adj)
+
+    norm = train_adj.shape[0] * train_adj.shape[0] / ((train_adj.shape[0] * train_adj.shape[0] - tf.sparse.reduce_sum(train_adj)) * 2)
+
+    pbar = tqdm(range(epochs))
+    decay = 0.5**(2./10000)
+    scores = []
+    best_hq = 0
+    batch_size = args.batchsize
+    if batch_size == 0:
+        batch_size = train_adj.shape[0]
+    train_idx = list(range(train_adj.shape[0]))
+    for e in pbar:
+        np.random.shuffle(train_idx)
+        n_batches = len(train_idx)//batch_size
+        pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
+        loss = 0
+        for b in pbar_vaebatch:
+            batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
+            loss += model.train_step(X_train, A_train, labels, pos_weight, norm, batch_idx)
+        pbar.set_description(f'{loss:.3f}')
+        model.optimizer.learning_rate = model.optimizer.learning_rate*decay
+
+        if (e + 1) % RESULT_EVERY == 0 and e >= int(epochs/2):
+            _, embs, _, _, _ = model((X_train, A_train), training=False)
+            node_new_features = embs.numpy()
+
+            #with summary_writer.as_default():
+            #    tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
+            #    tf.summary.scalar('Embs std', np.std(node_new_features), step=step)
+            # concat with original features
+            cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+                node_new_features[cluster_mask], node_names[cluster_mask],
+                dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+            )
+            
+            #stats["epoch"] = e
+            scores.append(stats)
+            logger.info(str(stats))
+            #with summary_writer.as_default():
+            #    tf.summary.scalar('hq_bins',  stats["hq"], step=step)
+            #all_cluster_labels.append(cluster_labels)
+            gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
+
+            if dataset.contig_markers is not None and stats["hq"] > best_hq:
+                best_hq = stats["hq"]
+                #best_model = th.gnn_model
+                best_embs = node_new_features
+                best_epoch = e
+                #save_model(args, e, th, th_vae)
+
+            elif dataset.contig_markers is None and stats["f1"] > best_hq:
+                best_hq = stats["f1"]
+                #best_model = th.gnn_model
+                best_embs = node_new_features
+                best_epoch = e
+                #save_model(args, e, th, th_vae)
+            # print('--- END ---')
+            if args.quiet:
+                logger.info(f"--- EPOCH {e:d} ---")
+                logger.info(f"[VGAE {nlayers_gnn}l] L={loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+                logger.info(str(stats))
+
+
+    _, embs, _, _, _ = model((X_train, A_train), training=False)
+    embs = embs.numpy()
+
+def run_model_gnn(dataset, args, logger):
+    set_seed(args.seed)
+    node_names = np.array(dataset.node_names)
+    RESULT_EVERY = args.evalepochs
+    hidden_gnn = args.hidden_gnn
+    output_dim_gnn = args.embsize_gnn
+    epochs = args.epoch
+    lr_gnn = args.lr_gnn
+    nlayers_gnn = args.layers_gnn
+    gname = args.model_name
+    gmodel_type = name_to_model[gname.split("_")[0].upper()]
+    clustering = args.clusteringalgo
+    k = args.kclusters
+    use_disconnected = not args.quick
+    cluster_markers_only = args.quick
+    use_edge_weights = True
+    decay = 0.5 ** (2.0 / epochs)
+    concat_features = args.concat_features
+
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
+    summary_writer = tf.summary.create_file_writer(train_log_dir)
+    print("logging to tensorboard")
+    tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
+    logger.addHandler(tb_handler)
+    #tf.summary.trace_on(graph=True)
+
+    logger.info("******* Running model: {} **********".format(gname))
+    logger.info("***** using edge weights: {} ******".format(use_edge_weights))
+    logger.info("***** using disconnected: {} ******".format(use_disconnected))
+    logger.info("***** concat features: {} *****".format(concat_features))
+    logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
+    logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
+    logger.info("***** self edges only: {} *****".format(args.noedges))
+    logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
+    tf.config.experimental_run_functions_eagerly(True)
+
+    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures,
+            binarize=args.binarize, remove_edges=args.noedges)
+    logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
+    logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
+    # pre train clustering
+    if not args.skip_preclustering:
+        cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+                    X[cluster_mask], node_names[cluster_mask],
+                    dataset, clustering=clustering, k=k,
+                    #cuda=args.cuda,
+                )
+        logger.info(f">>> Pre train stats: {str(stats)}")
+    
+    scores = []
+    losses = {"total": [], "ae": [], "gnn": [], "scg": []}
+    all_cluster_labels = []
+    X = X.astype(np.float32)
+    features = tf.constant(X)
+    input_dim_gnn = X.shape[1]
+   
+    logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim_gnn}")
+    
+    S = []
+    gnn_model = gmodel_type(
+        features_shape=features.shape,
+        input_dim=input_dim_gnn,
+        labels=None,
+        adj=train_adj,
+        n_labels=output_dim_gnn,
+        hidden_units=hidden_gnn,
+        layers=nlayers_gnn,
+        conv_last=False,
+    )  # , use_bn=True, use_vae=False)
+    logger.info(f"*** output clustering dim {output_dim_gnn}")
+
+    th = TH(
+        features,
+        gnn_model=gnn_model,
+        lr=lr_gnn,
+        all_different_idx=neg_pair_idx,
+        all_same_idx=pos_pair_idx,
+        ae_encoder=None,
+        ae_decoder=None,
+        latentdim=output_dim_gnn,
+        gnn_weight=float(args.gnn_alpha),
+        ae_weight=float(args.ae_alpha),
+        scg_weight=float(args.scg_alpha),
+        num_negatives=args.negatives,
+        decoder_input=args.decoder_input,
+    )
+
+
+    gnn_model.summary()
+    if args.eval_split == 0:
+        train_idx = np.arange(len(features))
+        eval_idx = []
+    else:
+        train_idx = np.array(random.sample(list(range(len(features))), int(len(features)*(1-args.eval_split))))
+        eval_idx = np.array([x for x in np.arange(len(features)) if x not in train_idx])
+        logging.info(f"**** using {len(train_idx)} for training and {len(eval_idx)} for eval")
+    features = np.array(features)
+    pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
+    scores = []
+    best_embs = None
+    best_model = None
+    best_hq = 0
+    best_epoch = 0
+    batch_size = args.batchsize
+    if batch_size == 0:
+        batch_size = len(train_idx)
+    vae_losses = []
+    step = 0
+    for e in pbar_epoch:
+        np.random.shuffle(train_idx)
+        step += 1
+        
+        with summary_writer.as_default():
+            tf.summary.scalar('epoch', e, step=step)
+
+        total_loss, gnn_loss, diff_loss = th.train_unsupervised(train_idx)
+        with summary_writer.as_default():
+            tf.summary.scalar('gnn loss', gnn_loss, step=step)
+            tf.summary.scalar('SCG loss', diff_loss, step=step)
+            tf.summary.scalar('Total loss', total_loss, step=step)
+            tf.summary.scalar('GNN  LR', th.opt.learning_rate, step=step)
+
+            gnn_loss = gnn_loss.numpy()
+            diff_loss = diff_loss.numpy()
+   
+        #if 
+        #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
+        gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
+        if (e + 1) % RESULT_EVERY == 0 and e > 350:
+            th.gnn_model.adj = adj
+            gnn_input_features = features
+            node_new_features = th.gnn_model(gnn_input_features, None, training=False)
+            node_new_features = node_new_features.numpy()
+
+            with summary_writer.as_default():
+                tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
+                tf.summary.scalar('Embs std', np.std(node_new_features), step=step)
+            # concat with original features
+            if concat_features:
+                node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
+
+            cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+                node_new_features[cluster_mask], node_names[cluster_mask],
+                dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+            )
+            
+            stats["epoch"] = e
+            scores.append(stats)
+            logger.info(str(stats))
+            with summary_writer.as_default():
+                tf.summary.scalar('hq_bins',  stats["hq"], step=step)
+            all_cluster_labels.append(cluster_labels)
+            if not args.ae_only:
+                th.gnn_model.adj = train_adj
+
+            if dataset.contig_markers is not None and stats["hq"] > best_hq:
+                best_hq = stats["hq"]
+                #best_model = th.gnn_model
+                best_embs = node_new_features
+                best_epoch = e
+                #save_model(args, e, th, th_vae)
+
+            elif dataset.contig_markers is None and stats["f1"] > best_hq:
+                best_hq = stats["f1"]
+                #best_model = th.gnn_model
+                best_embs = node_new_features
+                best_epoch = e
+                #save_model(args, e, th, th_vae)
+            # print('--- END ---')
+            if args.quiet:
+                logger.info(f"--- EPOCH {e:d} ---")
+                logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+                logger.info(str(stats))
+
+        pbar_epoch.set_description(
+            f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+        )
+        total_loss = gnn_loss + diff_loss
+        losses["gnn"].append(gnn_loss)
+        losses["scg"].append(diff_loss)
+        losses["total"].append(total_loss)
+        #if e == 1:
+            #breakpoint()
+        #    with summary_writer.as_default():
+        #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
+        #        summary_writer.flush()
+
+    if best_embs is None:
+        best_embs = node_new_features
+    
+    cluster_labels, stats, _, _ = compute_clusters_and_stats(
+        best_embs[cluster_mask], node_names[cluster_mask], dataset,
+        clustering=clustering, k=k, #cuda=args.cuda,
+    )
+    stats["epoch"] = e
+    scores.append(stats)
+    # get best stats:
+    hqs = [s["hq"] for s in scores]
+    epoch_hqs = [s["epoch"] for s in scores]
+    best_idx = np.argmax(hqs)
+    S.append(scores[best_idx])
+    logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
+    with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_results.tsv", "w") as f:
+        f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+        for i in range(len(cluster_labels)):
+            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
+        
+    return best_embs, scores[best_idx]
+
+
+def run_model_vae(dataset, args, logger):
+    set_seed(args.seed)
+    node_names = np.array(dataset.node_names)
+    RESULT_EVERY = args.evalepochs
+    hidden_vae = args.hidden_vae
+    output_dim_vae = args.embsize_vae
+    epochs = args.epoch
+    lr_vae = args.lr_vae
+    clustering = args.clusteringalgo
+    k = args.kclusters
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
+    summary_writer = tf.summary.create_file_writer(train_log_dir)
+    print("logging to tensorboard")
+    tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
+    logger.addHandler(tb_handler)
+    #tf.summary.trace_on(graph=True)
+
+    logger.info("******* Running model: VAE **********")
+    logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
+    tf.config.experimental_run_functions_eagerly(True)
+    X, ab_dim, kmer_dim = prepare_data_for_vae(dataset)
+    cluster_mask = [True] * len(dataset.node_names)
+
+    if not args.skip_preclustering:
+        cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+                    X[cluster_mask], node_names[cluster_mask], dataset, clustering=clustering, k=k) #cuda=args.cuda,
+    scores = []
+    losses = {"total": [], "ae": [], "gnn": [], "scg": []}
+    all_cluster_labels = []
+    X = X.astype(np.float32)
+    features = tf.constant(X)
+    input_dim_gnn = output_dim_vae
+    logger.info(f"*** Model input dim {X.shape[1]}")
+    
+    S = []
+    logger.info(f"*** output clustering dim {output_dim_vae}")
+    
+    encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+    decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+    th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae, kld_weight=1/args.kld_alpha)
+
+    if args.eval_split == 0:
+        train_idx = np.arange(len(features))
+        eval_idx = []
+    else:
+        train_idx = np.array(random.sample(list(range(len(features))), int(len(features)*(1-args.eval_split))))
+        eval_idx = np.array([x for x in np.arange(len(features)) if x not in train_idx])
+        logging.info(f"**** using {len(train_idx)} for training and {len(eval_idx)} for eval")
+    features = np.array(features)
+    pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
+    scores = []
+    best_embs = None
+    best_model = None
+    best_hq = 0
+    best_epoch = 0
+    batch_size = args.batchsize
+    if batch_size == 0:
+        batch_size = len(train_idx)
+
+    logger.info("**** initial batch size: {} ****".format(batch_size))
+    batch_steps = [25, 75, 150, 300]
+    batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
+    logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
+    vae_losses = []
+    step = 0
+    for e in pbar_epoch:
+        vae_epoch_losses = {"kld": [], "total": [], "kmer": [], "abundance": []}
+        np.random.shuffle(train_idx)
+        recon_loss = 0
+
+        # train VAE in batches
+        if e in batch_steps:
+            #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
+            batch_size = batch_size * 2
+        np.random.shuffle(train_idx)
+        n_batches = len(train_idx)//batch_size
+        pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
+        for b in pbar_vaebatch:
+            batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
+            vae_losses = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
+            vae_epoch_losses["total"].append(vae_losses[0])
+            vae_epoch_losses["kmer"].append(vae_losses[1])
+            vae_epoch_losses["abundance"].append(vae_losses[2])
+            vae_epoch_losses["kld"].append(vae_losses[3])
+            pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_epoch_losses["total"][-10:]):.4f}')
+            step += 1
+        with summary_writer.as_default():
+            tf.summary.scalar('train loss', np.mean(vae_epoch_losses["total"]), step=step)
+            tf.summary.scalar('train kmer loss', np.mean(vae_epoch_losses["kmer"]), step=step)
+            tf.summary.scalar('train ab loss', np.mean(vae_epoch_losses["abundance"]), step=step)
+            tf.summary.scalar('train kld loss', np.mean(vae_epoch_losses["kld"]), step=step)
+        if args.eval_split > 0:
+            eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
+            eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
+            eval_loss = eval_mse1 + eval_mse2 - eval_kld
+            with summary_writer.as_default():
+                tf.summary.scalar('eval loss', eval_loss, step=step)
+                tf.summary.scalar('eval kmer loss', eval_mse2, step=step)
+                tf.summary.scalar('eval ab loss', eval_mse1, step=step)
+                tf.summary.scalar('eval kld loss', eval_kld, step=step)
+        else:
+            eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
+        recon_loss = np.mean(vae_epoch_losses["total"])
+ 
+        with summary_writer.as_default():
+            tf.summary.scalar('epoch', e, step=step)
+
+        #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
+        gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
+        if (e + 1) % RESULT_EVERY == 0 and e > 350:
+          
+            gnn_input_features = encoder(features)[0]
+            node_new_features = gnn_input_features.numpy()
+
+            with summary_writer.as_default():
+                tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
+                tf.summary.scalar('Embs std', np.std(node_new_features), step=step)
+    
+            cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+                node_new_features[cluster_mask], node_names[cluster_mask],
+                dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+            )
+
+            stats["epoch"] = e
+            scores.append(stats)
+            logger.info(str(stats))
+            with summary_writer.as_default():
+                tf.summary.scalar('hq_bins',  stats["hq"], step=step)
+            all_cluster_labels.append(cluster_labels)
+            if dataset.contig_markers is not None and stats["hq"] > best_hq:
+                best_hq = stats["hq"]
+                best_embs = node_new_features
+                best_epoch = e
+                #save_model(args, e, th, th_vae)
+
+            elif dataset.contig_markers is None and stats["f1"] > best_hq:
+                best_hq = stats["f1"]
+                best_embs = node_new_features
+                best_epoch = e
+                #save_model(args, e, th, th_vae)
+            # print('--- END ---')
+            if args.quiet:
+                logger.info(f"--- EPOCH {e:d} ---")
+                logger.info(f"[VAE] R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+                logger.info(str(stats))
+
+        pbar_epoch.set_description(
+            f"[VAE R={recon_loss:.3f} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+        )
+        total_loss = recon_loss
+        losses["ae"].append(recon_loss)
+        losses["total"].append(total_loss)
+    if best_embs is None:
+        best_embs = node_new_features
+    
+    cluster_labels, stats, _, _ = compute_clusters_and_stats(
+        best_embs[cluster_mask], node_names[cluster_mask],
+        dataset, clustering=clustering, k=k, #cuda=args.cuda,
+    )
+    stats["epoch"] = e
+    scores.append(stats)
+    # get best stats:
+    # if concat_features:  # use HQ
+    hqs = [s["hq"] for s in scores]
+    epoch_hqs = [s["epoch"] for s in scores]
+    best_idx = np.argmax(hqs)
+    # else:  # use F1
+    #    f1s = [s["f1"] for s in scores]
+    #    best_idx = np.argmax(f1s)
+    # S.append(stats)
+    S.append(scores[best_idx])
+    logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
+    with open(f"{dataset.name}_vae_{clustering}{k}_results.tsv", "w") as f:
+        f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+        for i in range(len(cluster_labels)):
+            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
+    
+    return best_embs, scores[best_idx]
+
+def run_model_vaegnn(dataset, args, logger):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -349,8 +898,8 @@ def run_model(dataset, args, logger):
     clustering = args.clusteringalgo
     k = args.kclusters
     use_edge_weights = True
-    use_disconnected = False
-    cluster_markers_only = True
+    use_disconnected = not args.quick
+    cluster_markers_only = args.quick
     decay = 0.5 ** (2.0 / epochs)
     concat_features = args.concat_features
     use_ae = gname.endswith("_ae") or args.ae_only or gname == "vae"
@@ -375,43 +924,18 @@ def run_model(dataset, args, logger):
     logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
     tf.config.experimental_run_functions_eagerly(True)
 
-    if not args.ae_only:
-        X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+
+    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
             dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
-        logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
-    else:
-        X, ab_dim, kmer_dim = prepare_data_for_vae(dataset)
-        cluster_mask = [True] * len(dataset.node_names)
-
+    logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
-    
-
     # pre train clustering
     if not args.skip_preclustering:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
-                    X[cluster_mask],
-                    node_names[cluster_mask],
-                    dataset.ref_marker_sets,
-                    dataset.contig_markers,
-                    dataset.node_to_label,
-                    dataset.label_to_node,
-                    clustering=clustering,
-                    k=k,
-                    #cuda=args.cuda,
+                    X[cluster_mask], node_names[cluster_mask],
+                    dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
                 )
-        if args.tsne:
-            cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
-            node_embeddings_2dim, centroids_2dim = run_tsne(X, dataset, cluster_to_contig, hq_bins, centroids=None)
-            plot_embs(
-                dataset.node_names,
-                node_embeddings_2dim,
-                dataset.label_to_node.copy(),
-                centroids=centroids_2dim,
-                hq_centroids=hq_bins,
-                node_sizes=None,
-                outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_notrain.png"),
-            )
         logger.info(f">>> Pre train stats: {str(stats)}")
     
     pname = ""
@@ -584,29 +1108,10 @@ def run_model(dataset, args, logger):
                 node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
 
             cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
-                node_new_features[cluster_mask],
-                node_names[cluster_mask],
-                dataset.ref_marker_sets,
-                dataset.contig_markers,
-                dataset.node_to_label,
-                dataset.label_to_node,
-                clustering=clustering,
-                k=k,
-                #cuda=args.cuda,
+                node_new_features[cluster_mask], node_names[cluster_mask],
+                dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
             )
-            #plot tSNE
-            if args.tsne:
-                cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
-                node_embeddings_2dim, centroids_2dim = run_tsne(node_new_features, dataset, cluster_to_contig, hq_bins, centroids=None)
-                plot_embs(
-                    dataset.node_names,
-                    node_embeddings_2dim,
-                    dataset.label_to_node.copy(),
-                    centroids=centroids_2dim,
-                    hq_centroids=hq_bins,
-                    node_sizes=None,
-                    outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{e}.png"),
-                )
+           
             
             stats["epoch"] = e
             scores.append(stats)
@@ -666,14 +1171,7 @@ def run_model(dataset, args, logger):
         best_embs = node_new_features
     
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        best_embs[cluster_mask],
-        node_names[cluster_mask],
-        dataset.ref_marker_sets,
-        dataset.contig_markers,
-        dataset.node_to_label,
-        dataset.label_to_node,
-        clustering=clustering,
-        k=k,
+        best_embs[cluster_mask], node_names[cluster_mask], dataset, clustering=clustering, k=k,
         #cuda=args.cuda,
     )
     stats["epoch"] = e

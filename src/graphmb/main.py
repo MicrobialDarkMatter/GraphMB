@@ -404,6 +404,7 @@ def main():
     parser.add_argument("--decoder_input", help="What to use for input to the decoder", default="gnn")
     parser.add_argument("--ae_only", help="Do not use GNN (ae model must be used and decoder input must be ae", action="store_true")
     parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=10, type=int)
+    parser.add_argument("--quick", help="Reduce number of nodes to run quicker", action="store_true")
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
     )
@@ -432,7 +433,8 @@ def main():
     parser.add_argument("--minbin", type=int, help="Minimum size of clusters in bp", default=200000)
     parser.add_argument("--mincomp", type=int, help="Minimum size of connected components", default=1)
     parser.add_argument("--randomize", help="Randomize graph", action="store_true")
-    parser.add_argument("--no_edges", help="Add only self edges", action="store_true")
+    parser.add_argument("--binarize", help="Binarize adj matrix", action="store_true")
+    parser.add_argument("--noedges", help="Remove all but self edges from adj matrix", action="store_true")
     parser.add_argument("--read_embs", help="Read embeddings from file", action="store_true")
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
@@ -544,11 +546,6 @@ def main():
     
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
-    # if args.no_edges:
-    #    dataset.filter_edges(10e6)
-    # elif args.read_edges or args.depth:
-    # if args.edge_threshold is not None:
-    #    dataset.filter_edges(int(args.edge_threshold))
     if not args.rawfeatures and args.model_name != "vae":
         dataset.read_features()
     metrics_per_run = []
@@ -602,7 +599,7 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         
-        elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae", "vae"):
+        elif args.model_name in ("sage", "gcn", "gat", "sage_ae", "gcn_ae", "gat_ae", "vae", "vgae"):
             if "torch" in sys.modules:
                 sys.modules.pop('torch')
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
