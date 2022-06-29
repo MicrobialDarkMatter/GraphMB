@@ -9,7 +9,7 @@ from tensorflow.keras.layers import Dropout, Add, Concatenate
 import numpy as np
 from tensorflow.keras.regularizers import l2
 
-#from spektral.layers import GCNConv
+from spektral.layers import GCNConv
 
 from graphmb.layers import BiasLayer, LAF, GraphAttention
 
@@ -338,7 +338,7 @@ class VGAE(Model):
         
         self.optimizer = Adam(learning_rate=lr)#, clipnorm=1.0)
     
-    def call(self, x, training=True):
+    def call(self, x, indices=None, training=True):
         x,a = x
         z_mean, z_log_std, x_orig = self.encoder((x,a), training=training)
         #z_log_std = tf.nn.softplus(z_log_std)
@@ -346,20 +346,29 @@ class VGAE(Model):
         z_sample = tf.random.normal(tf.shape(z_mean)) * tf.exp(z_log_std)
         if training:
             z = z_mean + z_sample
+            z = tf.gather(z, indices)
+            out = tf.matmul(z, tf.transpose(z))
+            out = tf.nn.sigmoid(out)
         else:
             z = z_mean
-        out = tf.matmul(z, tf.transpose(z))
-        out = tf.nn.sigmoid(out)
+            out = None
+        
         return out, z, z_mean, z_log_std, x_orig
     
-    def train_step(self, x, a, y, pos_weight, norm):
-        loss = self._train_step(x, a, y, pos_weight, norm)
+    def train_step(self, x, a, y, pos_weight, norm, indices):
+        loss = self._train_step(x, a, y, pos_weight, norm, indices)
         return loss.numpy()
     
     @tf.function
-    def _train_step(self, x, a, y, pos_weight, norm):
+    def _train_step(self, x, a, y, pos_weight, norm, indices):
         with tf.GradientTape() as tape:
-            predictions, z, model_z_mean, model_z_log_std, x_orig = self((x, a), training=True)
+            predictions, z, model_z_mean, model_z_log_std, x_orig = self((x, a), indices, training=True)            
+            pairs = []
+            for i in indices:
+                for j in indices:
+                    pairs.append((i,j))
+            pairs = tf.convert_to_tensor(pairs, dtype=tf.int32)
+            y = tf.gather_nd(a, pairs)
             y = tf.reshape(y, [-1])
             predictions = tf.reshape(predictions, [-1])
             rec_loss = norm*tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(logits=predictions, labels=y, pos_weight=pos_weight))
@@ -373,7 +382,7 @@ class VGAE(Model):
             ## Add reconstruction loss
             if self.freeze_embeddings:
                 x_hat = self.decoder(z, training=True)
-                loss = loss + 0.5*tf.reduce_mean((x_hat - x_orig)**2)
+                loss = loss + 0.5*tf.reduce_mean((x_hat - tf.gather(x_orig, indices))**2)
                 
         tw =      self.encoder.trainable_weights
         if self.freeze_embeddings:
