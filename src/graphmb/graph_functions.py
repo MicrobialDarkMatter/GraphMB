@@ -9,6 +9,7 @@ import networkx as nx
 import numpy as np
 from tqdm import tqdm
 import operator
+import scipy
 
 
 # import dgl
@@ -103,6 +104,34 @@ def count_kmers(seq, k, kmer_to_id, canonical_k):
     counts = np.dot(counts, kernel)
     return counts
 
+
+def plot_edges_sim(X, adj, outname=""):
+    """
+    X: feature matrix
+    adj: adjacency matrix in sparse format
+    """
+    # for each pair in adj, calculate sim
+    x_values = []
+    y_values = []
+    for x, (i, j) in enumerate(zip(adj.row, adj.col)):
+        if i != j:
+        #y_values.append(np.dot(X[i], X[j]))
+            y_values.append(scipy.spatial.distance.cosine(X[i], X[j]))
+            x_values.append(adj.data[x])
+    #x_values = adj.values
+    #y_values = []
+    #for (i, j) in adj.indices:
+    #    y_values.append(np.dot(X[i], X[j]
+    #))
+    assert len(x_values) == len(y_values)
+    import matplotlib.pyplot as plt
+    plt.scatter(
+            x_values,
+            y_values, label=outname)
+    plt.xlabel("edge weight")
+    plt.legend(loc='upper left')
+    plt.savefig(outname + "edges_embs.png", dpi=500)
+    plt.show()
 
 def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
     from sklearn.manifold import TSNE

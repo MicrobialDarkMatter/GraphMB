@@ -604,8 +604,10 @@ def main():
                 sys.modules.pop('torch')
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
             import tensorflow as tf
+            tf.get_logger().setLevel(logging.ERROR)
             clustering_device = "cpu" # avoid tf vs torch issues
             logging.getLogger("tensorflow").setLevel(logging.FATAL)
+
             if not args.cuda:
                 tf.config.set_visible_devices([], "GPU")
             # load precomputed contigs with same SCGs (diff genomes)

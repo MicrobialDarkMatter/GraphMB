@@ -17,7 +17,7 @@ from rich.table import Table
 from scipy.sparse import coo_matrix, diags
 
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder, VGAE
-from graph_functions import set_seed, run_tsne, plot_embs
+from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
@@ -257,36 +257,38 @@ def prepare_data_for_gnn(
     else:
         cluster_mask = [True] * len(dataset.node_names)
         connected_marker_nodes = set(range(len(dataset.node_names)))
-
+    
+    adj_matrix = dataset.adj_matrix.copy()
+    edge_weights = dataset.edge_weights.copy()
     if binarize:
         # both dataset.adj_matrix and dataset.edge_weights
         #breakpoint()
-        percentile = 50
+        percentile = 95
         threshold = np.percentile(dataset.edge_weights, percentile)
         print(f"using this threshold ({percentile} percentile) {threshold} on adj matrix with {len(dataset.adj_matrix.row)} edges")
         #dataset.adj_matrix = dataset.adj_matrix
-        dataset.adj_matrix.data[dataset.adj_matrix.data < threshold] = 0
-        dataset.adj_matrix.data[dataset.adj_matrix.data >= threshold] = 1
-        dataset.adj_matrix.eliminate_zeros()
-        #dataset.edge_weights = dataset.edge_weights[dataset.edge_weights >= threshold] 
-        dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
+        adj_matrix.data[adj_matrix.data < threshold] = 0
+        adj_matrix.data[adj_matrix.data >= threshold] = 1
+        adj_matrix.eliminate_zeros()
+        edge_weights = adj_matrix.data 
+        #dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
         print(f"reduce matrix to {len(dataset.edge_weights)} edges")
+        
     if remove_edges:
         # create self loops only sparse adj matrix
         n = len(dataset.node_names)
-        dataset.adj_matrix = coo_matrix((np.ones(n), (np.array(range(n)), np.array(range(n)))), shape=(n,n))
-        dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
-        print(f"reduce matrix to {len(dataset.edge_weights)} edges")
+        adj_matrix = coo_matrix((np.ones(n), (np.array(range(n)), np.array(range(n)))), shape=(n,n))
+        edge_weights = np.ones(len(adj_matrix.row))
+        print(f"reduce matrix to {len(edge_weights)} edges")
 
-    adj_norm = normalize_adj_sparse(dataset.adj_matrix)
+    adj_norm = normalize_adj_sparse(adj_matrix)
     if use_edge_weights:
-        #if not binarize:
-        edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
-            dataset.edge_weights.max() - dataset.edge_weights.min()
-        )
-        #else:
-        #edge_features = dataset.edge_weights
-        old_rows, old_cols = dataset.adj_matrix.row, dataset.adj_matrix.col
+        #edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
+        #    dataset.edge_weights.max() - dataset.edge_weights.min()
+        #)
+        edge_features = edge_weights / edge_weights.max()
+        # multiply normalized values by edge weights
+        old_rows, old_cols = adj_matrix.row, adj_matrix.col
         old_idx_to_edge_idx = {(r, c): i for i, (r, c) in enumerate(zip(old_rows, old_cols))}
         old_values = adj_norm.data.astype(np.float32)
         new_values = []
@@ -300,8 +302,10 @@ def prepare_data_for_gnn(
                 except:
                     new_values.append(ov)
         new_values = np.array(new_values).astype(np.float32)
+    
     else:
-        new_values = adj_norm.data.astype(np.float32)
+        adj_norm.data = np.ones(len(adj_norm.row))
+        #new_values = adj_norm.data.astype(np.float32)
     adj = tf.SparseTensor(
         indices=np.array([adj_norm.row, adj_norm.col]).T, values=new_values, dense_shape=adj_norm.shape
     )
@@ -528,6 +532,10 @@ def run_model_gnn(dataset, args, logger):
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
+
+    #plot edges vs initial embs
+    plot_edges_sim(X, dataset.adj_matrix, "pretrain_")
+
     # pre train clustering
     if not args.skip_preclustering:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
@@ -616,7 +624,7 @@ def run_model_gnn(dataset, args, logger):
         #if 
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
-        if (e + 1) % RESULT_EVERY == 0 and e > 350:
+        if (e + 1) % RESULT_EVERY == 0: # and e > 350:
             th.gnn_model.adj = adj
             gnn_input_features = features
             node_new_features = th.gnn_model(gnn_input_features, None, training=False)
@@ -694,7 +702,8 @@ def run_model_gnn(dataset, args, logger):
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
-        
+    #plot edges vs final embs
+    plot_edges_sim(best_embs, dataset.adj_matrix, "posttrain_")
     return best_embs, scores[best_idx]
 
 
@@ -940,6 +949,9 @@ def run_model_vaegnn(dataset, args, logger):
     
     pname = ""
 
+    #plot edges vs initial embs
+    plot_edges_sim(X, dataset.adj_matrix, "pretrain_")
+
     scores = []
     losses = {"total": [], "ae": [], "gnn": [], "scg": []}
     all_cluster_labels = []
@@ -1013,6 +1025,7 @@ def run_model_vaegnn(dataset, args, logger):
     pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
     scores = []
     best_embs = None
+    best_vae_embs = None
     best_model = None
     best_hq = 0
     best_epoch = 0
@@ -1088,17 +1101,17 @@ def run_model_vaegnn(dataset, args, logger):
         #if 
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
-        if (e + 1) % RESULT_EVERY == 0 and e > 350:
+        if (e + 1) % RESULT_EVERY == 0: # and e > 350:
             if not args.ae_only:
                 th.gnn_model.adj = adj
             gnn_input_features = features
             if use_ae:
                 gnn_input_features = encoder(features)[0]
-            if not args.ae_only:
+            """if not args.ae_only:
                 node_new_features = th.gnn_model(gnn_input_features, None, training=False)
                 node_new_features = node_new_features.numpy()
-            else:
-                node_new_features = gnn_input_features.numpy()
+            else:"""
+            node_new_features = gnn_input_features.numpy()
 
             with summary_writer.as_default():
                 tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
@@ -1126,6 +1139,7 @@ def run_model_vaegnn(dataset, args, logger):
                 best_hq = stats["hq"]
                 #best_model = th.gnn_model
                 best_embs = node_new_features
+                best_vae_embs = gnn_input_features
                 best_epoch = e
                 #save_model(args, e, th, th_vae)
 
@@ -1133,6 +1147,7 @@ def run_model_vaegnn(dataset, args, logger):
                 best_hq = stats["f1"]
                 #best_model = th.gnn_model
                 best_embs = node_new_features
+                best_vae_embs = gnn_input_features
                 best_epoch = e
                 #save_model(args, e, th, th_vae)
             # print('--- END ---')
@@ -1200,20 +1215,8 @@ def run_model_vaegnn(dataset, args, logger):
     # res_table.show()
     #breakpoint()
     #plt.plot(range(len(losses["total"])), losses["total"], label="total loss")
-    if not args.quiet:
-        fig, ax1 = plt.subplots()
-        ax1.plot(range(1, len(losses["gnn"])), losses["gnn"][1:], label="GNN loss")
-        ax1.plot(range(1, len(losses["scg"])), losses["scg"][1:], label="SCG loss")
-        ax1.plot(range(1, len(losses["ae"])), losses["ae"][1:], label="AE loss")
-        ax1.legend(loc='upper right')
-        ax1.set_ylim(0,1.5)
-        ax2 = ax1.twinx()
-        #ax2.plot(epoch_hqs, [hq/max(hqs) for hq in hqs], label="HQ", color='red', marker='o')
-        ax2.plot(epoch_hqs, hqs, label="HQ", color='red', marker='o')
-        plt.xlabel("epoch")
-        plt.legend(loc='upper left')
-        plt.savefig(os.path.join(args.outdir,args.outname + "_training.png"), dpi=500)
-        plt.show()
-        logger.info("saving figure to {}".format(os.path.join(args.outdir, args.outname + "_training.png")))
-        
+
+    #plot edges vs initial embs
+    plot_edges_sim(best_vae_embs, dataset.adj_matrix, "vae_")
+    plot_edges_sim(best_embs, dataset.adj_matrix, "posttrain_")
     return best_embs, scores[best_idx]
