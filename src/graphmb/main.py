@@ -180,8 +180,10 @@ def main():
     torch.set_num_threads(args.numcores)
 
     # specify data properties for caching
-    name = "contigs_graph"
+    name = "cached"
     name += "_min" + str(args.mincontig) + "_kmer" + str(args.kmer)
+    if args.contig_nodes:
+        name += "_contiggraph"
     dataset = ContigsDataset(
         name,
         args.assembly,

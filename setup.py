@@ -23,7 +23,7 @@ setup(
         "networkx==2.6.2",
         # torch==1.7.1
         "scikit-learn==0.24.2",
-        "dgl==0.6.1",
+        "dgl",
         "tqdm==4.61.2",
     ],
     entry_points={

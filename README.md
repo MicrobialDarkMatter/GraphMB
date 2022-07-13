@@ -110,6 +110,14 @@ You can also run on CPU and limit the number of threads to use:
 graphmb --assembly data/strong100/ --outdir results/strong100/ --numcores 4
 ```
 
+GraphMB was tested on graphs where the nodes are contig paths and not full contigs.
+This gives more granularity to the algorithm and the edges are directly obtained from the assembly graph.
+However in some cases this might be inconvenient, for example if 
+We implemented an option to use a graph where the nodes are contigs.
+```bash
+graphmb --assembly data/strong100/ --outdir results/strong100/ --assembly_name contigs.fasta --depth contig_depth.txt --contignodes
+```
+
 ## Typical workflow
 Our workflows are available [here](https://github.com/AndreLamurias/binning_workflows).
 On this section we present an overview of how to get your data ready for GraphMB.
@@ -118,8 +126,7 @@ On this section we present an overview of how to get your data ready for GraphMB
 
 1. Assembly your reads with metaflye: ```flye -nano-raw <reads_file> -o <output> --meta```
 2. Filter and polish assembly if necessary (or extract edge sequences and polish edge sequences instead)
-3. Convert assembly graph to contig-based graph if you want to use full contig instead of edges
-4. Run CheckM on sequences with Bacteria markers: 
+3. Run CheckM on sequences with Bacteria markers: 
 ```bash
 mkdir edges
 cd edges; cat ../assembly.fasta | awk '{ if (substr($0, 1, 1)==">") {filename=(substr($0,2) ".fa")} print $0 > filename }'; cd ..
@@ -128,14 +135,14 @@ find edges/ -name "* *" -type f | rename 's/ /_/g'
 checkm taxonomy_wf -x fa domain Bacteria edges/ checkm_edges/
 checkm qa checkm_edges/Bacteria.ms checkm_edges/ -f checkm_edges_polished_results.txt --tab_table -o 2
 ```
-5. Get abundances with `jgi_summarize_bam_contig_depths`:
+4. Get abundances with `jgi_summarize_bam_contig_depths`:
 ```bash
 minimap2 -I 64GB -d assembly.mmi assembly.fasta # make index
 minimap2 -I 64GB -ax map-ont assembly.mmi <reads_file> > assembly.sam
 samtools sort assembly.sam > assembly.bam
 jgi_summarize_bam_contig_depths --outputDepth asseembly_depth.txt assembly.bam
 ```
-6. Now you should have all the files to run GraphMB
+5. Now you should have all the files to run GraphMB
 
 We have only tested GraphMB on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
 Depending on your setup, you need to either use the edges as contigs.
