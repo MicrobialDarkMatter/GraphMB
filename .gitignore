@@ -18,3 +18,6 @@ dist/
 build/
 src/graphmb/__pycache__/
 .eggs/
+*.log
+*.out
+results/
