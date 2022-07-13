@@ -235,12 +235,12 @@ def main():
     ### prepare contig features with VAE
     batchsteps = []
     vamb_epochs = 500
+    batchsteps = [25, 75, 150, 300]
     if len(dataset.nodes_depths[0]) == 1:
         vamb_bs = 32
-        batchsteps = [25, 75, 150]
     else:
         vamb_bs = 64
-        batchsteps = [25, 75, 150]
+        
     nhiddens = [512, 512]
     print("using these batchsteps:", batchsteps)
 
@@ -255,7 +255,7 @@ def main():
     vamb_emb_exists = os.path.exists(features_dir)
     if args.vamb or not vamb_emb_exists:
         print("running VAMB...")
-        vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
+        vamb_outdir = os.path.join(args.outdir, "{}_vamb_out{}/".format(name, args.vambdim))
         vamb_logpath = os.path.join(vamb_outdir, "log.txt")
         if os.path.exists(vamb_outdir) and os.path.isdir(vamb_outdir):
             shutil.rmtree(vamb_outdir)
