@@ -182,7 +182,7 @@ def main():
     # specify data properties for caching
     name = "cached"
     name += "_min" + str(args.mincontig) + "_kmer" + str(args.kmer)
-    if args.contig_nodes:
+    if args.contignodes:
         name += "_contiggraph"
     dataset = ContigsDataset(
         name,
@@ -240,7 +240,7 @@ def main():
         batchsteps = [25, 75, 150]
     else:
         vamb_bs = 64
-        batchsteps = [25, 75, 150, 300]
+        batchsteps = [25, 75, 150]
     nhiddens = [512, 512]
     print("using these batchsteps:", batchsteps)
 
