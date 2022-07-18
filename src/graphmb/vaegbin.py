@@ -213,7 +213,7 @@ def filter_disconnected(adj, node_names, markers):
 
     graph.remove_nodes_from(list(nodes_to_remove))
     assert len(graph.nodes()) == (len(node_names)-len(nodes_to_remove))
-    print(f"{len(nodes_to_remove)} without edges nor markers, keeping {len(graph.nodes())} nodes edges")
+    print(f"{len(nodes_to_remove)} nodes without edges nor markers, keeping {len(graph.nodes())} nodes")
     return set(graph.nodes())
 
 
@@ -252,7 +252,7 @@ def prepare_data_for_gnn(
             for i, n in enumerate(dataset.node_names)
             if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
         ]
-        print("eval with ", len(nodes_with_markers), "contigds")
+        print("train with ", len(nodes_with_markers), "contigds with markers")
         cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
     else:
         cluster_mask = [True] * len(dataset.node_names)
@@ -272,7 +272,7 @@ def prepare_data_for_gnn(
         adj_matrix.eliminate_zeros()
         edge_weights = adj_matrix.data 
         #dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
-        print(f"reduce matrix to {len(dataset.edge_weights)} edges")
+        print(f"reduce matrix to {len(edge_weights)} edges")
         
     if remove_edges:
         # create self loops only sparse adj matrix
@@ -280,7 +280,6 @@ def prepare_data_for_gnn(
         adj_matrix = coo_matrix((np.ones(n), (np.array(range(n)), np.array(range(n)))), shape=(n,n))
         edge_weights = np.ones(len(adj_matrix.row))
         print(f"reduce matrix to {len(edge_weights)} edges")
-
     adj_norm = normalize_adj_sparse(adj_matrix)
     if use_edge_weights:
         #edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
@@ -311,6 +310,7 @@ def prepare_data_for_gnn(
     )
     adj = tf.sparse.reorder(adj)
     if not use_disconnected:
+        # TODO change node ids
         train_edges = [
             eid
             for eid in range(len(adj_norm.row))
@@ -320,7 +320,8 @@ def prepare_data_for_gnn(
         train_adj = tf.SparseTensor(
             indices=np.array([adj_norm.row[train_edges], adj_norm.col[train_edges]]).T,
             values=new_values[train_edges],
-            dense_shape=adj_norm.shape,
+            #dense_shape=(len(train_edges), len(train_edges))
+            dense_shape=(adj.shape)
         )
         train_adj = tf.sparse.reorder(train_adj)
 
@@ -427,7 +428,7 @@ def run_model_vgae(dataset, args, logger):
 
     norm = train_adj.shape[0] * train_adj.shape[0] / ((train_adj.shape[0] * train_adj.shape[0] - tf.sparse.reduce_sum(train_adj)) * 2)
 
-    pbar = tqdm(range(epochs))
+    pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
     decay = 0.5**(2./10000)
     scores = []
     best_hq = 0
@@ -435,7 +436,7 @@ def run_model_vgae(dataset, args, logger):
     if batch_size == 0:
         batch_size = train_adj.shape[0]
     train_idx = list(range(train_adj.shape[0]))
-    for e in pbar:
+    for e in pbar_epoch:
         np.random.shuffle(train_idx)
         n_batches = len(train_idx)//batch_size
         pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
@@ -443,10 +444,10 @@ def run_model_vgae(dataset, args, logger):
         for b in pbar_vaebatch:
             batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
             loss += model.train_step(X_train, A_train, labels, pos_weight, norm, batch_idx)
-        pbar.set_description(f'{loss:.3f}')
+        pbar_epoch.set_description(f'{loss:.3f}')
         model.optimizer.learning_rate = model.optimizer.learning_rate*decay
 
-        if (e + 1) % RESULT_EVERY == 0 and e >= int(epochs/2):
+        if (e + 1) % RESULT_EVERY == 0: # and e >= int(epochs/2):
             _, embs, _, _, _ = model((X_train, A_train), training=False)
             node_new_features = embs.numpy()
 
