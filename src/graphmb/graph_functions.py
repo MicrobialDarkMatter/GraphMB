@@ -105,7 +105,7 @@ def count_kmers(seq, k, kmer_to_id, canonical_k):
     return counts
 
 
-def plot_edges_sim(X, adj, outname="", max_edge_value=150, min_edge_value=2):
+def plot_edges_sim(X, adj, scgs, outname="", max_edge_value=150, min_edge_value=2):
     """
     X: feature matrix
     adj: adjacency matrix in sparse format
@@ -113,16 +113,24 @@ def plot_edges_sim(X, adj, outname="", max_edge_value=150, min_edge_value=2):
     # for each pair in adj, calculate sim
     x_values = []
     y_values = []
+    x_same_scgs = []
+    y_same_scgs = []
     plotted_edges = set()
     for x, (i, j) in enumerate(zip(adj.row, adj.col)):
         if i != j and (i,j) not in plotted_edges and (j,i) not in plotted_edges and adj.data[x] > min_edge_value:
         #y_values.append(np.dot(X[i], X[j]))
             #y_values.append(scipy.spatial.distance.cosine(X[i], X[j]))
-            y_values.append(np.dot(X[i], X[j])/(np.linalg.norm(X[i])*np.linalg.norm(X[j])))
-            x_values.append(adj.data[x])
             plotted_edges.add((i,j))
+            if len(scgs[i] & scgs[j]) > 0:
+                y_same_scgs.append(np.dot(X[i], X[j])/(np.linalg.norm(X[i])*np.linalg.norm(X[j])))
+                x_same_scgs.append(adj.data[x])
+                #TODO plot edge weight by overlap
+            else:
+                y_values.append(np.dot(X[i], X[j])/(np.linalg.norm(X[i])*np.linalg.norm(X[j])))
+                x_values.append(adj.data[x])
     if max_edge_value is not None:
         x_values = [min(x, max_edge_value) for x in x_values]
+        x_same_scgs = [min(x, max_edge_value) for x in x_same_scgs]
     #x_values = adj.values
     #y_values = []
     #for (i, j) in adj.indices:
@@ -134,19 +142,24 @@ def plot_edges_sim(X, adj, outname="", max_edge_value=150, min_edge_value=2):
     plt.scatter(
             x_values,
             y_values, label=outname, marker=".", alpha=0.5, s=1)
+    plt.scatter(
+            x_same_scgs,
+            y_same_scgs, label=outname+"SCG", marker="o", alpha=0.5, s=3)
 
     plt.xlabel("edge weight capped at {}".format(max_edge_value))
 
     plt.ylabel("cosine sim")
     plt.legend(loc='upper right')
     plt.savefig(outname + "edges_embs.png", dpi=500)
-    plt.show()
+    #plt.show()
+    plt.close()
 
     # dist histogram
     plt.figure(1)
     counts, edges, bars =   plt.hist(y_values, bins=50)
     plt.bar_label(bars)
     plt.savefig(outname + "embs_dists_histogram.png", dpi=500)
+    plt.close()
 
 
 
