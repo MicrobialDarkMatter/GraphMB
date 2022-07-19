@@ -228,7 +228,7 @@ def prepare_data_for_vae(dataset):
 
 def prepare_data_for_gnn(
     dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False,
-    binarize=False, remove_edges=False
+    binarize=False, remove_edges=False, remove_same_scg=True
 ):
     if use_raw: # use raw features instead of precomputed embeddings
         node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
@@ -273,7 +273,18 @@ def prepare_data_for_gnn(
         edge_weights = adj_matrix.data 
         #dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
         print(f"reduce matrix to {len(edge_weights)} edges")
-        
+    
+    if remove_same_scg:
+        edges_with_same_scgs = 0
+        for x, (i, j) in enumerate(zip(adj_matrix.row, adj_matrix.col)):
+            if len(dataset.contig_markers[dataset.node_names[i]].keys() & \
+                dataset.contig_markers[dataset.node_names[j]].keys()) > 0:
+                #remove edge
+                adj_matrix.data[x] = 0
+                edge_weights[x] = 0
+                edges_with_same_scgs += 1
+        adj_matrix.eliminate_zeros()
+        print(f"deleted {edges_with_same_scgs} edges with same SCGs")
     if remove_edges:
         # create self loops only sparse adj matrix
         n = len(dataset.node_names)
@@ -535,7 +546,8 @@ def run_model_gnn(dataset, args, logger):
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
 
     #plot edges vs initial embs
-    plot_edges_sim(X, dataset.adj_matrix, "pretrain_")
+    id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
+    plot_edges_sim(X, dataset.adj_matrix, id_to_scg, "pretrain_")
 
     # pre train clustering
     if not args.skip_preclustering:
@@ -583,7 +595,6 @@ def run_model_gnn(dataset, args, logger):
         num_negatives=args.negatives,
         decoder_input=args.decoder_input,
     )
-
 
     gnn_model.summary()
     if args.eval_split == 0:
@@ -684,8 +695,8 @@ def run_model_gnn(dataset, args, logger):
         #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
         #        summary_writer.flush()
 
-    if best_embs is None:
-        best_embs = node_new_features
+    #if best_embs is None:
+    best_embs = node_new_features
     
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
         best_embs[cluster_mask], node_names[cluster_mask], dataset,
@@ -704,7 +715,7 @@ def run_model_gnn(dataset, args, logger):
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
     #plot edges vs final embs
-    plot_edges_sim(best_embs, dataset.adj_matrix, "posttrain_")
+    plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
     return best_embs, scores[best_idx]
 
 
@@ -951,7 +962,8 @@ def run_model_vaegnn(dataset, args, logger):
     pname = ""
 
     #plot edges vs initial embs
-    plot_edges_sim(X, dataset.adj_matrix, "pretrain_")
+    id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
+    plot_edges_sim(X, dataset.adj_matrix, id_to_scg, "pretrain_")
 
     scores = []
     losses = {"total": [], "ae": [], "gnn": [], "scg": []}
@@ -1218,6 +1230,6 @@ def run_model_vaegnn(dataset, args, logger):
     #plt.plot(range(len(losses["total"])), losses["total"], label="total loss")
 
     #plot edges vs initial embs
-    plot_edges_sim(best_vae_embs, dataset.adj_matrix, "vae_")
-    plot_edges_sim(best_embs, dataset.adj_matrix, "posttrain_")
+    plot_edges_sim(best_vae_embs, dataset.adj_matrix, id_to_scg, "vae_")
+    plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
     return best_embs, scores[best_idx]
