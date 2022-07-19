@@ -656,9 +656,10 @@ def run_model_gnn(dataset, args, logger):
             
             stats["epoch"] = e
             scores.append(stats)
-            logger.info(str(stats))
+            #logger.info(str(stats))
             with summary_writer.as_default():
                 tf.summary.scalar('hq_bins',  stats["hq"], step=step)
+                tf.summary.scalar('hq_bins',  stats["mq"], step=step)
             all_cluster_labels.append(cluster_labels)
             if not args.ae_only:
                 th.gnn_model.adj = train_adj
@@ -845,9 +846,10 @@ def run_model_vae(dataset, args, logger):
 
             stats["epoch"] = e
             scores.append(stats)
-            logger.info(str(stats))
+            #logger.info(str(stats))
             with summary_writer.as_default():
                 tf.summary.scalar('hq_bins',  stats["hq"], step=step)
+                tf.summary.scalar('mq_bins',  stats["mq"], step=step)
             all_cluster_labels.append(cluster_labels)
             if dataset.contig_markers is not None and stats["hq"] > best_hq:
                 best_hq = stats["hq"]
@@ -1141,9 +1143,10 @@ def run_model_vaegnn(dataset, args, logger):
             
             stats["epoch"] = e
             scores.append(stats)
-            logger.info(str(stats))
+            #logger.info(str(stats))
             with summary_writer.as_default():
                 tf.summary.scalar('hq_bins',  stats["hq"], step=step)
+                tf.summary.scalar('mq_bins',  stats["mq"], step=step)
             all_cluster_labels.append(cluster_labels)
             if not args.ae_only:
                 th.gnn_model.adj = train_adj
