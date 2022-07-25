@@ -15,13 +15,13 @@ from graphmb.layers import BiasLayer, LAF, GraphAttention
 
 
 class VAEEncoder(Model):
-    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0):
+    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0, layers=2):
         super(VAEEncoder, self).__init__()
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
         in_ = Input(shape=(abundance_dim+kmers_dim,))
         x = in_
-        for _ in range(2):
+        for _ in range(layers):
             x = Dense(hiddendim, activation='linear')(x)
             x = LeakyReLU(0.01)(x)
             if dropout > 0:
@@ -36,24 +36,19 @@ class VAEEncoder(Model):
         return mu, sigma
     
 class VAEDecoder(Model):
-    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0):
+    def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0, layers=2):
         super(VAEDecoder, self).__init__()
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
         in_ = Input(shape=(zdim,))
         x = in_
-        for _ in range(2):
+        for _ in range(layers):
             x = Dense(hiddendim, activation='linear')(x)
             x = LeakyReLU(0.01)(x)
             if dropout > 0:
                 x = Dropout(dropout)(x)
             x = BatchNormalization()(x)
             
-        # ORIGINAL VAMB PAPER
-        # x = Dense(abundance_dim+kmers_dim)(x)
-        
-        # IT IS BETTER TO SEPARATE THE LAYERS
-        # TO GET DIFFERENT BIASES
         x1 = Dense(abundance_dim)(x)
         x2 = Dense(kmers_dim)(x)
         if self.abundance_dim > 1:
@@ -121,11 +116,6 @@ class TrainHelperVAE:
     def _train_step(self, x, vae=True, writer=None, epoch=0):
         with tf.GradientTape() as tape:
             mu, logvar = self.encoder(x, training=True)
-            
-            # ORIGINAL VAMB PAPER
-            # BAD TRICK - TRY TO AVOID IF POSSIBLE
-            #logvar = tf.math.softplus(logvar)
-            #logvar = tf.nn.relu(logvar+2.0)-2.0
             logvar = tf.clip_by_value(logvar, -2, 2)
             self.logvar = tf.cast(tf.math.reduce_mean(logvar), float)
             self.mu = tf.cast(tf.math.reduce_mean(mu), float)
@@ -147,6 +137,7 @@ class TrainHelperVAE:
         return loss, mse2, mse1, kld
 
 
+
 class TH:
     def __init__(
         self,
@@ -160,7 +151,10 @@ class TH:
         latentdim=32,
         gnn_weight=1.0,
         ae_weight=1.0,
+        kld_weight = 1/200,
         scg_weight=100.0,
+        kmer_weight=0.15,
+        abundance_weight=0.85,
         kmer_dim=103,
         kmer_alpha=0.5,
         num_negatives=50,
@@ -193,9 +187,14 @@ class TH:
         self.mse_loss = tf.keras.losses.MeanSquaredError()
         self.gnn_weight = gnn_weight
         self.ae_weight = ae_weight
+        self.kld_weight = kld_weight
         self.scg_weight = scg_weight
+        self.kmer_weight = kmer_weight
+        self.abundance_weight = abundance_weight
         self.no_gnn = gnn_model is None
         self.train_ae = False
+        self.abundance_dim = self.decoder.abundance_dim
+        self.kmers_dim = self.decoder.kmers_dim
 
     @tf.function
     def train_unsupervised(self, idx):
@@ -265,6 +264,99 @@ class TH:
         self.opt.apply_gradients(zip(grads, tw))
         return loss, gnn_loss, scg_loss
     
+    @tf.function
+    def ae_loss(self, x, mu, logvar, vae, training=True, writer=None, epoch=0):
+        if vae:
+            epsilon = tf.random.normal(tf.shape(mu))
+            z = mu + epsilon * tf.math.exp(0.5 * logvar)
+            kld  = 0.5*tf.math.reduce_mean(tf.math.reduce_mean(1.0 + logvar - tf.math.pow(mu, 2) - tf.math.exp(logvar), axis=1))
+            kld  = kld * self.kld_weight
+        else:
+            z = mu
+            kld = 0
+        x_hat = self.decoder(z, training=training)
+        if writer is not None:
+            with writer.as_default():
+                tf.summary.scalar('min ab', tf.reduce_min(x_hat[:, :self.abundance_dim]), step=epoch)
+        if self.abundance_dim > 1:
+            mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
+        else:
+            mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
+        mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
+
+        return mse1, mse2, kld
+
+    @tf.function
+    def train_unsupervised_decode(self, idx):
+        with tf.GradientTape() as tape:
+            #breakpoint()
+            # run gnn model
+            # TODO GNN model that encodes mu and logvar
+            gnn_embs = self.gnn_model(self.features, idx)
+            mu, logvar = self.encoder(gnn_embs, training=True)
+            z_sample = tf.random.normal(tf.shape(mu)) * tf.exp(logvar)
+
+            gnn_loss = tf.constant(0, dtype=tf.float32)
+            if not self.no_gnn:
+                # create random negatives for gnn_loss
+                row_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 0], params=z_sample)
+                col_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 1], params=z_sample)
+                positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
+
+                neg_idx = tf.random.uniform(
+                    shape=(self.num_negatives * len(self.gnn_model.adj.indices),),
+                    minval=0,
+                    maxval=self.adj_shape[0] * self.adj_shape[1] - 1,
+                    dtype=tf.int64,
+                )
+                neg_idx_row = tf.math.minimum(
+                    tf.cast(self.adj_shape[0] - 1, tf.float32),
+                    tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32),
+                )
+                neg_idx_row = tf.cast(neg_idx_row, tf.int64)[:, None]
+                neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)[
+                    :, None
+                ]
+                neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
+                try:
+                    #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
+                    neg_row_embs = tf.gather(indices=neg_idx_row, params=z_sample)
+                    neg_col_embs = tf.gather(indices=neg_idx_col, params=z_sample)
+                    negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
+                except:
+                    breakpoint()
+
+                pos_loss = tf.reduce_mean(
+                    tf.keras.losses.binary_crossentropy(
+                        tf.ones_like(positive_pairwise), positive_pairwise, from_logits=True
+                    )
+                )
+                neg_loss = tf.reduce_mean(
+                    tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
+                )
+                gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
+                loss = gnn_loss
+            
+            # SCG loss
+            scg_loss = tf.constant(0, dtype=tf.float32)
+            if self.all_different_idx is not None and self.scg_weight > 0:
+                ns1 = tf.gather(z_sample, self.all_different_idx[:, 0])
+                ns2 = tf.gather(z_sample, self.all_different_idx[:, 1])
+                all_diff_pairs = tf.math.exp(-0.5 * tf.reduce_sum((ns1 - ns2) ** 2, axis=-1))
+                scg_loss = tf.reduce_mean(all_diff_pairs) * self.scg_weight
+                loss += scg_loss
+
+            # decode
+            kmer_loss, ab_loss, kld_loss = self.ae_loss(tf.gather(self.features, idx), mu, logvar, vae=True)
+            loss += kmer_loss + ab_loss - kld_loss
+
+        tw = self.gnn_model.trainable_weights
+        tw += self.encoder.trainable_weights
+        tw += self.decoder.trainable_weights
+        grads = tape.gradient(loss, tw)
+        self.opt.apply_gradients(zip(grads, tw))
+        return loss, gnn_loss, scg_loss, kmer_loss, ab_loss, kld_loss
+
     @staticmethod
     def sample_idx(idx, n):
         n = tf.cast(n, tf.int64)
@@ -330,7 +422,7 @@ class VGAE(Model):
             x = Dense(256)(x)
             x = LeakyReLU()(x)
             x = BatchNormalization(epsilon=1e-6)(x)
-        x = Dense(emb_dim[1])(x)
+        #x = Dense(emb_dim[1])(x)
         
         
         self.decoder = Model(z_in, x)
@@ -360,7 +452,7 @@ class VGAE(Model):
         return loss.numpy()
     
     @tf.function
-    def _train_step(self, x, a, y, pos_weight, norm, indices):
+    def _train_step(self, x, a, y, pos_weight, norm, indices, loss="graph"): #loss="features"
         with tf.GradientTape() as tape:
             predictions, z, model_z_mean, model_z_log_std, x_orig = self((x, a), indices, training=True)            
             pairs = []
@@ -384,7 +476,7 @@ class VGAE(Model):
                 x_hat = self.decoder(z, training=True)
                 loss = loss + 0.5*tf.reduce_mean((x_hat - tf.gather(x_orig, indices))**2)
                 
-        tw =      self.encoder.trainable_weights
+        tw = self.encoder.trainable_weights
         if self.freeze_embeddings:
             tw += self.decoder.trainable_weights
         gradients = tape.gradient(loss,tw)
