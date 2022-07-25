@@ -32,9 +32,19 @@ from graphmb.graph_functions import (
     run_tsne
 )
 
-import vaegbin
+import vaegbin, train_vaegnn, train_gnn
 from graphmb.version import __version__
 
+
+def run_model(dataset, args, logger):
+    if args.model_name.endswith("_ae"):
+        return train_vaegnn.run_model_vaegnn(dataset, args, logger)
+    elif args.model_name == "vae":
+        return vaegbin.run_model_vae(dataset, args, logger)
+    elif args.model_name in ("gcn", "sage", "gat"):
+        return train_gnn.run_model_gnn(dataset, args, logger)
+    elif args.model_name == "vgae":
+        return vaegbin.run_model_vgae(dataset, args, logger)
 
 def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
     # properties of all nodes
@@ -412,6 +422,7 @@ def main():
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
     parser.add_argument("--evalepochs", type=int, help="Epoch interval to run eval", default=10)
+    parser.add_argument("--evalskip", type=int, help="Skip eval of these epochs", default=50)
     parser.add_argument("--eval_split", type=float, help="Percentage of dataset to use for eval", default=0.0)
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--rawfeatures", help="Use raw features", action="store_true")
@@ -616,7 +627,7 @@ def main():
             elif args.markers is not None:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            best_train_embs, metrics = vaegbin.run_model(dataset, args, logger)
+            best_train_embs, metrics = run_model(dataset, args, logger)
 
         run_post_processing(
             best_train_embs,
