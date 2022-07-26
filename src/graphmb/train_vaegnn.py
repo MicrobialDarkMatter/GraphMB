@@ -78,7 +78,7 @@ def run_model_vaegnn(dataset, args, logger):
     id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
     plot_edges_sim(X, dataset.adj_matrix, id_to_scg, "pretrain_")
 
-    scores = []
+    scores = [stats]
     losses = {"total": [], "ae": [], "gnn": [], "scg": []}
     all_cluster_labels = []
     X = X.astype(np.float32)
@@ -218,9 +218,9 @@ def run_model_vaegnn(dataset, args, logger):
                 logger.info(f"--- EPOCH {e:d} ---")
                 logger.info(f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} HQ={stats['hq']}   BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
                 logger.info(str(scores[-1]))
-
+        losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
         pbar_epoch.set_description(
-            f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f}  HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+            f"[{gname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} TotalVAE={recon_loss:.3f} {losses_string} HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss + recon_loss
         losses["gnn"].append(gnn_loss)
@@ -257,7 +257,7 @@ def run_model_vaegnn(dataset, args, logger):
     # get best stats:
     # if concat_features:  # use HQ
     hqs = [s["hq"] for s in scores]
-    epoch_hqs = [s["epoch"] for s in scores]
+    #epoch_hqs = [s["epoch"] for s in scores]
     best_idx = np.argmax(hqs)
     # else:  # use F1
     #    f1s = [s["f1"] for s in scores]
@@ -280,6 +280,6 @@ def run_model_vaegnn(dataset, args, logger):
     #plt.plot(range(len(losses["total"])), losses["total"], label="total loss")
 
     #plot edges vs initial embs
-    plot_edges_sim(best_vae_embs, dataset.adj_matrix, id_to_scg, "vae_")
+    #plot_edges_sim(best_vae_embs, dataset.adj_matrix, id_to_scg, "vae_")
     plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
     return best_embs, scores[best_idx]

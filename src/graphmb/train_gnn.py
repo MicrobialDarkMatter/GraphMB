@@ -4,6 +4,7 @@ import os
 import tensorflow as tf
 import random
 import logging
+from tqdm import tqdm
 
 from graphmb.models import  TH
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim

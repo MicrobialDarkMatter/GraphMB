@@ -6,7 +6,7 @@ import random
 import logging
 from tqdm import tqdm
 
-from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder
+from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder, GNNEncoder
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
@@ -102,7 +102,10 @@ def run_model_gnn_recon(dataset, args, logger):
     logger.info(f"*** output clustering dim {output_dim_gnn}")
     
     # encoder encodes GNN output to VAE space
-    encoder = VAEEncoder(0, output_dim_gnn, hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=0)
+    #encoder = VAEEncoder(0, output_dim_gnn, hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
+    #encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
+    encoder = GNNEncoder(ab_dim, kmer_dim, X.shape[0], hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
+
     # decodes decodes decodes VAE space to feature space
     decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
 
@@ -121,7 +124,7 @@ def run_model_gnn_recon(dataset, args, logger):
         num_negatives=args.negatives,
         decoder_input=args.decoder_input,
     )
-
+    th.adj = train_adj
 
     if not args.quiet:
         if not args.ae_only:
@@ -205,7 +208,9 @@ def run_model_gnn_recon(dataset, args, logger):
    
             th.gnn_model.adj = adj
             #gnn_input_features = features
-            node_new_features = encoder(th.gnn_model(features, None))[0]
+            #node_new_features = encoder(th.gnn_model(features, None))[0]
+            node_new_features, mu, logvar, x_orig = encoder(features, adj, training=False)
+            #node_new_features = th.gnn_model(features, None)
             node_new_features = node_new_features.numpy()
 
             best_hq, best_embs, best_epoch, scores = eval_epoch(logger, summary_writer, node_new_features,
@@ -253,6 +258,6 @@ def run_model_gnn_recon(dataset, args, logger):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
 
     #plot edges vs initial embs
-    plot_edges_sim(best_vae_embs, dataset.adj_matrix, id_to_scg, "vae_")
+    #plot_edges_sim(best_vae_embs, dataset.adj_matrix, id_to_scg, "vae_")
     plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
     return best_embs, scores[best_idx]

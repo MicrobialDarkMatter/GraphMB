@@ -34,6 +34,7 @@ class VAEEncoder(Model):
     def call(self, x, training=False):
         mu, sigma = self.model(x, training=training)
         return mu, sigma
+
     
 class VAEDecoder(Model):
     def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0, layers=2):
@@ -193,8 +194,9 @@ class TH:
         self.abundance_weight = abundance_weight
         self.no_gnn = gnn_model is None
         self.train_ae = False
-        self.abundance_dim = self.decoder.abundance_dim
-        self.kmers_dim = self.decoder.kmers_dim
+        if self.decoder is not None:
+            self.abundance_dim = self.decoder.abundance_dim
+            self.kmers_dim = self.decoder.kmers_dim
 
     @tf.function
     def train_unsupervised(self, idx):
@@ -284,7 +286,7 @@ class TH:
             mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
         mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
 
-        return mse1, mse2, kld
+        return mse2, mse1, kld
 
     @tf.function
     def train_unsupervised_decode(self, idx):
@@ -292,51 +294,15 @@ class TH:
             #breakpoint()
             # run gnn model
             # TODO GNN model that encodes mu and logvar
-            gnn_embs = self.gnn_model(self.features, idx)
-            mu, logvar = self.encoder(gnn_embs, training=True)
-            z_sample = tf.random.normal(tf.shape(mu)) * tf.exp(logvar)
+            #gnn_embs = self.gnn_model(self.features, idx)
+            #gnn_embs = tf.gather(self.features, idx)
+            z_sample, mu, logvar, x_orginal = self.encoder(self.features, self.adj,
+                                                           indices=idx, training=True)
+            #mu = gnn_embs
+            z_sample = mu + tf.random.normal(tf.shape(mu)) * tf.exp(logvar)
 
+            loss = 0
             gnn_loss = tf.constant(0, dtype=tf.float32)
-            if not self.no_gnn:
-                # create random negatives for gnn_loss
-                row_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 0], params=z_sample)
-                col_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 1], params=z_sample)
-                positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
-
-                neg_idx = tf.random.uniform(
-                    shape=(self.num_negatives * len(self.gnn_model.adj.indices),),
-                    minval=0,
-                    maxval=self.adj_shape[0] * self.adj_shape[1] - 1,
-                    dtype=tf.int64,
-                )
-                neg_idx_row = tf.math.minimum(
-                    tf.cast(self.adj_shape[0] - 1, tf.float32),
-                    tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32),
-                )
-                neg_idx_row = tf.cast(neg_idx_row, tf.int64)[:, None]
-                neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)[
-                    :, None
-                ]
-                neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
-                try:
-                    #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
-                    neg_row_embs = tf.gather(indices=neg_idx_row, params=z_sample)
-                    neg_col_embs = tf.gather(indices=neg_idx_col, params=z_sample)
-                    negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
-                except:
-                    breakpoint()
-
-                pos_loss = tf.reduce_mean(
-                    tf.keras.losses.binary_crossentropy(
-                        tf.ones_like(positive_pairwise), positive_pairwise, from_logits=True
-                    )
-                )
-                neg_loss = tf.reduce_mean(
-                    tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
-                )
-                gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
-                loss = gnn_loss
-            
             # SCG loss
             scg_loss = tf.constant(0, dtype=tf.float32)
             if self.all_different_idx is not None and self.scg_weight > 0:
@@ -366,6 +332,58 @@ class TH:
         return s_idx
 
 
+class GNNEncoder(Model):
+    def __init__(self, abundance_dim, kmers_dim, nnodes, hiddendim, zdim=64, dropout=0, layers=2):
+        super(GNNEncoder, self).__init__()
+        self.abundance_dim = abundance_dim
+        self.kmers_dim = kmers_dim
+        N = nnodes
+        F = self.abundance_dim + self.kmers_dim
+        x_in = Input(shape=(abundance_dim+kmers_dim,))
+        a_in = Input((N,), dtype=tf.float32)
+        #x = Embedding(N, F, trainable=False)(x_in)
+        x_orig = x_in
+        x = x_in
+        for _ in range(layers):
+            GCNConv( hiddendim,
+                     activation=None)([x, a_in])
+            x = LeakyReLU(0.01)(x)
+            if dropout > 0:
+                x = Dropout(dropout)(x)
+            x = BatchNormalization()(x)
+
+        z_mean = GCNConv(
+            zdim,
+            activation=None,
+        )([x, a_in])
+        
+        z_log_std = GCNConv(
+            zdim,
+            activation=None,
+        )([x, a_in])
+        
+        self.encoder = Model([x_in, a_in], [z_mean, z_log_std, x_orig])
+        self.encoder.build([ (None,F), (None,N) ])
+        
+        # TODO add decoder
+
+    
+    def call(self, x, a, indices=None, training=True):
+        mu, logvar, x_orig = self.encoder((x,a), training=training)
+        #z_log_std = tf.nn.softplus(z_log_std)
+        logvar = tf.clip_by_value(logvar, -2, 2)
+        z_sample = tf.random.normal(tf.shape(mu)) * tf.exp(logvar)
+        if training:
+            z = mu + z_sample
+        else:
+            z = mu
+        if indices is not None:
+            z = tf.gather(z, indices)
+            mu = tf.gather(mu, indices)
+            logvar = tf.gather(logvar, indices)
+        
+        return z, mu, logvar, x_orig
+    
 class VGAE(Model):
     def __init__(self, emb_dim, embeddings=None, 
                  hidden_dim1=None, hidden_dim2=None,
