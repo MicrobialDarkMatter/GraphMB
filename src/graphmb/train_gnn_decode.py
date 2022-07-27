@@ -6,7 +6,7 @@ import random
 import logging
 from tqdm import tqdm
 
-from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder, GNNEncoder
+from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder, GVAE
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
@@ -89,34 +89,18 @@ def run_model_gnn_recon(dataset, args, logger):
     logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim_gnn}, use_ae: {use_ae}, run AE only: {args.ae_only}")
     
     S = []
-    gnn_model = gmodel_type(
-        features_shape=features.shape,
-        input_dim=input_dim_gnn,
-        labels=None,
-        adj=train_adj,
-        n_labels=output_dim_gnn,
-        hidden_units=hidden_gnn,
-        layers=nlayers_gnn,
-        conv_last=False,
-    )  # , use_bn=True, use_vae=False)
     logger.info(f"*** output clustering dim {output_dim_gnn}")
     
-    # encoder encodes GNN output to VAE space
-    #encoder = VAEEncoder(0, output_dim_gnn, hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
-    #encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
-    encoder = GNNEncoder(ab_dim, kmer_dim, X.shape[0], hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
-
-    # decodes decodes decodes VAE space to feature space
-    decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
-
+    model = GVAE(ab_dim, kmer_dim, X.shape[0], hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
+    model.adj = adj
     th = TH(
         features,
-        gnn_model=gnn_model,
+        gnn_model=model,
         lr=lr_gnn,
         all_different_idx=neg_pair_idx,
         all_same_idx=pos_pair_idx,
-        ae_encoder=encoder,
-        ae_decoder=decoder,
+        ae_encoder=None,
+        ae_decoder=None,
         latentdim=output_dim_gnn,
         gnn_weight=float(args.gnn_alpha),
         ae_weight=float(args.ae_alpha),
@@ -125,13 +109,8 @@ def run_model_gnn_recon(dataset, args, logger):
         decoder_input=args.decoder_input,
     )
     th.adj = train_adj
-
-    if not args.quiet:
-        if not args.ae_only:
-            gnn_model.summary()
-        #if gname.endswith("_ae"):
-        #    th.encoder.summary()
-        #    th.decoder.summary()
+    model.summary()
+   
     if args.eval_split == 0:
         train_idx = np.arange(len(features))
         eval_idx = []
@@ -143,7 +122,6 @@ def run_model_gnn_recon(dataset, args, logger):
     pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
     scores = [stats]
     best_embs = None
-    best_vae_embs = None
     best_model = None
     best_hq = 0
     best_epoch = 0
@@ -154,7 +132,6 @@ def run_model_gnn_recon(dataset, args, logger):
     batch_steps = [25, 75, 150, 300]
     batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
     logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
-    vae_losses = []
     step = 0
     for e in pbar_epoch:
         vae_epoch_losses = {"kld": [], "total": [], "kmer": [], "abundance": [], "scg": [], "gnn": []}
@@ -209,7 +186,7 @@ def run_model_gnn_recon(dataset, args, logger):
             th.gnn_model.adj = adj
             #gnn_input_features = features
             #node_new_features = encoder(th.gnn_model(features, None))[0]
-            node_new_features, mu, logvar, x_orig = encoder(features, adj, training=False)
+            node_new_features = th.gnn_model.encode(features, adj)
             #node_new_features = th.gnn_model(features, None)
             node_new_features = node_new_features.numpy()
 

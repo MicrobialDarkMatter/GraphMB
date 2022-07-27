@@ -197,6 +197,9 @@ class TH:
         if self.decoder is not None:
             self.abundance_dim = self.decoder.abundance_dim
             self.kmers_dim = self.decoder.kmers_dim
+        elif self.gnn_model.decoder is not None:
+            self.abundance_dim = self.gnn_model.decoder.abundance_dim
+            self.kmers_dim = self.gnn_model.decoder.kmers_dim
 
     @tf.function
     def train_unsupervised(self, idx):
@@ -267,7 +270,7 @@ class TH:
         return loss, gnn_loss, scg_loss
     
     @tf.function
-    def ae_loss(self, x, mu, logvar, vae, training=True, writer=None, epoch=0):
+    def ae_loss(self, x, x_hat, mu, logvar, vae, training=True, writer=None, epoch=0):
         if vae:
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)
@@ -276,7 +279,6 @@ class TH:
         else:
             z = mu
             kld = 0
-        x_hat = self.decoder(z, training=training)
         if writer is not None:
             with writer.as_default():
                 tf.summary.scalar('min ab', tf.reduce_min(x_hat[:, :self.abundance_dim]), step=epoch)
@@ -293,13 +295,9 @@ class TH:
         with tf.GradientTape() as tape:
             #breakpoint()
             # run gnn model
-            # TODO GNN model that encodes mu and logvar
-            #gnn_embs = self.gnn_model(self.features, idx)
-            #gnn_embs = tf.gather(self.features, idx)
-            z_sample, mu, logvar, x_orginal = self.encoder(self.features, self.adj,
+            z_sample, mu, logvar, x_orginal, x_hat = self.gnn_model(self.features, self.adj,
                                                            indices=idx, training=True)
-            #mu = gnn_embs
-            z_sample = mu + tf.random.normal(tf.shape(mu)) * tf.exp(logvar)
+ 
 
             loss = 0
             gnn_loss = tf.constant(0, dtype=tf.float32)
@@ -313,12 +311,12 @@ class TH:
                 loss += scg_loss
 
             # decode
-            kmer_loss, ab_loss, kld_loss = self.ae_loss(tf.gather(self.features, idx), mu, logvar, vae=True)
+            kmer_loss, ab_loss, kld_loss = self.ae_loss(tf.gather(self.features, idx), x_hat, mu, logvar, vae=True)
             loss += kmer_loss + ab_loss - kld_loss
 
         tw = self.gnn_model.trainable_weights
-        tw += self.encoder.trainable_weights
-        tw += self.decoder.trainable_weights
+        #tw += self.encoder.trainable_weights
+        #tw += self.decoder.trainable_weights
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
         return loss, gnn_loss, scg_loss, kmer_loss, ab_loss, kld_loss
@@ -332,9 +330,9 @@ class TH:
         return s_idx
 
 
-class GNNEncoder(Model):
+class GVAE(Model):
     def __init__(self, abundance_dim, kmers_dim, nnodes, hiddendim, zdim=64, dropout=0, layers=2):
-        super(GNNEncoder, self).__init__()
+        super(GVAE, self).__init__()
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
         N = nnodes
@@ -364,9 +362,8 @@ class GNNEncoder(Model):
         
         self.encoder = Model([x_in, a_in], [z_mean, z_log_std, x_orig])
         self.encoder.build([ (None,F), (None,N) ])
-        
-        # TODO add decoder
-
+        self.decoder = VAEDecoder(self.abundance_dim, self.kmers_dim, hiddendim, zdim=zdim, dropout=dropout, layers=layers)
+        self.decoder.build([ (None,zdim)])
     
     def call(self, x, a, indices=None, training=True):
         mu, logvar, x_orig = self.encoder((x,a), training=training)
@@ -382,7 +379,16 @@ class GNNEncoder(Model):
             mu = tf.gather(mu, indices)
             logvar = tf.gather(logvar, indices)
         
-        return z, mu, logvar, x_orig
+        x_hat = self.decoder(z, training=training)
+        return z, mu, logvar, x_orig, x_hat
+    
+    def encode(self, x, a):
+        mu, _, _ = self.encoder((x,a))
+        return mu
+
+    def summary(self):
+        self.encoder.summary()
+        self.decoder.summary()
     
 class VGAE(Model):
     def __init__(self, emb_dim, embeddings=None, 
