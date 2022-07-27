@@ -119,6 +119,8 @@ def run_model_vaegnn(dataset, args, logger):
         scg_weight=float(args.scg_alpha),
         num_negatives=args.negatives,
         decoder_input=args.decoder_input,
+        kmers_dim=kmer_dim,
+        abundance_dim=ab_dim,
     )
 
 
