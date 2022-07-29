@@ -76,7 +76,7 @@ def run_model_vaegnn(dataset, args, logger):
 
     #plot edges vs initial embs
     id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
-    plot_edges_sim(X, dataset.adj_matrix, id_to_scg, "pretrain_")
+    plot_edges_sim(X, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_pretrain_")
 
     scores = [stats]
     losses = {"total": [], "ae": [], "gnn": [], "scg": []}

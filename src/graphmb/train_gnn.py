@@ -57,7 +57,7 @@ def run_model_gnn(dataset, args, logger):
 
     #plot edges vs initial embs
     id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
-    plot_edges_sim(X, dataset.adj_matrix, id_to_scg, "pretrain_")
+    plot_edges_sim(X, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_pretrain_")
 
     # pre train clustering
     if not args.skip_preclustering:
@@ -191,6 +191,6 @@ def run_model_gnn(dataset, args, logger):
         for i in range(len(cluster_labels)):
             f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
     #plot edges vs final embs
-    plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
+    plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_posttrain_")
     return best_embs, scores[best_idx]
 
