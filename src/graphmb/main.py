@@ -32,7 +32,7 @@ from graphmb.graph_functions import (
     run_tsne
 )
 
-import vaegbin, train_vaegnn, train_gnn, train_gnn_decode, train_vae
+import vaegbin, train_vaegnn, train_gnn, train_gnn_decode, train_vae, train_auggnn
 from graphmb.version import __version__
 
 
@@ -47,6 +47,8 @@ def run_model(dataset, args, logger):
         return vaegbin.run_model_vgae(dataset, args, logger)
     elif args.model_name.endswith("decode"):
         return train_gnn_decode.run_model_gnn_recon(dataset, args, logger)
+    elif args.model_name.endswith("aug"):
+        return train_auggnn.run_model_vaegnn(dataset, args, logger)
 
 def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
     # properties of all nodes
@@ -612,7 +614,8 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         
-        elif args.model_name in ("sage", "gcn", "gat", "vae", "vgae") or args.model_name.endswith("_ae") or args.model_name.endswith("_decode"):
+        elif args.model_name in ("sage", "gcn", "gat", "vae", "vgae") or args.model_name.endswith("_ae") or \
+             args.model_name.endswith("_decode") or args.model_name.endswith("_aug"):
             if "torch" in sys.modules:
                 sys.modules.pop('torch')
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL

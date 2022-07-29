@@ -139,7 +139,7 @@ def run_model_gnn(dataset, args, logger):
    
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
-        if (e + 1) % RESULT_EVERY == 0: # and e > 350:
+        if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
             th.gnn_model.adj = adj
             gnn_input_features = features
             node_new_features = th.gnn_model(gnn_input_features, None, training=False)

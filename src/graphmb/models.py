@@ -160,6 +160,8 @@ class TH:
         kmer_alpha=0.5,
         num_negatives=50,
         decoder_input="gnn",
+        kmers_dim=103,
+        abundance_dim=4,
         #no_gnn=False
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
@@ -194,12 +196,9 @@ class TH:
         self.abundance_weight = abundance_weight
         self.no_gnn = gnn_model is None
         self.train_ae = False
-        if self.decoder is not None:
-            self.abundance_dim = self.decoder.abundance_dim
-            self.kmers_dim = self.decoder.kmers_dim
-        elif self.gnn_model.decoder is not None:
-            self.abundance_dim = self.gnn_model.decoder.abundance_dim
-            self.kmers_dim = self.gnn_model.decoder.kmers_dim
+        self.abundance_dim = abundance_dim
+        self.kmers_dim = kmers_dim
+
 
     @tf.function
     def train_unsupervised(self, idx):
