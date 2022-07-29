@@ -227,8 +227,8 @@ def run_model_vaegnn(dataset, args, logger):
     tf.config.experimental_run_functions_eagerly(True)
 
 
-    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures,
+    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
@@ -263,7 +263,7 @@ def run_model_vaegnn(dataset, args, logger):
         features_shape=features.shape,
         input_dim=input_dim_gnn,
         labels=None,
-        adj=train_adj,
+        adj=adj,
         n_labels=output_dim_gnn,
         hidden_units=hidden_gnn,
         layers=nlayers_gnn,
@@ -357,9 +357,9 @@ def run_model_vaegnn(dataset, args, logger):
             th.z = th.encoder(X)[0]
             dist_matrix = th.get_vae_edges(0.99)
             #breakpoint()
-            logging.info("adding {} edges to graph of {} edges".format(len(dist_matrix.indices), len(train_adj.indices)))
+            logging.info("adding {} edges to graph of {} edges".format(len(dist_matrix.indices), len(adj.indices)))
             # merge with Assembly graph
-            th.gnn_model.adj = tf.sparse.add(train_adj, dist_matrix)
+            th.gnn_model.adj = tf.sparse.add(adj, dist_matrix)
             logging.info("graph now has {} edges".format(len(th.gnn_model.adj.indices)))
 
 

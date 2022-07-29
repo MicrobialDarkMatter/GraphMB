@@ -9,7 +9,7 @@ from tqdm import tqdm
 from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
-from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
+from vaegbin import name_to_model, TensorboardLogger, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
 def run_model_vae(dataset, args, logger):
     set_seed(args.seed)

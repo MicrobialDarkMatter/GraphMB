@@ -227,7 +227,7 @@ def prepare_data_for_vae(dataset):
     return X, ab_dim, kmer_dim
 
 def prepare_data_for_gnn(
-    dataset, use_edge_weights=True, use_disconnected=True, cluster_markers_only=False, use_raw=False,
+    dataset, use_edge_weights=True, cluster_markers_only=False, use_raw=False,
     binarize=False, remove_edges=False, remove_same_scg=True
 ):
     if use_raw: # use raw features instead of precomputed embeddings
@@ -320,29 +320,11 @@ def prepare_data_for_gnn(
         indices=np.array([adj_norm.row, adj_norm.col]).T, values=new_values, dense_shape=adj_norm.shape
     )
     adj = tf.sparse.reorder(adj)
-    if not use_disconnected:
-        # TODO change node ids
-        train_edges = [
-            eid
-            for eid in range(len(adj_norm.row))
-            if adj_norm.row[eid] in connected_marker_nodes and adj_norm.col[eid] in connected_marker_nodes
-        ]
-
-        train_adj = tf.SparseTensor(
-            indices=np.array([adj_norm.row[train_edges], adj_norm.col[train_edges]]).T,
-            values=new_values[train_edges],
-            #dense_shape=(len(train_edges), len(train_edges))
-            dense_shape=(adj.shape)
-        )
-        train_adj = tf.sparse.reorder(train_adj)
-
-    else:
-        train_adj = adj
 
     # neg_pair_idx = None
     pos_pair_idx = None
-    print("**** Num of edges:", train_adj.indices.shape[0])
-    return X, adj, train_adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx, ab_dim, kmer_dim
+    print("**** Num of edges:", adj.indices.shape[0])
+    return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx, ab_dim, kmer_dim
 
 def save_model(args, epoch, th, th_vae):
     if th_vae is not None:
@@ -446,8 +428,8 @@ def run_model_vgae(dataset, args, logger):
     tf.config.experimental_run_functions_eagerly(True)
 
 
-    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=True,
+    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, cluster_markers_only, use_raw=True,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
@@ -463,12 +445,11 @@ def run_model_vgae(dataset, args, logger):
     model = VGAE(X.shape, hidden_dim1=hidden_gnn, hidden_dim2=output_dim_gnn, dropout=0.1,
              l2_reg=1e-5, embeddings=X, freeze_embeddings=True, lr=lr_gnn)
     X_train = np.arange(len(X))[:,None].astype(np.int64)
-    A_train = tf.sparse.to_dense(train_adj)
+    A_train = tf.sparse.to_dense(adj)
     labels = dataset.adj_matrix.toarray()
-    #pos_weight = float((float(train_adj.shape[0] * train_adj.shape[0] - tf.reduce_sum(train_adj)) / tf.reduce_sum(train_adj)).astype(np.float32))
-    pos_weight = (train_adj.shape[0] * train_adj.shape[0] - tf.sparse.reduce_sum(train_adj)) / tf.sparse.reduce_sum(train_adj)
+    pos_weight = (adj.shape[0] * adj.shape[0] - tf.sparse.reduce_sum(adj)) / tf.sparse.reduce_sum(adj)
 
-    norm = train_adj.shape[0] * train_adj.shape[0] / ((train_adj.shape[0] * train_adj.shape[0] - tf.sparse.reduce_sum(train_adj)) * 2)
+    norm = adj.shape[0] * adj.shape[0] / ((adj.shape[0] * adj.shape[0] - tf.sparse.reduce_sum(adj)) * 2)
 
     pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
     decay = 0.5**(2./10000)
@@ -476,8 +457,8 @@ def run_model_vgae(dataset, args, logger):
     best_hq = 0
     batch_size = args.batchsize
     if batch_size == 0:
-        batch_size = train_adj.shape[0]
-    train_idx = list(range(train_adj.shape[0]))
+        batch_size = adj.shape[0]
+    train_idx = list(range(adj.shape[0]))
     for e in pbar_epoch:
         np.random.shuffle(train_idx)
         n_batches = len(train_idx)//batch_size

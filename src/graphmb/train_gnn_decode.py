@@ -57,8 +57,8 @@ def run_model_gnn_recon(dataset, args, logger):
     tf.config.experimental_run_functions_eagerly(True)
 
 
-    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures,
+    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
@@ -110,7 +110,7 @@ def run_model_gnn_recon(dataset, args, logger):
         kmers_dim=kmer_dim,
         abundance_dim=ab_dim,
     )
-    th.adj = train_adj
+    th.adj = adj
     model.summary()
    
     if args.eval_split == 0:

@@ -49,8 +49,8 @@ def run_model_gnn(dataset, args, logger):
     logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
     tf.config.experimental_run_functions_eagerly(True)
 
-    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures,
+    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
@@ -84,7 +84,7 @@ def run_model_gnn(dataset, args, logger):
         features_shape=features.shape,
         input_dim=input_dim_gnn,
         labels=None,
-        adj=train_adj,
+        adj=adj,
         n_labels=output_dim_gnn,
         hidden_units=hidden_gnn,
         layers=nlayers_gnn,
@@ -155,7 +155,7 @@ def run_model_gnn(dataset, args, logger):
                 logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} HQ={stats['hq']} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
                 logger.info(str(stats))
             if not args.ae_only:
-                th.gnn_model.adj = train_adj
+                th.gnn_model.adj = adj
 
         pbar_epoch.set_description(
             f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f}  HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"

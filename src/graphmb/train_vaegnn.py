@@ -57,8 +57,8 @@ def run_model_vaegnn(dataset, args, logger):
     tf.config.experimental_run_functions_eagerly(True)
 
 
-    X, adj, train_adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-            dataset, use_edge_weights, use_disconnected, cluster_markers_only, use_raw=args.rawfeatures,
+    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+            dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
     logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
@@ -93,7 +93,7 @@ def run_model_vaegnn(dataset, args, logger):
         features_shape=features.shape,
         input_dim=input_dim_gnn,
         labels=None,
-        adj=train_adj,
+        adj=adj,
         n_labels=output_dim_gnn,
         hidden_units=hidden_gnn,
         layers=nlayers_gnn,
@@ -151,7 +151,7 @@ def run_model_vaegnn(dataset, args, logger):
     vae_losses = []
     step = 0
     for e in pbar_epoch:
-        vae_epoch_losses = {"train kld loss": [], "total vae loss": [], "train kmer loss": [], "abundance": []}
+        vae_epoch_losses = {"kld": [], "total vae loss": [], "kmer": [], "ab": []}
         np.random.shuffle(train_idx)
         recon_loss = 0
 
@@ -166,9 +166,9 @@ def run_model_vaegnn(dataset, args, logger):
             batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
             vae_losses = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
             vae_epoch_losses["total vae loss"].append(vae_losses[0])
-            vae_epoch_losses["train kmer loss"].append(vae_losses[1])
-            vae_epoch_losses["abundance"].append(vae_losses[2])
-            vae_epoch_losses["train kld loss"].append(vae_losses[3])
+            vae_epoch_losses["kmer"].append(vae_losses[1])
+            vae_epoch_losses["ab"].append(vae_losses[2])
+            vae_epoch_losses["kld"].append(vae_losses[3])
             pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_epoch_losses["total vae loss"][-10:]):.4f}')
             step += 1
         vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
@@ -178,7 +178,7 @@ def run_model_vaegnn(dataset, args, logger):
             eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
             eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
             eval_loss = eval_mse1 + eval_mse2 - eval_kld
-            log_to_tensorboard(summary_writer, {"eval_loss": eval_loss, "eval kmer_loss": eval_mse2,
+            log_to_tensorboard(summary_writer, {"eval_loss": eval_loss, "eval kmer loss": eval_mse2,
                                                 "eval ab loss": eval_mse1, "eval kld loss": eval_kld}, step)
         else:
             eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
@@ -222,7 +222,7 @@ def run_model_vaegnn(dataset, args, logger):
                 logger.info(str(scores[-1]))
         losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
         pbar_epoch.set_description(
-            f"[{gname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} TotalVAE={recon_loss:.3f} {losses_string} HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+            f"[{gname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss + recon_loss
         losses["gnn"].append(gnn_loss)
