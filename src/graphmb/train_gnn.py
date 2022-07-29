@@ -170,15 +170,16 @@ def run_model_gnn(dataset, args, logger):
         #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
         #        summary_writer.flush()
 
-    #if best_embs is None:
-    best_embs = node_new_features
+    if best_embs is None:
+        best_embs = node_new_features
     
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        best_embs[cluster_mask], node_names[cluster_mask], dataset,
+        best_embs, node_names, dataset,
         clustering=clustering, k=k, #cuda=args.cuda,
     )
     stats["epoch"] = e
     scores.append(stats)
+    logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     # get best stats:
     hqs = [s["hq"] for s in scores]
     epoch_hqs = [s["epoch"] for s in scores]

@@ -215,7 +215,7 @@ def run_model_gnn_recon(dataset, args, logger):
         best_embs = node_new_features
     
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        best_embs[cluster_mask], node_names[cluster_mask], dataset, clustering=clustering, k=k,
+        best_embs, node_names, dataset, clustering=clustering, k=k,
         #cuda=args.cuda,
     )
     stats["epoch"] = e
@@ -230,6 +230,7 @@ def run_model_gnn_recon(dataset, args, logger):
     #    best_idx = np.argmax(f1s)
     # S.append(stats)
     S.append(scores[best_idx])
+    logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
     with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_{pname}_results.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")

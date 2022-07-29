@@ -411,24 +411,11 @@ def run_model_vaegnn(dataset, args, logger):
         #    with summary_writer.as_default():
         #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
         #        summary_writer.flush()
-
-    """if use_ae:
-        eval_features = encoder(features)[0]
-    if not args.ae_only:
-        th.gnn_model.adj = adj
-        node_new_features = th.gnn_model(eval_features, None, training=False)
-        node_new_features = node_new_features.numpy()
-    else:
-        node_new_features = eval_features.numpy()
-
-    # concat with original features
-    if concat_features:
-        node_new_features = tf.concat([features, node_new_features], axis=1).numpy()"""
     if best_embs is None:
         best_embs = node_new_features
     
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        best_embs[cluster_mask], node_names[cluster_mask], dataset, clustering=clustering, k=k,
+        best_embs, node_names, dataset, clustering=clustering, k=k,
         #cuda=args.cuda,
     )
     stats["epoch"] = e
@@ -443,6 +430,7 @@ def run_model_vaegnn(dataset, args, logger):
     #    best_idx = np.argmax(f1s)
     # S.append(stats)
     S.append(scores[best_idx])
+    logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
     with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_{pname}_results.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
