@@ -53,7 +53,8 @@ def run_model_gnn(dataset, args, logger):
             dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
-    logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
+    logger.info("***** input features dimension: {}".format(X[cluster_mask].shape[1]))
+    logger.info("***** Nodes used for clustering: {}".format(X[cluster_mask].shape[0]))
 
     #plot edges vs initial embs
     id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
@@ -62,7 +63,7 @@ def run_model_gnn(dataset, args, logger):
     # pre train clustering
     if not args.skip_preclustering:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
-                    X[cluster_mask], node_names[cluster_mask],
+                    X, node_names,
                     dataset, clustering=clustering, k=k,
                     #cuda=args.cuda,
                 )
@@ -72,7 +73,6 @@ def run_model_gnn(dataset, args, logger):
     
     scores = [stats]
     losses = {"total": [], "ae": [], "gnn": [], "scg": []}
-    all_cluster_labels = []
     X = X.astype(np.float32)
     features = tf.constant(X)
     input_dim_gnn = X.shape[1]
@@ -89,7 +89,7 @@ def run_model_gnn(dataset, args, logger):
         hidden_units=hidden_gnn,
         layers=nlayers_gnn,
         conv_last=False,
-    )  # , use_bn=True, use_vae=False)
+    )
     logger.info(f"*** output clustering dim {output_dim_gnn}")
 
     th = TH(
@@ -120,7 +120,7 @@ def run_model_gnn(dataset, args, logger):
     pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
     scores = []
     best_embs = None
-    best_model = None
+    best_model = th.gnn_model.get_weights()
     best_hq = 0
     best_epoch = 0
     batch_size = args.batchsize
@@ -136,29 +136,34 @@ def run_model_gnn(dataset, args, logger):
                                             "GNN LR": th.opt.learning_rate}, step)
         gnn_loss = gnn_loss.numpy()
         diff_loss = diff_loss.numpy()
-   
+
+        if args.eval_split > 0:
+            total_loss, gnn_loss, diff_loss = th.train_unsupervised(eval_idx, training=False)
+            log_to_tensorboard(summary_writer, {"eval_kmer": eval_mse2, "eval_ab": eval_mse1,
+                                                "eval_kld": eval_kld, "eval loss": eval_loss}, step)
+        else:
+            eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
+
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
         if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
-            th.gnn_model.adj = adj
             gnn_input_features = features
             node_new_features = th.gnn_model(gnn_input_features, None, training=False)
             node_new_features = node_new_features.numpy()
             if concat_features:
                 node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
-            best_hq, best_embs, best_epoch, scores = eval_epoch(logger, summary_writer, node_new_features,
-                                                                cluster_mask, step, args, dataset, e, scores,
-                                                                best_hq, best_embs, best_epoch)
+            best_hq, best_embs, best_epoch, scores, best_model = eval_epoch(logger, summary_writer, node_new_features,
+                                                                cluster_mask, th.gnn_model.get_weights(), step, args, dataset, e, scores,
+                                                                best_hq, best_embs, best_epoch, best_model)
             
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
                 logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} HQ={stats['hq']} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
                 logger.info(str(stats))
-            if not args.ae_only:
-                th.gnn_model.adj = adj
+        
 
         pbar_epoch.set_description(
-            f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f}  HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+            f"[{args.outname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f}  HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss
         losses["gnn"].append(gnn_loss)
@@ -172,19 +177,23 @@ def run_model_gnn(dataset, args, logger):
 
     if best_embs is None:
         best_embs = node_new_features
-    
+    gnn_model.set_weights(best_model)
+    node_new_features = th.gnn_model(gnn_input_features, None, training=False)
+    node_new_features = node_new_features.numpy()
+    if concat_features:
+        node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
     cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        best_embs, node_names, dataset,
+        node_new_features, node_names, dataset,
         clustering=clustering, k=k, #cuda=args.cuda,
     )
     stats["epoch"] = e
     scores.append(stats)
-    logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     # get best stats:
     hqs = [s["hq"] for s in scores]
     epoch_hqs = [s["epoch"] for s in scores]
     best_idx = np.argmax(hqs)
     S.append(scores[best_idx])
+    logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
     with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_results.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")

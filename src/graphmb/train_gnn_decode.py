@@ -168,17 +168,14 @@ def run_model_gnn_recon(dataset, args, logger):
         vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
         log_to_tensorboard(summary_writer, vae_epoch_losses, step)
  
-        #if args.eval_split > 0:
-        #    eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
-        #    eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
-        #    eval_loss = eval_mse1 + eval_mse2 - eval_kld
-        #    with summary_writer.as_default():
-        #        tf.summary.scalar('eval loss', eval_loss, step=step)
-        #        tf.summary.scalar('eval kmer loss', eval_mse2, step=step)
-        #        tf.summary.scalar('eval ab loss', eval_mse1, step=step)
-        #        tf.summary.scalar('eval kld loss', eval_kld, step=step)
-        #else:
-        eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
+        if args.eval_split > 0:
+            eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
+            eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
+            eval_loss = eval_mse1 + eval_mse2 - eval_kld
+            log_to_tensorboard(summary_writer, {"eval_kmer": eval_mse2, "eval_ab": eval_mse1,
+                                                "eval_kld": eval_kld, "eval loss": eval_loss}, step)
+        else:
+            eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
 
 
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0

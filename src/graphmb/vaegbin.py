@@ -246,17 +246,17 @@ def prepare_data_for_gnn(
     depth = 2
     # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth) 
     if cluster_markers_only and dataset.contig_markers is not None:
-        connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
+        #connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
         nodes_with_markers = [
             i
             for i, n in enumerate(dataset.node_names)
             if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
         ]
-        print("train with ", len(nodes_with_markers), "contigds with markers")
+        print("eval cluster with ", len(nodes_with_markers), "contigds with markers")
         cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
     else:
         cluster_mask = [True] * len(dataset.node_names)
-        connected_marker_nodes = set(range(len(dataset.node_names)))
+        #connected_marker_nodes = set(range(len(dataset.node_names)))
     
     adj_matrix = dataset.adj_matrix.copy()
     edge_weights = dataset.edge_weights.copy()
@@ -357,7 +357,7 @@ def log_to_tensorboard(writer, values, step):
             tf.summary.scalar(k, v, step=step)
 
 
-def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, step, args, dataset, epoch, scores, best_hq, best_embs, best_epoch):
+def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights, step, args, dataset, epoch, scores, best_hq, best_embs, best_epoch, best_model):
     log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
 
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
@@ -373,12 +373,12 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, step, ar
     #all_cluster_labels.append(cluster_labels)
 
     if dataset.contig_markers is not None and stats["hq"] > best_hq:
-        best_hq, best_embs, best_epoch = stats["hq"], node_new_features, epoch
+        best_hq, best_embs, best_epoch, best_model = stats["hq"], node_new_features, epoch, weights
         #best_model = th.gnn_model
         #save_model(args, e, th, th_vae)
 
     elif dataset.contig_markers is None and stats["f1"] > best_hq:
-        best_hq, best_embs, best_epoch = stats["f1"], node_new_features, epoch
+        best_hq, best_embs, best_epoch, best_model = stats["f1"], node_new_features, epoch, weights
         #best_model = th.gnn_model
         #save_model(args, e, th, th_vae)
     # print('--- END ---')
@@ -387,7 +387,13 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, step, ar
     #    logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} HQ={stats['hq']} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
     #    logger.info(str(stats))
 
-    return best_hq, best_embs, best_epoch, scores
+    #cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+    #    node_new_features, np.array(dataset.node_names),
+    #    dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne, #cuda=args.cuda,
+    #)
+    #log_to_tensorboard(summary_writer, {"hq_bins_all": stats["hq"], "mq_bins_all": stats["mq"]}, step)
+
+    return best_hq, best_embs, best_epoch, scores, best_model
 
 
 def run_model_vgae(dataset, args, logger):
