@@ -614,10 +614,11 @@ class GCNLAF(Model):
 
 class GAT(Model):
     def __init__(
-        self, features, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
+        self, features_shape, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
     ):
         super(GAT, self).__init__()
-        self.features = features
+        self.features_shape = features_shape
+        #self.features = features
         self.labels = labels
         self.adj = adj
         self.adj_size = adj.dense_shape.numpy()
@@ -641,10 +642,10 @@ class GAT(Model):
             x = Dense(n_labels, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([(self.features.shape[0], input_dim), tuple(self.adj_size)])
+        self.model.build([(features_shape[0], input_dim), tuple(self.adj_size)])
 
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
+    def call(self, features, idx, training=True):
+        output = self.model((features, self.adj), training=training)
         if idx is None:
             return output
         else:
