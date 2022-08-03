@@ -63,7 +63,7 @@ def run_model_gnn(dataset, args, logger):
     # pre train clustering
     if not args.skip_preclustering:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
-                    X, node_names,
+                    X[cluster_mask], node_names[cluster_mask],
                     dataset, clustering=clustering, k=k,
                     #cuda=args.cuda,
                 )
@@ -108,7 +108,7 @@ def run_model_gnn(dataset, args, logger):
         decoder_input=args.decoder_input,
     )
 
-    gnn_model.summary()
+    #gnn_model.summary()
     if args.eval_split == 0:
         train_idx = np.arange(len(features))
         eval_idx = []

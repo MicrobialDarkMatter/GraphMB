@@ -217,15 +217,6 @@ def filter_disconnected(adj, node_names, markers):
     return set(graph.nodes())
 
 
-
-def prepare_data_for_vae(dataset):
-    # less preparation necessary than for GNN
-    node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
-    ab_dim = dataset.node_depths.shape[1]
-    kmer_dim = dataset.node_kmers.shape[1]
-    X = node_raw
-    return X, ab_dim, kmer_dim
-
 def prepare_data_for_gnn(
     dataset, use_edge_weights=True, cluster_markers_only=False, use_raw=False,
     binarize=False, remove_edges=False, remove_same_scg=True
@@ -357,7 +348,8 @@ def log_to_tensorboard(writer, values, step):
             tf.summary.scalar(k, v, step=step)
 
 
-def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights, step, args, dataset, epoch, scores, best_hq, best_embs, best_epoch, best_model):
+def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
+               step, args, dataset, epoch, scores, best_hq, best_embs, best_epoch, best_model):
     log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
 
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(

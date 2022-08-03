@@ -198,23 +198,17 @@ def run_model_vaegnn(dataset, args, logger):
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
         if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
-            if not args.ae_only:
-                th.gnn_model.adj = adj
-            gnn_input_features = features
-            if use_ae:
-                gnn_input_features = encoder(features)[0]
-            if not args.ae_only:
-                node_new_features = th.gnn_model(gnn_input_features, None, training=False)
-                node_new_features = node_new_features.numpy()
-            else:
-                node_new_features = gnn_input_features.numpy()
+            gnn_input_features = th.encoder(features)[0]
+            node_new_features = th.gnn_model(gnn_input_features, None, training=False)
+            node_new_features = node_new_features.numpy()
+
 
             if concat_features:
                 node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
-
-            best_hq, best_embs, best_epoch, scores = eval_epoch(logger, summary_writer, node_new_features,
-                                                                cluster_mask, step, args, dataset, e, scores,
-                                                                best_hq, best_embs, best_epoch)
+            weights = (th.encoder.get_weights(), th.gnn_model.get_weights())
+            best_hq, best_embs, best_epoch, scores, best_model = eval_epoch(logger, summary_writer, node_new_features,
+                                                                cluster_mask, weights, step, args, dataset, e, scores,
+                                                                best_hq, best_embs, best_epoch, best_model)
             
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")

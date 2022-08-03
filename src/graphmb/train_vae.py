@@ -11,6 +11,14 @@ from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
+def prepare_data_for_vae(dataset):
+    # less preparation necessary than for GNN
+    node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
+    ab_dim = dataset.node_depths.shape[1]
+    kmer_dim = dataset.node_kmers.shape[1]
+    X = node_raw
+    return X, ab_dim, kmer_dim
+
 def run_model_vae(dataset, args, logger):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
@@ -117,7 +125,7 @@ def run_model_vae(dataset, args, logger):
 
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
-        if (e + 1) % RESULT_EVERY == 0 and e > 350:
+        if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
           
             gnn_input_features = encoder(features)[0]
             node_new_features = gnn_input_features.numpy()

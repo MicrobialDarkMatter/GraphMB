@@ -111,7 +111,7 @@ def run_model_gnn_recon(dataset, args, logger):
         abundance_dim=ab_dim,
     )
     th.adj = adj
-    model.summary()
+    #model.summary()
    
     if args.eval_split == 0:
         train_idx = np.arange(len(features))
@@ -181,17 +181,15 @@ def run_model_gnn_recon(dataset, args, logger):
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
         if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
-   
-            th.gnn_model.adj = adj
-            #gnn_input_features = features
+               #gnn_input_features = features
             #node_new_features = encoder(th.gnn_model(features, None))[0]
             node_new_features = th.gnn_model.encode(features, adj)
             #node_new_features = th.gnn_model(features, None)
             node_new_features = node_new_features.numpy()
-
-            best_hq, best_embs, best_epoch, scores = eval_epoch(logger, summary_writer, node_new_features,
-                                                                cluster_mask, step, args, dataset, e, scores,
-                                                                best_hq, best_embs, best_epoch)
+            weights = th.gnn_model.get_weights()
+            best_hq, best_embs, best_epoch, scores, best_model = eval_epoch(logger, summary_writer, node_new_features,
+                                                                cluster_mask, weights, step, args, dataset, e, scores,
+                                                                best_hq, best_embs, best_epoch, best_model)
             if args.quiet:
                 logger.info(f"--- EPOCH {e:d} ---")
                 logger.info(f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} HQ={scores[-1]['hq']}   BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
