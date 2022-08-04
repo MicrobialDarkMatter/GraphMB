@@ -36,19 +36,19 @@ import vaegbin, train_vaegnn, train_gnn, train_gnn_decode, train_vae, train_augg
 from graphmb.version import __version__
 
 
-def run_model(dataset, args, logger):
+def run_model(dataset, args, logger, nrun):
     if args.model_name.endswith("_ae"):
-        return train_vaegnn.run_model_vaegnn(dataset, args, logger)
+        return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun)
     elif args.model_name == "vae":
-        return train_vae.run_model_vae(dataset, args, logger)
+        return train_vae.run_model_vae(dataset, args, logger, nrun)
     elif args.model_name in ("gcn", "sage", "gat"):
-        return train_gnn.run_model_gnn(dataset, args, logger)
+        return train_gnn.run_model_gnn(dataset, args, logger, nrun)
     elif args.model_name == "vgae":
-        return vaegbin.run_model_vgae(dataset, args, logger)
+        return vaegbin.run_model_vgae(dataset, args, logger, nrun)
     elif args.model_name.endswith("decode"):
-        return train_gnn_decode.run_model_gnn_recon(dataset, args, logger)
+        return train_gnn_decode.run_model_gnn_recon(dataset, args, logger, nrun)
     elif args.model_name.endswith("aug"):
-        return train_auggnn.run_model_vaegnn(dataset, args, logger)
+        return train_auggnn.run_model_vaegnn(dataset, args, logger, nrun)
 
 def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
     # properties of all nodes
@@ -632,7 +632,7 @@ def main():
             elif args.markers is not None:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            best_train_embs, metrics = run_model(dataset, args, logger)
+            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n)
 
         run_post_processing(
             best_train_embs,
@@ -664,13 +664,18 @@ def main():
     for mname in metrics_names:
         values = [m[mname] for m in metrics_per_run]
         logger.info("### SCG {}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
+    hqs = [m["hq"] for m in metrics_per_run]
+    mqs = [m["mq"] for m in metrics_per_run]
+    logger.info("{:.1f} {:.1f} {:.1f} {:.1f}".format(np.mean(hqs), np.std(hqs), np.mean(mqs), np.std(mqs)))
     if args.labels is not None:
         #amber_metrics_names = amber_metrics_per_run[0].keys()
         amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "hq", "mq"]
         for mname in amber_metrics_names:
             values = [m[mname] for m in amber_metrics_per_run]
             logger.info("### label eval {}: {:.4f} {:.4f} ###".format(mname, np.mean(values), np.std(values)))
-    print("Total run time: {}".format(datetime.now() - now))
+    total_time = datetime.now() - now
+    print("Total run time: {}".format(total_time))
+    print("Seconds per run: {:.2f}".format(total_time.total_seconds() / args.nruns))
 
 if __name__ == "__main__":
     main()

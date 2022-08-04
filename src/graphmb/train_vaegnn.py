@@ -11,7 +11,7 @@ from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
-def run_model_vaegnn(dataset, args, logger):
+def run_model_vaegnn(dataset, args, logger, nrun):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -40,30 +40,33 @@ def run_model_vaegnn(dataset, args, logger):
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
     summary_writer = tf.summary.create_file_writer(train_log_dir)
-    print("logging to tensorboard")
+    args.rawfeatures = True
     tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
     logger.addHandler(tb_handler)
-    #tf.summary.trace_on(graph=True)
-
-    logger.info("******* Running model: {} **********".format(gname))
-    logger.info("***** using edge weights: {} ******".format(use_edge_weights))
-    logger.info("***** using disconnected: {} ******".format(use_disconnected))
-    logger.info("***** concat features: {} *****".format(concat_features))
-    logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
-    logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
-    logger.info("***** self edges only: {} *****".format(args.noedges))
-    args.rawfeatures = True
-    logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
-    tf.config.experimental_run_functions_eagerly(True)
-
 
     X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
-            dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
-            binarize=args.binarize, remove_edges=args.noedges)
-    logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
-    logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
+        dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
+        binarize=args.binarize, remove_edges=args.noedges)
+
+    if nrun == 0:
+        print("logging to tensorboard")
+        
+    #tf.summary.trace_on(graph=True)
+
+        logger.info("******* Running model: {} **********".format(gname))
+        logger.info("***** using edge weights: {} ******".format(use_edge_weights))
+        logger.info("***** using disconnected: {} ******".format(use_disconnected))
+        logger.info("***** concat features: {} *****".format(concat_features))
+        logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
+        logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
+        logger.info("***** self edges only: {} *****".format(args.noedges))
+        logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
+        logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
+        logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
+    tf.config.experimental_run_functions_eagerly(True)
+    
     # pre train clustering
-    if not args.skip_preclustering:
+    if not args.skip_preclustering and nrun == 0:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                     X[cluster_mask], node_names[cluster_mask],
                     dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
@@ -123,13 +126,6 @@ def run_model_vaegnn(dataset, args, logger):
         abundance_dim=ab_dim,
     )
 
-
-    if not args.quiet:
-        if not args.ae_only:
-            gnn_model.summary()
-        #if gname.endswith("_ae"):
-        #    th.encoder.summary()
-        #    th.decoder.summary()
     if args.eval_split == 0:
         train_idx = np.arange(len(features))
         eval_idx = []
@@ -216,7 +212,7 @@ def run_model_vaegnn(dataset, args, logger):
                 logger.info(str(scores[-1]))
         losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
         pbar_epoch.set_description(
-            f"[{gname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+            f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss + recon_loss
         losses["gnn"].append(gnn_loss)

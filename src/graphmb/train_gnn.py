@@ -12,7 +12,7 @@ from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
 
-def run_model_gnn(dataset, args, logger):
+def run_model_gnn(dataset, args, logger, nrun):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -34,34 +34,36 @@ def run_model_gnn(dataset, args, logger):
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
     summary_writer = tf.summary.create_file_writer(train_log_dir)
-    print("logging to tensorboard")
+    
     tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
     logger.addHandler(tb_handler)
     #tf.summary.trace_on(graph=True)
-
-    logger.info("******* Running model: {} **********".format(gname))
-    logger.info("***** using edge weights: {} ******".format(use_edge_weights))
-    logger.info("***** using disconnected: {} ******".format(use_disconnected))
-    logger.info("***** concat features: {} *****".format(concat_features))
-    logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
-    logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
-    logger.info("***** self edges only: {} *****".format(args.noedges))
-    logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
     tf.config.experimental_run_functions_eagerly(True)
 
     X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
             dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
-    logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
-    logger.info("***** input features dimension: {}".format(X[cluster_mask].shape[1]))
-    logger.info("***** Nodes used for clustering: {}".format(X[cluster_mask].shape[0]))
+    if nrun == 0:
+        print("logging to tensorboard")
+        logger.info("******* Running model: {} **********".format(gname))
+        logger.info("***** using edge weights: {} ******".format(use_edge_weights))
+        logger.info("***** using disconnected: {} ******".format(use_disconnected))
+        logger.info("***** concat features: {} *****".format(concat_features))
+        logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
+        logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
+        logger.info("***** self edges only: {} *****".format(args.noedges))
+        logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
+    
+        logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
+        logger.info("***** input features dimension: {}".format(X[cluster_mask].shape[1]))
+        logger.info("***** Nodes used for clustering: {}".format(X[cluster_mask].shape[0]))
 
     #plot edges vs initial embs
     id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
     plot_edges_sim(X, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_pretrain_")
 
     # pre train clustering
-    if not args.skip_preclustering:
+    if not args.skip_preclustering and nrun == 0:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                     X[cluster_mask], node_names[cluster_mask],
                     dataset, clustering=clustering, k=k,

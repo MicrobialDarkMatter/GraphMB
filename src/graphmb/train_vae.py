@@ -19,7 +19,7 @@ def prepare_data_for_vae(dataset):
     X = node_raw
     return X, ab_dim, kmer_dim
 
-def run_model_vae(dataset, args, logger):
+def run_model_vae(dataset, args, logger, nrun):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -32,18 +32,19 @@ def run_model_vae(dataset, args, logger):
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
     summary_writer = tf.summary.create_file_writer(train_log_dir)
-    print("logging to tensorboard")
+    
     tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
     logger.addHandler(tb_handler)
     #tf.summary.trace_on(graph=True)
-
-    logger.info("******* Running model: VAE **********")
-    logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
+    if nrun == 0:
+        print("logging to tensorboard")
+        logger.info("******* Running model: VAE **********")
+        logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
     tf.config.experimental_run_functions_eagerly(True)
     X, ab_dim, kmer_dim = prepare_data_for_vae(dataset)
     cluster_mask = [True] * len(dataset.node_names)
 
-    if not args.skip_preclustering:
+    if not args.skip_preclustering and nrun == 0:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                     X[cluster_mask], node_names[cluster_mask], dataset, clustering=clustering, k=k) #cuda=args.cuda,
     scores = []
@@ -52,10 +53,11 @@ def run_model_vae(dataset, args, logger):
     X = X.astype(np.float32)
     features = tf.constant(X)
     input_dim_gnn = output_dim_vae
-    logger.info(f"*** Model input dim {X.shape[1]}")
-    
+    if nrun == 0:
+        logger.info(f"*** Model input dim {X.shape[1]}")
+        logger.info(f"*** output clustering dim {output_dim_vae}")
     S = []
-    logger.info(f"*** output clustering dim {output_dim_vae}")
+    
     
     encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
     decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
@@ -79,10 +81,12 @@ def run_model_vae(dataset, args, logger):
     if batch_size == 0:
         batch_size = len(train_idx)
 
-    logger.info("**** initial batch size: {} ****".format(batch_size))
+    
     batch_steps = [25, 75, 150, 300]
     batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
-    logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
+    if nrun == 0:
+        logger.info("**** initial batch size: {} ****".format(batch_size))
+        logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
     vae_losses = []
     step = 0
     for e in pbar_epoch:
