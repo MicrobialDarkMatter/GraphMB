@@ -185,9 +185,10 @@ def run_model_vaegnn(dataset, args, logger, nrun):
         with summary_writer.as_default():
             tf.summary.scalar('epoch', e, step=step)
  
-        total_loss, gnn_loss, diff_loss = th.train_unsupervised(train_idx)
+        total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
         log_to_tensorboard(summary_writer, {"Total loss": total_loss, "gnn loss": gnn_loss, "SCG loss": diff_loss,
-                                            'GNN  LR': th.opt.learning_rate}, step)
+                                            'GNN  LR': th.opt.learning_rate,
+                                            "pos loss": pos_loss, "neg loss": neg_loss}, step)
         gnn_loss = gnn_loss.numpy()
         diff_loss = diff_loss.numpy()
 

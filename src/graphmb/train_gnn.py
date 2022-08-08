@@ -133,9 +133,10 @@ def run_model_gnn(dataset, args, logger, nrun):
     for e in pbar_epoch:
         np.random.shuffle(train_idx)
         step += 1
-        total_loss, gnn_loss, diff_loss = th.train_unsupervised(train_idx)
+        total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
         log_to_tensorboard(summary_writer, {"gnn loss": gnn_loss, "SCG loss": diff_loss, "GNN loss": total_loss,
-                                            "GNN LR": th.opt.learning_rate}, step)
+                                            "GNN LR": th.opt.learning_rate, "pos loss": pos_loss,
+                                            "neg_loss": neg_loss}, step)
         gnn_loss = gnn_loss.numpy()
         diff_loss = diff_loss.numpy()
 

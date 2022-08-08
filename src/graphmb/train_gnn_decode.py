@@ -11,7 +11,7 @@ from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
-def run_model_gnn_recon(dataset, args, logger):
+def run_model_gnn_recon(dataset, args, logger, nrun):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -197,7 +197,7 @@ def run_model_gnn_recon(dataset, args, logger):
 
         losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
         pbar_epoch.set_description(
-            f"[{gname} {nlayers_gnn}l {pname}] {losses_string}  HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+            f"[{args.outname} {nlayers_gnn}l {pname}] {losses_string}  HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
         )
         total_loss = gnn_loss + diff_loss + recon_loss
         losses["gnn"].append(gnn_loss)

@@ -230,10 +230,10 @@ class TH:
                     tf.cast(self.adj_shape[0] - 1, tf.float32),
                     tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32),
                 )
-                neg_idx_row = tf.cast(neg_idx_row, tf.int64)[:, None]
-                neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)[
-                    :, None
-                ]
+                neg_idx_row = tf.cast(neg_idx_row, tf.int64) #[:, None]
+                neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)#[
+                #    :, None
+                #]
                 neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
                 try:
                     #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
@@ -243,30 +243,41 @@ class TH:
                 except:
                     breakpoint()
 
-                pos_loss = tf.reduce_mean(
-                    tf.keras.losses.binary_crossentropy(
-                        tf.ones_like(positive_pairwise), positive_pairwise, from_logits=True
-                    )
-                )
-                neg_loss = tf.reduce_mean(
-                    tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs), negative_pairs, from_logits=True)
-                )
-                gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
+                pos_loss = tf.keras.losses.binary_crossentropy(tf.ones_like(positive_pairwise),
+                                                               positive_pairwise, from_logits=True)
+                neg_loss = tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs),
+                                                              negative_pairs, from_logits=True)
+                #gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
+                #breakpoint()
+                y_true = tf.concat((tf.ones_like(positive_pairwise), tf.ones_like(negative_pairs)), axis=0)
+                y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
+                gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
+                gnn_loss = gnn_loss * self.gnn_weight
                 loss = gnn_loss
             
             # SCG loss
             scg_loss = tf.constant(0, dtype=tf.float32)
+            #if self.all_different_idx is not None and self.scg_weight > 0:
+            #    ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
+            #    ns2 = tf.gather(node_hat, self.all_different_idx[:, 1])
+            #    all_diff_pairs = tf.math.exp(-0.5 * tf.reduce_sum((ns1 - ns2) ** 2, axis=-1))
+            #    scg_loss = tf.reduce_mean(all_diff_pairs) * self.scg_weight
+            #    loss += scg_loss
+
+            # scg loss alt
             if self.all_different_idx is not None and self.scg_weight > 0:
-                ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
-                ns2 = tf.gather(node_hat, self.all_different_idx[:, 1])
-                all_diff_pairs = tf.math.exp(-0.5 * tf.reduce_sum((ns1 - ns2) ** 2, axis=-1))
-                scg_loss = tf.reduce_mean(all_diff_pairs) * self.scg_weight
+                scg_row_embs = tf.gather(node_hat, self.all_different_idx[:, 0])
+                scg_col_embs = tf.gather(node_hat, self.all_different_idx[:, 1])
+                scg_pairwise = tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1)
+                scg_loss = tf.keras.losses.binary_crossentropy(
+                        tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=True
+                )
                 loss += scg_loss
 
         tw = self.gnn_model.trainable_weights
         grads = tape.gradient(loss, tw)
         self.opt.apply_gradients(zip(grads, tw))
-        return loss, gnn_loss, scg_loss
+        return loss, gnn_loss, scg_loss, pos_loss, neg_loss
     
     @tf.function
     def ae_loss(self, x, x_hat, mu, logvar, vae, training=True, writer=None, epoch=0):
