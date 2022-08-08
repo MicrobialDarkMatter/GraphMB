@@ -1,3 +1,4 @@
+from collections import Counter
 from sklearn.cluster import KMeans
 import sys
 import os
@@ -267,15 +268,19 @@ def prepare_data_for_gnn(
     
     if remove_same_scg:
         edges_with_same_scgs = 0
+        scg_counter = Counter()
         for x, (i, j) in enumerate(zip(adj_matrix.row, adj_matrix.col)):
-            if len(dataset.contig_markers[dataset.node_names[i]].keys() & \
-                dataset.contig_markers[dataset.node_names[j]].keys()) > 0:
+            overlap = len(dataset.contig_markers[dataset.node_names[i]].keys() & \
+                dataset.contig_markers[dataset.node_names[j]].keys())
+            if overlap > 0:
                 #remove edge
+                scg_counter[overlap] += 1
                 adj_matrix.data[x] = 0
                 edge_weights[x] = 0
                 edges_with_same_scgs += 1
         adj_matrix.eliminate_zeros()
         print(f"deleted {edges_with_same_scgs} edges with same SCGs")
+        print(scg_counter.most_common(20))
     if remove_edges:
         # create self loops only sparse adj matrix
         n = len(dataset.node_names)
@@ -388,7 +393,40 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
     return best_hq, best_embs, best_epoch, scores, best_model
 
 
-def run_model_vgae(dataset, args, logger):
+def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, best_hq,
+               step, args, dataset, epoch):
+    log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
+
+    cluster_labels, stats, positive_pairs, hq_bins = compute_clusters_and_stats(
+        node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
+        dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne, #cuda=args.cuda,
+    )
+    
+    stats["epoch"] = epoch
+    #logger.info(str(stats))
+
+    log_to_tensorboard(summary_writer, {"hq_bins": stats["hq"], "mq_bins": stats["mq"]}, step)
+    #all_cluster_labels.append(cluster_labels)
+    new_best = False
+    if dataset.contig_markers is not None and stats["hq"] > best_hq:
+        new_best = True
+    elif dataset.contig_markers is None and stats["f1"] > best_hq:
+        new_best = True
+    # print('--- END ---')
+    #if args.quiet:
+    #    logger.info(f"--- EPOCH {e:d} ---")
+    #    logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} HQ={stats['hq']} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+    #    logger.info(str(stats))
+
+    #cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
+    #    node_new_features, np.array(dataset.node_names),
+    #    dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne, #cuda=args.cuda,
+    #)
+    #log_to_tensorboard(summary_writer, {"hq_bins_all": stats["hq"], "mq_bins_all": stats["mq"]}, step)
+
+    return stats, new_best, cluster_labels, positive_pairs
+
+def run_model_vgae(dataset, args, logger, nrun):
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
     hidden_gnn = args.hidden_gnn
