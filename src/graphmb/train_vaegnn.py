@@ -156,7 +156,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
             batch_size = batch_size * 2
         np.random.shuffle(train_idx)
-        n_batches = len(train_idx)//batch_size
+        n_batches = len(train_idx)//batch_size + 1
         pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
         for b in pbar_vaebatch:
             batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
