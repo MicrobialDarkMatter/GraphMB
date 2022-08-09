@@ -86,7 +86,14 @@ def compute_hq(reference_markers, contig_genes, node_names, node_labels, comp_th
             positive_clusters.append(label)
     return hq, positive_clusters
 
-
+def compute_unresolved(reference_markers, contig_genes, node_names, node_labels, resolved_clusters):
+    # completeness of a bin with all not HQ -> how many more bins we could get
+    unresolved_contigs = np.array([n for i,n in enumerate(node_names) if node_labels[i] not in resolved_clusters])
+    cluster_stats = compute_cluster_score(reference_markers, contig_genes,
+                                          unresolved_contigs, np.ones(len(unresolved_contigs)))
+    contamination = cluster_stats[1]["cont"]
+    potential_mags = int(contamination / 100)
+    return potential_mags
 
 def run_kmedoids(X):
     import kmedoids
@@ -161,6 +168,11 @@ def compute_clusters_and_stats(
             comp_th=90,
             cont_th=1000,
         )
+        unresolved_mags = compute_unresolved(reference_markers=reference_markers,
+            contig_genes=contig_genes,
+            node_names=node_names,
+            node_labels=labels,
+            resolved_clusters=positive_clusters)
         # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
         positive_pairs = []
         node_names_to_idx = {node_name: i for i, node_name in enumerate(node_names)}
@@ -169,6 +181,7 @@ def compute_clusters_and_stats(
                 positive_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))
         # print("found {} positive pairs".format(len(positive_pairs)))
         positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
+
     else:
         positive_pairs, positive_clusters = None, None
         # TODO use p/r/ to get positive_clusters
@@ -195,7 +208,8 @@ def compute_clusters_and_stats(
         )
     return (
         labels,
-        {"precision": p, "recall": r, "f1": f1, "ari": ari, "hq": hq, "mq": mq, "n_clusters": len(np.unique(labels))},
+        {"precision": p, "recall": r, "f1": f1, "ari": ari, "hq": hq, "mq": mq,
+        "n_clusters": len(np.unique(labels)), "unresolved": unresolved_mags},
         positive_pairs,
         positive_clusters,
     )
@@ -272,7 +286,7 @@ def prepare_data_for_gnn(
         for x, (i, j) in enumerate(zip(adj_matrix.row, adj_matrix.col)):
             overlap = len(dataset.contig_markers[dataset.node_names[i]].keys() & \
                 dataset.contig_markers[dataset.node_names[j]].keys())
-            if overlap > 0:
+            if overlap > 0 and i != j:
                 #remove edge
                 scg_counter[overlap] += 1
                 adj_matrix.data[x] = 0
