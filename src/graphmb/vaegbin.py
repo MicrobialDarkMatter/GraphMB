@@ -108,7 +108,9 @@ def compute_clusters_and_stats(
     k=0,
     clustering="vamb",
     cuda=False,
-    tsne=False
+    tsne=False,
+    tsne_path=None,
+    max_pos_pairs=None
 ):
     reference_markers = dataset.ref_marker_sets
     contig_genes = dataset.contig_markers
@@ -117,14 +119,20 @@ def compute_clusters_and_stats(
 
     from vamb.cluster import cluster as vamb_cluster
     if clustering == "vamb":
-        best_cluster_to_contig = {
+        #breakpoint()
+        cluster_to_contig = {
             i: c for (i, (n, c)) in enumerate(vamb_cluster(X.astype(np.float32), node_names, cuda=cuda))
         }
-        best_contig_to_bin = {}
-        for b in best_cluster_to_contig:
-            for contig in best_cluster_to_contig[b]:
-                best_contig_to_bin[contig] = b
-        labels = np.array([best_contig_to_bin[n] for n in node_names])
+        contig_to_bin = {}
+        for b in cluster_to_contig:
+            for contig in cluster_to_contig[b]:
+                contig_to_bin[contig] = b
+        labels = np.array([contig_to_bin[n] for n in node_names])
+        cluster_to_embs = {
+            c: np.array([X[i] for i, n in enumerate(node_names) if n in cluster_to_contig[c]])
+            for c in cluster_to_contig
+        }
+        cluster_centroids = np.array([cluster_to_embs[c].mean(0) for c in cluster_to_contig])
     elif clustering == "kmedoids":
         import kmedoids
         breakpoint()
@@ -136,10 +144,10 @@ def compute_clusters_and_stats(
     elif clustering == "kmeans":
         clf = KMeans(k, random_state=1234)
         labels = clf.fit_predict(X)
-        best_contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
-        best_cluster_to_contig = {i: [] for i in range(k)}
+        contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
+        cluster_to_contig = {i: [] for i in range(k)}
         for i in range(len(node_names)):
-            best_cluster_to_contig[labels[i]].append(node_names[i])
+            cluster_to_contig[labels[i]].append(node_names[i])
     if contig_genes is not None:
         hq, positive_clusters = compute_hq(
             reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
@@ -177,8 +185,12 @@ def compute_clusters_and_stats(
         positive_pairs = []
         node_names_to_idx = {node_name: i for i, node_name in enumerate(node_names)}
         for label in positive_clusters:
-            for (p1, p2) in itertools.combinations(best_cluster_to_contig[label], 2):
-                positive_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))
+            added_pairs = []
+            for (p1, p2) in itertools.combinations(cluster_to_contig[label], 2):
+                added_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))    
+            if max_pos_pairs is not None and len(added_pairs) > max_pos_pairs:
+                added_pairs = random.sample(added_pairs, max_pos_pairs)
+            positive_pairs.extend(added_pairs)
         # print("found {} positive pairs".format(len(positive_pairs)))
         positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
 
@@ -188,23 +200,24 @@ def compute_clusters_and_stats(
         hq, mq = 0, 0
     if node_to_gt_idx_label is not None:
         p, r, f1, ari = calculate_overall_prf(
-            best_cluster_to_contig, best_contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
+            cluster_to_contig, contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )
     else:
         p, r, f1, ari = 0, 0, 0, 0
 
     #plot tSNE
     if tsne:
-        cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(cluster_labels) if x == cluster] for cluster in set(cluster_labels)}
-        node_embeddings_2dim, centroids_2dim = run_tsne(node_new_features, dataset, cluster_to_contig, hq_bins, centroids=None)
+        cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(labels) if x == cluster] for cluster in set(labels)}
+        node_embeddings_2dim, centroids_2dim = run_tsne(X, dataset, cluster_to_contig, positive_clusters, centroids=cluster_centroids)
         plot_embs(
             dataset.node_names,
             node_embeddings_2dim,
-            dataset.label_to_node.copy(),
+            #dataset.label_to_node.copy(),
+            cluster_to_contig,
             centroids=centroids_2dim,
-            hq_centroids=hq_bins,
+            hq_centroids=positive_clusters,
             node_sizes=None,
-            outputname=os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{e}.png"),
+            outputname=tsne_path,
         )
     return (
         labels,
@@ -408,14 +421,13 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
 
 
 def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, best_hq,
-               step, args, dataset, epoch):
+               step, args, dataset, epoch, tsne):
     log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
-
+    tsne_path = os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{epoch}.png")
     cluster_labels, stats, positive_pairs, hq_bins = compute_clusters_and_stats(
         node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
-        dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne, #cuda=args.cuda,
+        dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=tsne, tsne_path=tsne_path, max_pos_pairs=20 #cuda=args.cuda,
     )
-    
     stats["epoch"] = epoch
     #logger.info(str(stats))
 
