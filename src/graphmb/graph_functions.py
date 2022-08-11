@@ -2,6 +2,7 @@ from pathlib import Path
 import time
 import os
 import sys
+import math
 import pdb
 import itertools
 from collections import Counter
@@ -24,6 +25,14 @@ SEED = 0
 
 colors = [
     "black",
+    "red",
+    "blue",
+    "green",
+    "orange",
+    "purple",
+    "brown",
+    "pink",
+    "yellow",
     "silver",
     "maroon",
     "fuchsia",
@@ -178,7 +187,7 @@ def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
             if c not in hq_bins:
                 label_to_node["mq/lq"] += list(cluster_to_contig[c])
     if centroids is not None:
-        all_embs = tsne.fit_transform(torch.cat((torch.tensor(embs), torch.tensor(centroids)), dim=0))
+        all_embs = tsne.fit_transform(np.concatenate((np.array(embs), np.array(centroids)), axis=0))
         centroids_2dim = all_embs[embs.shape[0] :]
         node_embeddings_2dim = all_embs[: embs.shape[0]]
     else:
@@ -186,7 +195,7 @@ def run_tsne(embs, dataset, cluster_to_contig, hq_bins, centroids=None):
         node_embeddings_2dim = tsne.fit_transform(embs)
     return node_embeddings_2dim, centroids_2dim
 
-def draw_nx_graph(graph, node_to_label, labels_to_node, basename, contig_sizes=None, node_titles=None):
+def draw_nx_graph(adj, node_to_label, labels_to_node, basename, contig_sizes=None, node_titles=None, cluster_info={}):
     # draw graph with pybiz library, creates an HTML file with graph
     # del labels_to_node["NA"]
     from pyvis.network import Network
@@ -195,7 +204,6 @@ def draw_nx_graph(graph, node_to_label, labels_to_node, basename, contig_sizes=N
     labels_to_color["NA"] = "white"
     sorted(labels_to_node, key=lambda key: len(labels_to_node[key]), reverse=True)[: len(colors)]
     # node_labels to plot
-
     node_labels = {
         node: {
             "label": str(node) + ":" + str(node_to_label[node]),
@@ -205,31 +213,36 @@ def draw_nx_graph(graph, node_to_label, labels_to_node, basename, contig_sizes=N
     }
     if contig_sizes is not None:
         for n in node_labels:
-            node_labels[n]["size"] = contig_sizes[n]
+            node_labels[n]["size"] = int(contig_sizes[n])
 
     if node_titles is not None:
         for n in node_labels:
             node_labels[n]["title"] = node_titles[n]
-
+    #breakpoint()
+    graph = nx.from_scipy_sparse_matrix(adj, parallel_edges=False, create_using=None, edge_attribute='weight')
+    graph.remove_edges_from(nx.selfloop_edges(graph))
     nx.set_node_attributes(graph, node_labels)
+    nodes_to_plot = [n for n in graph.nodes() if node_to_label[n] != "NA" and len(graph.edges(n)) > 0]
 
     net = Network(notebook=False, height="750px", width="100%")
     net.add_nodes(
-        [int(n) for n in node_labels.keys()],
-        label=[node_labels[n]["label"] for n in node_labels],
-        size=[node_labels[n].get("size", 1) * 10 for n in node_labels],
-        color=[node_labels[n]["color"] for n in node_labels],
-        title=[node_labels[n].get("title", "") for n in node_labels],
+        [int(n) for n in node_labels.keys() if n in nodes_to_plot],
+        label=[node_labels[n]["label"] for n in node_labels  if n in nodes_to_plot],
+        size=[node_labels[n].get("size", 100000)/100_000 for n in node_labels if n in nodes_to_plot],
+        color=[node_labels[n]["color"] for n in node_labels if n in nodes_to_plot],
+        title=[node_labels[n].get("title", f"{cluster_info.get(node_to_label[n])}") for n in node_labels if n in nodes_to_plot],
     )
     for u, v, a in graph.edges(data=True):
         if u != v:
+            #if u not in net.get_nodes() or v not in net.get_nodes():
+            #    breakpoint()
             weight = float(a["weight"].item())
             if weight != 1:
                 net.add_edge(int(u), int(v), color="gray", title="reads weight: {}".format(weight))
             else:
                 net.add_edge(int(u), int(v))
 
-    # net.toggle_physics(False)
+    #net.toggle_physics(False)
     net.show_buttons()
     print("saving graph to", basename)
     net.show("{}.html".format(basename))
@@ -412,11 +425,11 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
     markers = ["o", "s", "p", "*"]
     if "NA" in labels_to_node:
         del labels_to_node["NA"]
-    # breakpoint()
+    #breakpoint()
     labels_to_node = {label: labels_to_node[label] for label in labels_to_node if len(labels_to_node[label]) > 0}
     labels_to_plot = sorted(labels_to_node, key=lambda key: len(labels_to_node[key]), reverse=True)[
         : len(colors) * len(markers)
-    ][:20]
+    ]#[:20]
     # print("ploting these labels", [l, colors[il], len(labels_to_node[l]) for il, l in enumerate(labels_to_plot)])
     x_to_plot = []
     y_to_plot = []
@@ -445,7 +458,7 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
             colors_to_plot.append(colors[i % len(colors)])
             markers_to_plot.append(markers[i // len(colors)])
         # breakpoint()
-        #print("plotting", l, colors[i % len(colors)], markers[i // len(colors)], len(labels_to_node[l]), valid_nodes)
+        #   print("plotting", l, colors[i % len(colors)], markers[i // len(colors)], len(labels_to_node[l]), valid_nodes)
         # plt.scatter(x_to_plot, y_to_plot, s=sizes_to_plot, c=colors[i], label=l)  # , alpha=0.5)
         sc = plt.scatter(
             x_to_plot,
@@ -459,6 +472,7 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
         x_to_plot = []
         y_to_plot = []
         sizes_to_plot = []
+    plt.legend('')
     if centroids is not None:
         hq_centroids_mask = [x in hq_centroids for x in range(len(centroids))]
         lq_centroids_mask = [x not in hq_centroids for x in range(len(centroids))]
@@ -477,10 +491,11 @@ def plot_embs(node_ids, node_embeddings_2dim, labels_to_node, centroids, hq_cent
 
     # for n in node_embeddings:
     # plt.scatter(x_to_plot, y_to_plot, c=colors_to_plot) #, alpha=0.5)
+    #plt.legend()
     if outputname is not None:
+        print("saving embs plot to {}".format(outputname))
         plt.savefig(outputname, bbox_inches="tight", dpi=400)
     else:
-        plt.legend()
         plt.show()
 
 
