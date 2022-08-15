@@ -87,7 +87,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         input_dim=input_dim_gnn,
         labels=None,
         adj=adj,
-        n_labels=output_dim_gnn,
+        embsize=output_dim_gnn,
         hidden_units=hidden_gnn,
         layers=nlayers_gnn,
         conv_last=False,

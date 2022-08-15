@@ -47,7 +47,9 @@ def run_model_vae(dataset, args, logger, nrun):
     if not args.skip_preclustering and nrun == 0:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                     X[cluster_mask], node_names[cluster_mask], dataset, clustering=clustering, k=k) #cuda=args.cuda,
-    scores = []
+    else:
+        stats = {"hq": 0, "epoch": 0}
+    scores = [stats]
     losses = {"total": [], "ae": [], "gnn": [], "scg": []}
     all_cluster_labels = []
     X = X.astype(np.float32)
@@ -108,6 +110,9 @@ def run_model_vae(dataset, args, logger, nrun):
             vae_epoch_losses["kmer"].append(vae_losses[1])
             vae_epoch_losses["abundance"].append(vae_losses[2])
             vae_epoch_losses["kld"].append(vae_losses[3])
+            vae_epoch_losses["kld_weight"] = th_vae.kld_weight
+            vae_epoch_losses["kmer_weight"] = th_vae.kmer_weight
+            #vae_epoch_losses["ab_weight"] = th_vae.abundance_weight
             pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_epoch_losses["total"][-10:]):.4f}')
             step += 1
         vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
