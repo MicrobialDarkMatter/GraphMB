@@ -64,18 +64,25 @@ class VAEDecoder(Model):
 
 
 class TrainHelperVAE:
-    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.):
+    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200., train_weights=False):
         self.encoder = encoder
         self.decoder = decoder
-        self.kld_weight = kld_weight
+        self.train_weights = train_weights
         self.abundance_dim = self.encoder.abundance_dim
         self.kmers_dim = self.encoder.kmers_dim
-        if self.abundance_dim > 1:
-            self.abundance_weight = 0.85 / tf.math.log(float(self.abundance_dim))
-            self.kmer_weight = 0.15
+        if train_weights:
+            #self.kld_weight = tf.Variable(kld_weight)
+            self.kld_weight = kld_weight
+            #self.abundance_weight = tf.Variable(0.5)
+            self.kmer_weight = tf.Variable(0.1)
         else:
-            self.abundance_weight = 0.5
-            self.kmer_weight = 0.5
+            self.kld_weight = kld_weight
+            if self.abundance_dim > 1:
+                #self.abundance_weight = 0.85 / tf.math.log(float(self.abundance_dim))
+                self.kmer_weight = 0.15
+            else:
+                #self.abundance_weight = 0.5
+                self.kmer_weight = 0.5
         self.opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         self.logvar = None
         self.mu = None
@@ -106,10 +113,15 @@ class TrainHelperVAE:
             with writer.as_default():
                 tf.summary.scalar('min ab', tf.reduce_min(x_hat[:, :self.abundance_dim]), step=epoch)
         if self.abundance_dim > 1:
-            mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
+            mse1 = -tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
         else:
-            mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
-        mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
+            mse1 = tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
+        if self.train_weights:
+            kmer_weight = tf.math.sigmoid(self.kmer_weight)
+        else:
+            kmer_weight = self.kmer_weight
+        mse1 *= (1-kmer_weight)
+        mse2 = kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
 
         return mse1, mse2, kld
 
@@ -123,7 +135,9 @@ class TrainHelperVAE:
             mse1, mse2, kld = self.loss(x, mu, logvar, vae, training=True, writer=writer, epoch=epoch)
             loss = mse1 + mse2 - kld
 
-        tw = self.encoder.trainable_weights + self.decoder.trainable_weights   
+        tw = self.encoder.trainable_weights + self.decoder.trainable_weights 
+        if self.train_weights:
+            tw += [self.kmer_weight] # self.kld_weight
         grads = tape.gradient(loss, tw)
         grad_norm = tf.linalg.global_norm(grads)
         clip_grads, _ = tf.clip_by_global_norm(grads, 5,  use_norm=grad_norm)
@@ -162,6 +176,7 @@ class TH:
         decoder_input="gnn",
         kmers_dim=103,
         abundance_dim=4,
+        labels=None
         #no_gnn=False
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
@@ -198,7 +213,6 @@ class TH:
         self.train_ae = False
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
-
 
     @tf.function
     def train_unsupervised(self, idx):
@@ -295,7 +309,8 @@ class TH:
         if self.abundance_dim > 1:
             mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
         else:
-            mse1 = self.abundance_weight*tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
+            mse1 = tf.reduce_mean( (x[:, :self.abundance_dim] - x_hat[:, :self.abundance_dim])**2)
+        mse1 *= (1-self.kmer_weight)
         mse2 = self.kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
 
         return mse2, mse1, kld
@@ -524,12 +539,14 @@ class GCN(Model):
         input_dim,
         labels,
         adj,
+        embsize=None,
         n_labels=None,
         hidden_units=None,
         layers=None,
         conv_last=None,
         use_bn=True,
         use_vae=False,
+        predict=False
     ):
         super(GCN, self).__init__()
         assert layers > 0
@@ -553,17 +570,16 @@ class GCN(Model):
             x = Dropout(0.5)(x)
 
         if use_vae:
-            mu = Dense(n_labels, use_bias=True)(x)
-            log_std = Dense(n_labels, use_bias=True)(x)
+            mu = Dense(embsize, use_bias=True)(x)
+            log_std = Dense(embsize, use_bias=True)(x)
             x = Concatenate(axis=1)([mu, log_std])
         else:
-
-            if conv_last:
+            x = Dense(embsize, use_bias=True)(x)
+            if predict:
                 x = Dense(n_labels, use_bias=False)(x)
-                x = Lambda(lambda t: tf.sparse.sparse_dense_matmul(t[0], t[1]))([adj_in, x])
-                x = BiasLayer()(x)
-            else:
-                x = Dense(n_labels, use_bias=True)(x)
+                x = Softmax()(x)
+                #x = Lambda(lambda t: tf.sparse.sparse_dense_matmul(t[0], t[1]))([adj_in, x])
+                #x = BiasLayer()(x)
 
         self.model = Model([node_in, adj_in], x)
         self.model.build([(features_shape[0], input_dim), tuple(self.adj_size)])
