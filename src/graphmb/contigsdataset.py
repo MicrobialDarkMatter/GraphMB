@@ -415,6 +415,35 @@ class AssemblyDataset:
             ]  # deal with missing embs
         self.node_embs = np.array(self.node_embs)
         
+
+    def get_topk_neighbors(self, k, scg_only=False):
+        """
+        Returns a list of the top k neighbors for each node. Use kmers and abundance
+
+        """
+        #breakpoint()
+        self.logger.info("getting top {} neighbors".format(k))
+        self.topk_neighbors = []
+        features = np.concatenate((self.node_kmers, self.node_depths), axis=1)
+        cosine_dists = np.dot(features, features.T)
+        for i in range(len(self.node_names)):
+            self.topk_neighbors.append(set(np.argsort(cosine_dists[i])[-k:]))
+        self.logger.info("got top {} neighbors".format(k))
+
+    def estimate_n_genomes(self):
+        scg_counts = {}
+        for marker_set in self.ref_marker_sets:
+            for gene in marker_set:
+                scg_counts[gene] = 0
+                for contig in self.contig_markers:
+                    if gene in self.contig_markers[contig]:
+                        scg_counts[gene] += self.contig_markers[contig][gene]
+
+        print(scg_counts)
+        quartiles = np.percentile(list(scg_counts.values()), [25, 50, 75])
+        print("candidate k0s", sorted(set([k for k in scg_counts.values() if k >= quartiles[2]])))
+        return max(scg_counts.values())
+        
        
 
 
