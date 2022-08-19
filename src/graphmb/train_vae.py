@@ -5,6 +5,8 @@ import tensorflow as tf
 import random
 import logging
 from tqdm import tqdm
+import mlflow
+import mlflow.tensorflow
 
 from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
@@ -21,6 +23,7 @@ def prepare_data_for_vae(dataset):
 
 def run_model_vae(dataset, args, logger, nrun):
     set_seed(args.seed)
+    mlflow.tensorflow.autolog()
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
     hidden_vae = args.hidden_vae
@@ -29,6 +32,8 @@ def run_model_vae(dataset, args, logger, nrun):
     lr_vae = args.lr_vae
     clustering = args.clusteringalgo
     k = args.kclusters
+    mlflow.log_params({"hidden_vae": hidden_vae, "output_dim_vae": output_dim_vae,
+                       "epochs": epochs, "lr_vae": lr_vae, "clustering": clustering, "k": k})
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
     summary_writer = tf.summary.create_file_writer(train_log_dir)
@@ -91,6 +96,8 @@ def run_model_vae(dataset, args, logger, nrun):
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
     vae_losses = []
     step = 0
+    mlflow.create_experiment(name=args.outname + current_time, tags={'run': nrun, 'dataset': args.dataset, 'model': 'vae'}) 
+    #with mlflow.start_run():
     for e in pbar_epoch:
         vae_epoch_losses = {"kld": [], "total": [], "kmer": [], "abundance": []}
         np.random.shuffle(train_idx)
@@ -117,6 +124,7 @@ def run_model_vae(dataset, args, logger, nrun):
             step += 1
         vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
         log_to_tensorboard(summary_writer, vae_epoch_losses, step)
+        mlflow.log_metrics(vae_epoch_losses, step=step)
 
         if args.eval_split > 0:
             eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
@@ -124,24 +132,26 @@ def run_model_vae(dataset, args, logger, nrun):
             eval_loss = eval_mse1 + eval_mse2 - eval_kld
             log_to_tensorboard(summary_writer, {"eval loss": eval_loss, "eval kmer loss": eval_mse2,
                                                 "eval ab loss": eval_mse1, "eval kld loss": eval_kld}, step)
-   
+
         else:
             eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
         recon_loss = np.mean(vae_epoch_losses["total"])
- 
+
         with summary_writer.as_default():
             tf.summary.scalar('epoch', e, step=step)
 
         #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
         gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
         if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
-          
+        
             gnn_input_features = encoder(features)[0]
             node_new_features = gnn_input_features.numpy()
 
             with summary_writer.as_default():
                 tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
                 tf.summary.scalar('Embs std', np.std(node_new_features), step=step)
+            mlflow.log_metrics({'Embs average': np.mean(node_new_features),
+                                'Embs std': np.std(node_new_features)}, step=step)
     
             cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                 node_new_features[cluster_mask], node_names[cluster_mask],
@@ -154,6 +164,7 @@ def run_model_vae(dataset, args, logger, nrun):
             with summary_writer.as_default():
                 tf.summary.scalar('hq_bins',  stats["hq"], step=step)
                 tf.summary.scalar('mq_bins',  stats["mq"], step=step)
+            mlflow.log_metrics({'hq_bins': stats["hq"], 'mq_bins': stats["mq"]}, step=step)
             all_cluster_labels.append(cluster_labels)
             if dataset.contig_markers is not None and stats["hq"] > best_hq:
                 best_hq = stats["hq"]
