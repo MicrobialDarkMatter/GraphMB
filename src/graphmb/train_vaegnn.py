@@ -252,10 +252,10 @@ def run_model_vaegnn(dataset, args, logger, nrun):
     S.append(scores[best_idx])
     logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
-    with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_{pname}_results.tsv", "w") as f:
-        f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
-        for i in range(len(cluster_labels)):
-            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
+    #with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_{pname}_results.tsv", "w") as f:
+    #    f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+    #    for i in range(len(cluster_labels)):
+    #        f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
     #del gnn_model, th
     # res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
     # if gt_idx_label_to_node is not None:

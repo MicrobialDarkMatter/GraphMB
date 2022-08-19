@@ -1,5 +1,5 @@
 from collections import Counter
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, MiniBatchKMeans
 import sys
 import os
 import random
@@ -133,6 +133,16 @@ def compute_clusters_and_stats(
             for c in cluster_to_contig
         }
         cluster_centroids = np.array([cluster_to_embs[c].mean(0) for c in cluster_to_contig])
+    elif clustering == "kmeansbatch":
+        kmeans = MiniBatchKMeans(n_clusters=k, random_state=0, batch_size=2048, verbose=0) #, init=seed_matrix)
+        labels = kmeans.fit_predict(X)
+        contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
+        cluster_to_contig = {i: [] for i in range(k)}
+        for i in range(len(node_names)):
+            cluster_to_contig[labels[i]].append(node_names[i])
+        #cluster_centroids = kmeans.cluster_centers_
+    elif clustering == "kmeansgpu":
+        pass
     elif clustering == "kmedoids":
         import kmedoids
         breakpoint()
@@ -182,17 +192,7 @@ def compute_clusters_and_stats(
             node_labels=labels,
             resolved_clusters=positive_clusters)
         # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
-        positive_pairs = []
-        node_names_to_idx = {node_name: i for i, node_name in enumerate(node_names)}
-        for label in positive_clusters:
-            added_pairs = []
-            for (p1, p2) in itertools.combinations(cluster_to_contig[label], 2):
-                added_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))    
-            if max_pos_pairs is not None and len(added_pairs) > max_pos_pairs:
-                added_pairs = random.sample(added_pairs, max_pos_pairs)
-            positive_pairs.extend(added_pairs)
-        # print("found {} positive pairs".format(len(positive_pairs)))
-        positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
+        positive_pairs = get_positive_pairs(node_names, positive_clusters, cluster_to_contig, max_pos_pairs)
 
     else:
         positive_pairs, positive_clusters = None, None
@@ -226,6 +226,20 @@ def compute_clusters_and_stats(
         positive_pairs,
         positive_clusters,
     )
+
+def get_positive_pairs(node_names, positive_clusters, cluster_to_contig, max_pos_pairs=None):
+    positive_pairs = []
+    node_names_to_idx = {node_name: i for i, node_name in enumerate(node_names)}
+    for label in positive_clusters:
+        added_pairs = []
+        for (p1, p2) in itertools.combinations(cluster_to_contig[label], 2):
+            added_pairs.append((node_names_to_idx[p1], node_names_to_idx[p2]))    
+        if max_pos_pairs is not None and len(added_pairs) > max_pos_pairs:
+            added_pairs = random.sample(added_pairs, max_pos_pairs)
+        positive_pairs.extend(added_pairs)
+    # print("found {} positive pairs".format(len(positive_pairs)))
+    positive_pairs = np.unique(np.array(list(positive_pairs)), axis=0)
+    return positive_pairs
 
 
 def filter_disconnected(adj, node_names, markers):
@@ -421,13 +435,33 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
 
 
 def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, best_hq,
-               step, args, dataset, epoch, tsne):
-    log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
-    tsne_path = os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{epoch}.png")
-    cluster_labels, stats, positive_pairs, hq_bins = compute_clusters_and_stats(
-        node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
-        dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=tsne, tsne_path=tsne_path, max_pos_pairs=20 #cuda=args.cuda,
-    )
+               step, args, dataset, epoch, tsne, cluster=True):
+    
+    if cluster:
+        log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
+        tsne_path = os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{epoch}.png")
+        cluster_labels, stats, positive_pairs, hq_bins = compute_clusters_and_stats(
+            node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
+            dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=tsne, tsne_path=tsne_path, max_pos_pairs=None #cuda=args.cuda,
+        )
+    else:
+        breakpoint()
+        cluster_labels = np.argmax(node_new_features[cluster_mask], axis=1)
+        hq, positive_clusters = compute_hq(reference_markers=dataset.ref_marker_sets,
+                                           contig_genes=dataset.contig_markers,
+                                           node_names=np.array(dataset.node_names)[cluster_mask],
+                                           node_labels=cluster_labels)
+        mq, _ = compute_hq(reference_markers=dataset.ref_marker_sets,
+                                           contig_genes=dataset.contig_markers,
+                                           node_names=np.array(dataset.node_names)[cluster_mask],
+                                           node_labels=cluster_labels, comp_th=50, cont_th=10,)
+        stats = {"hq": hq, "unresolved": len(positive_clusters), "mq": mq}
+        
+        cluster_to_contig = {i: [] for i in range(max(cluster_labels) + 1)}
+        for i in range(len(dataset.node_names)):
+            cluster_to_contig[cluster_labels[i]].append(dataset.node_names[i])
+        positive_pairs = None
+   
     stats["epoch"] = epoch
     #logger.info(str(stats))
 
