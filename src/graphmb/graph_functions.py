@@ -147,6 +147,8 @@ def plot_edges_sim(X, adj, scgs, outname="", max_edge_value=150, min_edge_value=
     #))
     assert len(x_values) == len(y_values)
     import matplotlib.pyplot as plt
+    plt.set_loglevel("error")
+    
     plt.figure(0)
     plt.scatter(
             x_values,

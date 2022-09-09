@@ -32,11 +32,10 @@ from graphmb.graph_functions import (
     run_tsne
 )
 
-import vaegbin, train_vaegnn, train_gnn, train_gnn_decode, train_vae, train_auggnn
 from graphmb.version import __version__
 
-
 def run_model(dataset, args, logger, nrun):
+    import vaegbin, train_vaegnn, train_gnn, train_gnn_decode, train_vae, train_auggnn
     if args.model_name.endswith("_ae"):
         return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun)
     elif args.model_name == "vae":
@@ -470,6 +469,7 @@ def main():
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
     parser.add_argument("--quiet", "-q", help="Do not output epoch progress", action="store_true")
     parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
+    parser.add_argument("--loglevel", "-l", help="Log level", default="info")
     parser.add_argument('--configfile', type=open, action=LoadFromFile)
     args = parser.parse_args()
 
@@ -481,15 +481,18 @@ def main():
 
     # set up logging
     now = datetime.now()
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+    logger = logging.getLogger(__name__)
+    loglevel = getattr(logging, args.loglevel.upper())
+    logger.setLevel(loglevel)
     logfile = os.path.join(args.outdir, now.strftime("%Y%m%d-%H%M%S") + "{}_output.log".format(args.outname))
     output_file_handler = logging.FileHandler(logfile)
     print("logging to {}".format(logfile))
     stdout_handler = logging.StreamHandler(sys.stdout)
     logger.addHandler(output_file_handler)
     logger.addHandler(stdout_handler)
-    logging.getLogger("matplotlib.font_manager").disabled = True
+    logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+    logging.getLogger("matplotlib").disabled = True
+    logging.getLogger("matplotlib.pyplot").disabled = True
 
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
@@ -620,10 +623,9 @@ def main():
                 sys.modules.pop('torch')
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
             import tensorflow as tf
-            tf.get_logger().setLevel(logging.ERROR)
+            #tf.get_logger().setLevel(logging.INFO)
             clustering_device = "cpu" # avoid tf vs torch issues
-            logging.getLogger("tensorflow").setLevel(logging.FATAL)
-
+            logging.getLogger("tensorflow").setLevel(logging.INFO)
             if not args.cuda:
                 tf.config.set_visible_devices([], "GPU")
             # load precomputed contigs with same SCGs (diff genomes)
