@@ -69,6 +69,7 @@ class AssemblyDataset:
         self.node_names = []
         self.node_seqs = {}  # should it be saved?
         self.graph_nodes = []  # nodes that are part of the assembly graph
+        self.graph_paths = {} # contig paths identified by assembler
         self.node_lengths = []
         self.node_kmers = []
         self.node_depths = []
@@ -82,6 +83,8 @@ class AssemblyDataset:
         self.labels = []
         self.node_to_label = {}
         self.label_to_node = {}
+        
+        self.contig_markers = {}
 
     def read_assembly(self):
         """Read assembly files, convert to numpy arrays and save to disk"""
@@ -98,7 +101,8 @@ class AssemblyDataset:
             self.logger.info(f"read {len(self.edges_src)}, edges")
             np.save(os.path.join(self.cache_dir, "edge_weights.npy"), self.edge_weights)
             scipy.sparse.save_npz(os.path.join(self.cache_dir, "adj_sparse.npz"), self.adj_matrix)
-            np.save(os.path.join(self.cache_dir, "graph_nodes.npy"), self.graph_nodes)
+            np.save(os.path.join(self.cache_dir, "graph_nodes.pkl"), self.graph_nodes)
+            pickle.dump(self.graph_paths, open(os.path.join(self.cache_dir, "graph_paths.pkl"), 'wb'))
         # self.filter_contigs()
         # self.rename_nodes_to_index()
         # self.nodes_depths = np.array(self.nodes_depths)
@@ -114,6 +118,69 @@ class AssemblyDataset:
         # print("reading SCGs")
         # self.read_scgs()
 
+    def print_stats(self):
+        print("==============================")
+        print("DATASET STATS:")
+        # get:
+        #   number of sequences
+        #   number of contigs
+        #   length of contigs (sum and average and N50)
+        #   coverage samples from jgi file
+        #   assembly_graph.file exists, number of edges, number of paths
+        print("number of sequences: {}".format(len(self.node_names)))
+        print("assembly length: {} Gb".format(round(sum(self.node_lengths) / 1000000000, 3)))
+        print("assembly N50: {} Mb".format(round(self.calculate_n50()/1000000, 3)))
+        print("assembly average length (Mb): {} max: {} min: {}".format(round(np.mean(self.node_lengths)/1000000, 3),
+                                                                   round(np.max(self.node_lengths)/1000000, 3),
+                                                                   round(np.min(self.node_lengths)/1000000, 3)))
+        print("coverage samples: {}".format(len(self.node_depths[0])))
+        if os.path.exists(os.path.join(self.data_dir, self.graphfile)) or \
+            len(self.edges_src) > 0:
+            print("Graph file found and read")
+            print("graph edges: {}".format(len(self.edges_src)))
+            print("contig paths: {}".format(len(self.graph_paths)))
+        else:
+            print("No assembly graph loaded")
+        #   contigs with markers on marker_gene_stats
+        #   stats with SCGs (max/min # of contigs, etc)
+        #   TODO: contigs wiht same SCGs
+        if len(self.contig_markers) > 0:
+            print("total ref markers sets: {}".format(len(self.ref_marker_sets)))
+            print("total ref markers: {}".format(len(self.markers)))
+            n_of_markers = [len(x) for x in self.contig_markers.values() if len(x) > 0]
+            print("contigs with one or more markers: {}/{}".format(len(n_of_markers),
+                                                                    len(self.node_names)))
+            
+            print("max SCGs on one contig: {}, average(excluding 0): {}".format(max(n_of_markers),
+                                                            np.mean(n_of_markers)))
+            self.estimate_n_genomes()
+            print("SCG contig count min: {} contigs".format(min(self.scg_counts.values())))
+        else:
+            print("No SCG markers")
+        print("==============================")
+                                                          
+    def calculate_n50(self):
+        """Calculate N50 for a sequence of numbers.
+    
+        Args:
+            list_of_lengths (list): List of numbers.
+    
+        Returns:
+            float: N50 value.
+        from https://onestopdataanalysis.com/n50-genome/
+        """
+        tmp = []
+        for tmp_number in set(self.node_lengths):
+                tmp += [tmp_number] * list(self.node_lengths).count(tmp_number) * tmp_number
+        tmp.sort()
+    
+        if (len(tmp) % 2) == 0:
+            median = (tmp[int(len(tmp) / 2) - 1] + tmp[int(len(tmp) / 2)]) / 2
+        else:
+            median = tmp[int(len(tmp) / 2)]
+    
+        return median
+
     def read_cache(self, load_graph=True):
         prefix = os.path.join(self.cache_dir, "{}")
         self.node_names = list(np.load(prefix.format("node_names.npy")))
@@ -122,6 +189,7 @@ class AssemblyDataset:
         self.node_lengths = np.load(prefix.format("node_lengths.npy"))
         if load_graph:
             self.graph_nodes = np.load(prefix.format("graph_nodes.npy"))
+            self.graph_paths = pickle.load(open(prefix.format("graph_paths.pkl"), 'rb'))
             self.adj_matrix = scipy.sparse.load_npz(prefix.format("adj_sparse.npz"))
             self.edge_weights = self.adj_matrix.data
             self.edges_src = self.adj_matrix.row
@@ -213,7 +281,7 @@ class AssemblyDataset:
                     else:
                         self.graph_nodes.append(node_name)
                         # self.nodes_data.append([])
-                if line.startswith("L"):  # link/edge
+                elif line.startswith("L"):  # link/edge
                     values = line.strip().split()  # TAG, SRC, SIGN, DEST, SIGN, 0M, RC
                     src_node_name = process_node_name(values[1], self.assembly_type)
                     dst_node_name = process_node_name(values[3], self.assembly_type)
@@ -234,7 +302,10 @@ class AssemblyDataset:
                         self.edges_src.append(dst_index)
                         self.edges_dst.append(src_index)
                         self.edge_weights.append(rc)
-            # TODO: Other information from gfa file: contig sequences
+                elif line.startswith("P"):
+                    values = line.strip().split()  # P contig path
+                    self.graph_paths[values[1]] = [self.node_names.index(path_node_name[:-1]) \
+                        for path_node_name in values[2].split(",")]
         self.logger.info(f"skipped contigs {len(skipped_contigs)} < {self.min_contig_length}")
         self.adj_matrix = scipy.sparse.coo_matrix(
             (self.edge_weights, (self.edges_src, self.edges_dst)), shape=(len(self.node_names), len(self.node_names))
@@ -334,8 +405,9 @@ class AssemblyDataset:
             marker_counts = get_markers_to_contigs(ref_sets, contig_markers)
             self.markers = marker_counts
         else:
-            self.ref_marker_sets = None
-            self.contig_markers = None
+            self.ref_marker_sets = {}
+            self.contig_markers = {}
+            self.run_checkm()
 
     def get_all_different_idx(self):
         """
@@ -431,19 +503,37 @@ class AssemblyDataset:
         self.logger.info("got top {} neighbors".format(k))
 
     def estimate_n_genomes(self):
-        scg_counts = {}
+        self.scg_counts = {}
         for marker_set in self.ref_marker_sets:
             for gene in marker_set:
-                scg_counts[gene] = 0
+                self.scg_counts[gene] = 0
                 for contig in self.contig_markers:
                     if gene in self.contig_markers[contig]:
-                        scg_counts[gene] += self.contig_markers[contig][gene]
+                        self.scg_counts[gene] += self.contig_markers[contig][gene]
 
-        print(scg_counts)
-        quartiles = np.percentile(list(scg_counts.values()), [25, 50, 75])
-        print("candidate k0s", sorted(set([k for k in scg_counts.values() if k >= quartiles[2]])))
-        return max(scg_counts.values())
+        #print(self.scg_counts)
+        quartiles = np.percentile(list(self.scg_counts.values()), [25, 50, 75])
+        print("candidate k0s", sorted(set([k for k in self.scg_counts.values() if k >= quartiles[2]])))
+        return max(self.scg_counts.values())
         
        
-
+    def run_checkm(self, nthreads=10, tempdir="../temp"):
+        # check if checkm is installed
+        checkm_is_avail = shutil.which("checkm") is not None
+        # if not, print commands only
+        commands = [
+            "mkdir {}/nodes".format(self.data_dir), #; cd nodes; ",
+            "cat {0}/{1} | awk '{{ if (substr($0, 1, 1)=='>') {{filename=(substr($0,2) '.fa')}} print $0 > {0}/filename }}".format(self.data_dir, self.fastafile),
+            'find {}/nodes/ -name "* *" -type f | rename "s/ /_/g"'.format(self.data_dir),
+            "checkm taxonomy_wf --tmpdir {0} -t {1} -x fa domain Bacteria {2}/nodes/ {2}/checkm_nodes/".format(tempdir, nthreads, self.data_dir)
+        ]
+        if checkm_is_avail:
+            #run commands one by one
+            for cmd in commands:
+                os.system(cmd)
+        else:
+            print("Run this on a machine with CheckM installed")
+            for cmd in commands:
+                print(cmd)
+        
 

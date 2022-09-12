@@ -562,6 +562,8 @@ def main():
     if args.labels is not None:
         dataset.read_labels()
     
+    dataset.print_stats()
+
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
     if not args.rawfeatures and args.model_name != "vae":
