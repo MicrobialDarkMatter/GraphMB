@@ -152,34 +152,33 @@ class AssemblyDataset:
                                                                     len(self.node_names)))
             
             print("max SCGs on one contig: {}, average(excluding 0): {}".format(max(n_of_markers),
-                                                            np.mean(n_of_markers)))
+                                                            round(np.mean(n_of_markers), 3)))
             self.estimate_n_genomes()
             print("SCG contig count min: {} contigs".format(min(self.scg_counts.values())))
         else:
             print("No SCG markers")
+        # labels
+        if self.labelsfile is not None or len(self.labels) > 1:
+            print("number of GS labels: {}".format(len(self.labels)))
+            nodes_not_na = [n for n in self.node_names if n in self.node_to_label and \
+                                                     self.node_to_label[n] != "NA"]
+            print("nodes with labels: {}".format(len(nodes_not_na)))
         print("==============================")
                                                           
     def calculate_n50(self):
-        """Calculate N50 for a sequence of numbers.
-    
-        Args:
-            list_of_lengths (list): List of numbers.
-    
-        Returns:
-            float: N50 value.
-        from https://onestopdataanalysis.com/n50-genome/
-        """
-        tmp = []
-        for tmp_number in set(self.node_lengths):
-                tmp += [tmp_number] * list(self.node_lengths).count(tmp_number) * tmp_number
-        tmp.sort()
-    
-        if (len(tmp) % 2) == 0:
-            median = (tmp[int(len(tmp) / 2) - 1] + tmp[int(len(tmp) / 2)]) / 2
-        else:
-            median = tmp[int(len(tmp) / 2)]
-    
-        return median
+        # https://eaton-lab.org/slides/genomics/answers/nb-4.1-numpy.html
+        contig_sizes = self.node_lengths.copy()
+        contig_sizes.sort()
+        contig_sizes = contig_sizes[::-1]
+        total_len = contig_sizes.sum()
+        half_total_len = total_len / 2
+        contig_sum_lens = np.zeros(contig_sizes.size, dtype=int)
+        for i in range(contig_sizes.size):
+            contig_sum_lens[i] = contig_sizes[i:].sum()
+        which_contigs_longer_than_half = contig_sum_lens > half_total_len
+        contigs_longer_than_half = contig_sizes[which_contigs_longer_than_half]
+        n50 = contigs_longer_than_half.min()
+        return n50
 
     def read_cache(self, load_graph=True):
         prefix = os.path.join(self.cache_dir, "{}")
@@ -215,6 +214,7 @@ class AssemblyDataset:
                 and os.path.exists(prefix.format("edge_weights.npy"))
                 and os.path.exists(prefix.format("adj_sparse.npz"))
                 and os.path.exists(prefix.format("graph_nodes.npy"))
+                and os.path.exists(prefix.format("graph_paths.pkl"))
                 and os.path.exists(prefix.format("node_to_label.npy"))
                 and os.path.exists(prefix.format("label_to_node.npy"))
                 and os.path.exists(prefix.format("labels.npy"))
@@ -305,7 +305,7 @@ class AssemblyDataset:
                 elif line.startswith("P"):
                     values = line.strip().split()  # P contig path
                     self.graph_paths[values[1]] = [self.node_names.index(path_node_name[:-1]) \
-                        for path_node_name in values[2].split(",")]
+                        for path_node_name in values[2].split(",") if path_node_name[:-1] in self.node_names]
         self.logger.info(f"skipped contigs {len(skipped_contigs)} < {self.min_contig_length}")
         self.adj_matrix = scipy.sparse.coo_matrix(
             (self.edge_weights, (self.edges_src, self.edges_dst)), shape=(len(self.node_names), len(self.node_names))
@@ -390,7 +390,7 @@ class AssemblyDataset:
             if self.node_to_label[self.node_names[u]] == self.node_to_label[self.node_names[v]]:
                 positive_edges += 1
         self.logger.info(
-            f"homophily: {positive_edges / (len(self.edge_weights) - edges_without_label)} {len(self.edge_weights) - edges_without_label}"
+            f"homophily: {round(positive_edges / (len(self.edge_weights) - edges_without_label),4)} {len(self.edge_weights) - edges_without_label}"
         )
 
     def read_scgs(self):
