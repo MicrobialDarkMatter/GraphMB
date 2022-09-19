@@ -418,6 +418,7 @@ def main():
     parser.add_argument("--ae_only", help="Do not use GNN (ae model must be used and decoder input must be ae", action="store_true")
     parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=10, type=int)
     parser.add_argument("--quick", help="Reduce number of nodes to run quicker", action="store_true")
+    parser.add_argument("--classify", help="Run classification instead of clustering", action="store_true")
     parser.add_argument(
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
     )
@@ -466,6 +467,7 @@ def main():
         "--outdir", "--outputdir", help="Output dir (same as input assembly dir if not defined", default=None
     )
     parser.add_argument("--assembly_type", help="flye or spades", default="flye")
+    parser.add_argument("--contignodes", help="Use contigs as nodes instead of edges", action="store_true")
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
     parser.add_argument("--quiet", "-q", help="Do not output epoch progress", action="store_true")
     parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
@@ -534,9 +536,11 @@ def main():
         features_dir,
         args.outdir,
         min_contig_length=args.mincontig,
+        contignodes=args.contignodes
     )
     if dataset.check_cache(use_graph) and not args.reload:
         dataset.read_cache(use_graph)
+        dataset.read_gfa_contigs()
     else:
         check_dirs(args, use_features=False)
         dataset.read_assembly()

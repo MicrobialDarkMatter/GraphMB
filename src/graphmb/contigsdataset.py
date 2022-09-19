@@ -47,6 +47,7 @@ class AssemblyDataset:
         cache_dir,
         assemblytype="flye",
         min_contig_length=0,
+        contignodes=False
     ):
         self.name = name
         self.logger = logger
@@ -62,6 +63,7 @@ class AssemblyDataset:
         self.load_kmer = True
         self.kmer = 4
         self.min_contig_length = min_contig_length
+        self.contignodes = contignodes
         if self.load_kmer:
             self.kmer_to_ids, self.canonical_k = get_kmer_to_id(self.kmer)
 
@@ -96,8 +98,12 @@ class AssemblyDataset:
         np.save(os.path.join(self.cache_dir, "node_attributes_kmer.npy"), self.node_kmers.astype(float))
         pickle.dump(self.node_seqs, open(os.path.join(self.cache_dir, "node_seqs.pkl"), "wb"))
         if os.path.exists(os.path.join(self.data_dir, self.graphfile)):
-            self.logger.info("processing GFA file {}".format(os.path.join(self.data_dir, self.graphfile)))
-            self.read_gfa()
+            if not self.contignodes:
+                self.logger.info("processing GFA file (edge nodes) {}".format(os.path.join(self.data_dir, self.graphfile)))
+                self.read_gfa()
+            else:
+                self.logger.info("processing GFA file (contig nodes) {}".format(os.path.join(self.data_dir, self.graphfile)))
+                self.read_gfa_contigs()
             self.logger.info(f"read {len(self.edges_src)}, edges")
             np.save(os.path.join(self.cache_dir, "edge_weights.npy"), self.edge_weights)
             scipy.sparse.save_npz(os.path.join(self.cache_dir, "adj_sparse.npz"), self.adj_matrix)
@@ -258,7 +264,7 @@ class AssemblyDataset:
             node_kmers[contig_name] = kmers
             # convert kmers to numpy
             self.node_kmers = np.array(stats.zscore([node_kmers[n] for n in self.node_names], axis=0))
-        self.node_lengths = [node_lengths[n] for n in self.node_names]
+        self.node_lengths = np.array([node_lengths[n] for n in self.node_names])    
 
     def read_gfa(self):
         """Read graph file from GFA format, save list of start and end nodes to self.edges_src and self.edges_dst
@@ -307,6 +313,79 @@ class AssemblyDataset:
                     self.graph_paths[values[1]] = [self.node_names.index(path_node_name[:-1]) \
                         for path_node_name in values[2].split(",") if path_node_name[:-1] in self.node_names]
         self.logger.info(f"skipped contigs {len(skipped_contigs)} < {self.min_contig_length}")
+        self.adj_matrix = scipy.sparse.coo_matrix(
+            (self.edge_weights, (self.edges_src, self.edges_dst)), shape=(len(self.node_names), len(self.node_names))
+        )
+        self.edge_weights = np.array(self.edge_weights)
+
+    def read_gfa_contigs(self):
+        skipped_contigs = set()
+        edge_edge_links = {}
+        contig_edge_links = {}
+        with open(os.path.join(self.data_dir, self.graphfile), "r") as f:
+            # ignore S entries (these are not contigs)
+            # the node seqs are read from the assembly file
+            for line in f:
+                if line.startswith("L"): # edge links
+                    values = line.strip().split()  # TAG, SRC, SIGN, DEST, SIGN, 0M, RC
+                    src_node_name = process_node_name(values[1], self.assembly_type)
+                    dst_node_name = process_node_name(values[3], self.assembly_type)
+                    edge_edge_links.setdefault(src_node_name,set()).add(values[3])
+                    edge_edge_links.setdefault(dst_node_name,set()).add(values[1])
+                elif line.startswith("P"): # contig to edge links
+                    values = line.strip().split()
+                    contig_name = process_node_name(values[1], self.assembly_type)
+                    if contig_name in skipped_contigs or contig_name not in self.node_names:
+                        #skipped_edges.add((contig_names.index(values[1]), contig_names.index(values[3])))
+                        continue
+                    for edge in values[2].split(","):
+                        contig_edge_links.setdefault(contig_name,set()).add(edge[:-1])
+                    self.graph_paths[values[1]] = [self.node_names.index(path_node_name[:-1]) \
+                        for path_node_name in values[2].split(",") if path_node_name[:-1] in self.node_names]
+        if len(contig_edge_links) == 0:
+            # load graph paths from assembly_info
+            self.logger.info("reading assembly_info file for graph paths...")
+            # TODO: check if file exists
+            with open(os.path.join(self.data_dir, "assembly_info.txt"), "r") as f:
+                next(f) # skip header
+                for line in f:
+                    values = line.strip().split("\t")
+                    contig_name = process_node_name(values[0], self.assembly_type)
+                    if values[3] == "Y" and int(values[1]) > 100000: #output circular contigs
+                        print("found circular contig", contig_name, values)
+                    if contig_name in skipped_contigs or contig_name not in self.node_names:
+                        #skipped_edges.add((contig_names.index(values[1]), contig_names.index(values[3])))
+                        continue
+                    for edge in values[-1].split(","):
+                        if edge != "*":
+                            contig_edge_links.setdefault(contig_name,set()).add(edge.strip("-"))
+                    self.graph_paths[values[1]] = list(contig_edge_links[contig_name])
+
+        print("skipped contigs", len(skipped_contigs), "<", self.min_contig_length)
+        # create graph, , and to linked to adjacent edges
+        # first create edge to contig index
+        edge_contig_links = {}
+        for contig in contig_edge_links:
+            for e in contig_edge_links[contig]:
+                edge_contig_links.setdefault(e, set()).add(contig)
+        for contig in contig_edge_links:
+            src_index = self.node_names.index(contig)
+            for edge in contig_edge_links[contig]:
+                # connect contigs linked to same edge
+                for contig2 in edge_contig_links[edge]:
+                    dst_index = self.node_names.index(contig2)
+                    if contig2 != contig:
+                        self.edges_src.append(src_index)
+                        self.edges_dst.append(dst_index)
+                        self.edge_weights.append(1)
+                        # inverse is added when we get to contig2
+                for edge2 in edge_edge_links.get(edge, []):
+                    for contig2 in edge_contig_links.get(edge2, []):
+                        dst_index = self.node_names.index(contig2)
+                        self.edges_src.append(src_index)
+                        self.edges_dst.append(dst_index)
+                        self.edge_weights.append(1)
+        #self.logger.info(f"skipped contigs {len(skipped_contigs)} < {self.min_contig_length}")
         self.adj_matrix = scipy.sparse.coo_matrix(
             (self.edge_weights, (self.edges_src, self.edges_dst)), shape=(len(self.node_names), len(self.node_names))
         )
