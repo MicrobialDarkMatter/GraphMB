@@ -6,8 +6,9 @@ from tensorflow.keras.layers import Input, Dense, Activation, Softmax, Embedding
 #from tensorflow.keras import Sequential
 from tensorflow.keras.layers import BatchNormalization, Lambda, LeakyReLU, Flatten
 from tensorflow.keras.layers import Dropout, Add, Concatenate
+from tensorflow.keras.losses import SparseCategoricalCrossentropy
 import numpy as np
-from tensorflow.keras.regularizers import l2
+from tensorflow.keras.regularizers import l2    
 
 from spektral.layers import GCNConv
 
@@ -19,6 +20,7 @@ class VAEEncoder(Model):
         super(VAEEncoder, self).__init__()
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
+        self.zdim = zdim
         in_ = Input(shape=(abundance_dim+kmers_dim,))
         x = in_
         for _ in range(layers):
@@ -41,6 +43,7 @@ class VAEDecoder(Model):
         super(VAEDecoder, self).__init__()
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
+        self.zdim = zdim
         in_ = Input(shape=(zdim,))
         x = in_
         for _ in range(layers):
@@ -63,8 +66,33 @@ class VAEDecoder(Model):
         return x_hat
 
 
+class LabelClassifier(Model):
+    def __init__(self, n_classes, hiddendim=128, zdim=64, dropout=0, layers=1):
+        super(LabelClassifier, self).__init__()
+        in_ = Input(shape=(zdim,))
+        x = in_
+        for nl in range(layers):
+            if nl == layers-1:
+                x = Dense(n_classes, activation='softmax')(x)
+            else:
+                x = Dense(hiddendim, activation='linear')(x)
+                #x = LeakyReLU(0.01)(x)
+                if dropout > 0:
+                    x = Dropout(dropout)(x)
+
+        self.model = Model(in_, x)
+        self.loss_fn = SparseCategoricalCrossentropy()
+ 
+    def call(self, z, training=False):
+        predictions = self.model(z, training=training)
+        return predictions
+
+    def loss(self, gold_labels, predicted_labels):
+        return self.loss_fn(y_true=gold_labels,y_pred=predicted_labels)
+
 class TrainHelperVAE:
-    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200., train_weights=False):
+    def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.,
+                train_weights=False, classification=False, n_classes=0, gold_labels=None):
         self.encoder = encoder
         self.decoder = decoder
         self.train_weights = train_weights
@@ -87,10 +115,16 @@ class TrainHelperVAE:
         self.logvar = None
         self.mu = None
         self.z = None
+        self.classify = classification
+        if self.classify:
+            self.classifier = LabelClassifier(n_classes, zdim=encoder.zdim)
+            self.gold_labels = gold_labels
+            
+            
         
-    def train_step(self, x, writer=None, epoch=0, vae=True):
+    def train_step(self, x, writer=None, epoch=0, vae=True, gold_labels=None):
         #breakpoint()
-        losses = self._train_step(x, vae=vae, writer=writer, epoch=epoch)
+        losses = self._train_step(x, vae=vae, writer=writer, epoch=epoch, gold_labels=gold_labels)
         if writer is not None:
             with writer.as_default():
                 tf.summary.scalar('mean logvar', self.logvar, step=epoch)
@@ -99,7 +133,7 @@ class TrainHelperVAE:
         return losses
     
     @tf.function
-    def loss(self, x, mu, logvar, vae, training=True, writer=None, epoch=0):
+    def loss(self, x, mu, logvar, vae, training=True, writer=None, epoch=0, gold_labels=None):
         if vae:
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)
@@ -107,8 +141,13 @@ class TrainHelperVAE:
             kld  = kld * self.kld_weight
         else:
             z = mu
-            kld = 0
+            kld = tf.convert_to_tensor(0.0)
         x_hat = self.decoder(z, training=training)
+        if self.classify:
+            predictions = self.classifier(z)
+            prediction_loss = self.classifier.loss(gold_labels, predictions)
+        else:
+            prediction_loss = tf.convert_to_tensor(0.0)
         if writer is not None:
             with writer.as_default():
                 tf.summary.scalar('min ab', tf.reduce_min(x_hat[:, :self.abundance_dim]), step=epoch)
@@ -123,21 +162,25 @@ class TrainHelperVAE:
         mse1 *= (1-kmer_weight)
         mse2 = kmer_weight*tf.reduce_mean( tf.reduce_mean((x[:, self.abundance_dim:] - x_hat[:, self.abundance_dim:])**2, axis=1))
 
-        return mse1, mse2, kld
+        return mse1, mse2, kld, prediction_loss
 
     @tf.function
-    def _train_step(self, x, vae=True, writer=None, epoch=0):
+    def _train_step(self, x, vae=True, writer=None, epoch=0, gold_labels=None):
         with tf.GradientTape() as tape:
             mu, logvar = self.encoder(x, training=True)
             logvar = tf.clip_by_value(logvar, -2, 2)
             self.logvar = tf.cast(tf.math.reduce_mean(logvar), float)
             self.mu = tf.cast(tf.math.reduce_mean(mu), float)
-            mse1, mse2, kld = self.loss(x, mu, logvar, vae, training=True, writer=writer, epoch=epoch)
-            loss = mse1 + mse2 - kld
+            mse1, mse2, kld, predl = self.loss(x, mu, logvar, vae, training=True,
+                                               writer=writer, epoch=epoch,
+                                               gold_labels=gold_labels)
+            loss = mse1 + mse2 - kld + predl
 
         tw = self.encoder.trainable_weights + self.decoder.trainable_weights 
         if self.train_weights:
             tw += [self.kmer_weight] # self.kld_weight
+        if self.classify:
+            tw += self.classifier.trainable_weights
         grads = tape.gradient(loss, tw)
         grad_norm = tf.linalg.global_norm(grads)
         clip_grads, _ = tf.clip_by_global_norm(grads, 5,  use_norm=grad_norm)
@@ -149,7 +192,7 @@ class TrainHelperVAE:
                 tf.summary.scalar('grad norm', grad_norm, step=epoch)
                 tf.summary.scalar('clipped grad norm', new_grad_norm, step=epoch)
 
-        return loss, mse2, mse1, kld
+        return loss, mse2, mse1, kld, predl
 
 
 

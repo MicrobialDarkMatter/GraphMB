@@ -110,7 +110,8 @@ def compute_clusters_and_stats(
     cuda=False,
     tsne=False,
     tsne_path=None,
-    max_pos_pairs=None
+    max_pos_pairs=None,
+    use_labels=False
 ):
     reference_markers = dataset.ref_marker_sets
     contig_genes = dataset.contig_markers
@@ -158,7 +159,7 @@ def compute_clusters_and_stats(
         cluster_to_contig = {i: [] for i in range(k)}
         for i in range(len(node_names)):
             cluster_to_contig[labels[i]].append(node_names[i])
-    if contig_genes is not None:
+    if contig_genes is not None and len(contig_genes) > 0:
         hq, positive_clusters = compute_hq(
             reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
         )
@@ -195,7 +196,7 @@ def compute_clusters_and_stats(
         positive_pairs = get_positive_pairs(node_names, positive_clusters, cluster_to_contig, max_pos_pairs)
 
     else:
-        positive_pairs, positive_clusters = None, None
+        positive_pairs, positive_clusters, unresolved_mags = None, None, 0
         # TODO use p/r/ to get positive_clusters
         hq, mq = 0, 0
     if node_to_gt_idx_label is not None:

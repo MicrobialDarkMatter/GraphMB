@@ -32,7 +32,7 @@ def run_model_vae(dataset, args, logger, nrun):
     lr_vae = args.lr_vae
     clustering = args.clusteringalgo
     k = args.kclusters
-    with mlflow.start_run():
+    with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
@@ -65,11 +65,12 @@ def run_model_vae(dataset, args, logger, nrun):
             logger.info(f"*** output clustering dim {output_dim_vae}")
         S = []
         
-        
+        gold_labels=np.array([dataset.labels.index(dataset.node_to_label[n]) for n in dataset.node_names])
         encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
         decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
-        th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae, kld_weight=1/args.kld_alpha)
-
+        th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae,
+                                kld_weight=1/args.kld_alpha,
+                                classification=args.classify, n_classes=len(dataset.labels))
         if args.eval_split == 0:
             train_idx = np.arange(len(features))
             eval_idx = []
@@ -99,7 +100,8 @@ def run_model_vae(dataset, args, logger, nrun):
         #mlflow.create_experiment(name=args.outname + current_time, tags={'run': nrun, 'dataset': args.dataset, 'model': 'vae'}) 
         #with mlflow.start_run():
         for e in pbar_epoch:
-            vae_epoch_losses = {"kld_loss": [], "total_loss": [], "kmer_loss": [], "ab_loss": []}
+            vae_epoch_losses = {"kld_loss": [], "total_loss": [], "kmer_loss": [],
+                               "ab_loss": [], "pred_loss": []}
             np.random.shuffle(train_idx)
             recon_loss = 0
 
@@ -112,15 +114,20 @@ def run_model_vae(dataset, args, logger, nrun):
             pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
-                vae_losses = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
+                vae_losses = th_vae.train_step(X[batch_idx], summary_writer, step,
+                                               vae=True, gold_labels=gold_labels[batch_idx])
                 vae_epoch_losses["total_loss"].append(vae_losses[0])
                 vae_epoch_losses["kmer_loss"].append(vae_losses[1])
                 vae_epoch_losses["ab_loss"].append(vae_losses[2])
                 vae_epoch_losses["kld_loss"].append(vae_losses[3])
+                vae_epoch_losses["pred_loss"].append(vae_losses[4])
                 vae_epoch_losses["kld_weight"] = th_vae.kld_weight
                 vae_epoch_losses["kmer_weight"] = th_vae.kmer_weight
                 #vae_epoch_losses["ab_weight"] = th_vae.abundance_weight
-                pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_epoch_losses["total_loss"][-10:]):.4f}')
+                #pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_epoch_losses["total_loss"][-10:]):.4f}')  
+                vae_epoch_losses_avg = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
+                losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses_avg.items()])
+                pbar_vaebatch.set_description(f'E={e} {losses_string}')
                 step += 1
             vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
             log_to_tensorboard(summary_writer, vae_epoch_losses, step)
@@ -144,8 +151,10 @@ def run_model_vae(dataset, args, logger, nrun):
             gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
             if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
             
-                gnn_input_features = encoder(features)[0]
-                node_new_features = gnn_input_features.numpy()
+                latent_features = encoder(features)[0]
+                node_new_features = latent_features.numpy()
+                if args.classify:
+                    labels = th_vae.classifier(latent_features, training=False)
 
                 with summary_writer.as_default():
                     tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
@@ -155,7 +164,8 @@ def run_model_vae(dataset, args, logger, nrun):
         
                 cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                     node_new_features[cluster_mask], node_names[cluster_mask],
-                    dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+                    dataset, clustering=clustering, k=k, tsne=args.tsne, use_labels=args.classify
+                    #cuda=args.cuda,
                 )
 
                 stats["epoch"] = e
@@ -184,7 +194,7 @@ def run_model_vae(dataset, args, logger, nrun):
                     logger.info(str(stats))
 
             pbar_epoch.set_description(
-                f"[VAE R={recon_loss:.3f}  HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+                f"[VAE {losses_string}  HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
             )
             total_loss = recon_loss
             losses["ae"].append(recon_loss)
