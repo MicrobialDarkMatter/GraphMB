@@ -540,11 +540,14 @@ def main():
     )
     if dataset.check_cache(use_graph) and not args.reload:
         dataset.read_cache(use_graph)
-        dataset.read_gfa_contigs()
     else:
         check_dirs(args, use_features=False)
         dataset.read_assembly()
     dataset.read_scgs()
+    if os.path.exists(os.path.join(args.assembly, "assembly_info.txt")):
+        logger.info("Reading assembly info file")
+        dataset.read_assembly_info()
+        dataset.print_circular_contigs()
     # k can be user defined or dependent on the dataset
     if args.kclusters is None:
         args.kclusters = len(dataset.labels)
