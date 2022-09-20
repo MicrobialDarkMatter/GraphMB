@@ -26,7 +26,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
     nlayers_gnn = args.layers_gnn
     gname = args.model_name
 
-    with mlflow.start_run():
+    with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
         if gname == "vae":
             args.ae_only = True
@@ -173,7 +173,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
                 step += 1
             vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
             log_to_tensorboard(summary_writer, vae_epoch_losses, step)
-            mlflow.log_metrics(vae_epoch_losses)
+            mlflow.log_metrics(vae_epoch_losses, step=step)
 
 
             if args.eval_split > 0:
@@ -198,7 +198,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
                                                 'GNN  LR': float(th.opt.learning_rate),
                                                 "pos loss": float(pos_loss), "neg loss": float(neg_loss)}
             log_to_tensorboard(summary_writer, epoch_metrics, step)
-            mlflow.log_metrics(epoch_metrics)
+            mlflow.log_metrics(epoch_metrics, step=step)
             gnn_loss = gnn_loss.numpy()
             diff_loss = diff_loss.numpy()
 
@@ -221,7 +221,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
                     logger.info(f"--- EPOCH {e:d} ---")
                     logger.info(f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} HQ={stats['hq']}   BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
                     logger.info(str(scores[-1]))
-                mlflow.log_metrics(scores[-1])
+                mlflow.log_metrics(scores[-1], step=step)
             losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
             pbar_epoch.set_description(
                 f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
