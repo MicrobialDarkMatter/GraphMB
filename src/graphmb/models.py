@@ -258,7 +258,7 @@ class TH:
         self.kmers_dim = kmers_dim
 
     @tf.function
-    def train_unsupervised(self, idx):
+    def train_unsupervised(self, idx, training=True):
         with tf.GradientTape() as tape:
             #breakpoint()
             # run encoder first
@@ -330,10 +330,10 @@ class TH:
                         tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=True
                 )
                 loss += scg_loss
-
-        tw = self.gnn_model.trainable_weights
-        grads = tape.gradient(loss, tw)
-        self.opt.apply_gradients(zip(grads, tw))
+        if training:
+            tw = self.gnn_model.trainable_weights
+            grads = tape.gradient(loss, tw)
+            self.opt.apply_gradients(zip(grads, tw))
         return loss, gnn_loss, scg_loss, pos_loss, neg_loss
     
     @tf.function

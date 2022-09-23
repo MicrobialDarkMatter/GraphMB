@@ -175,23 +175,8 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             log_to_tensorboard(summary_writer, vae_epoch_losses, step)
             mlflow.log_metrics(vae_epoch_losses, step=step)
 
-
-            if args.eval_split > 0:
-                eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
-                eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
-                eval_loss = eval_mse1 + eval_mse2 - eval_kld
-                log_to_tensorboard(summary_writer, {"eval_loss": eval_loss, "eval kmer loss": eval_mse2,
-                                                    "eval ab loss": eval_mse1, "eval kld loss": eval_kld}, step)
-                
-            else:
-                eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
             recon_loss = np.mean(vae_epoch_losses["vae_loss"])
-
             th.encoder = th_vae.encoder
-                
-            with summary_writer.as_default():
-                tf.summary.scalar('epoch', e, step=step)
-    
             total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
             epoch_metrics = {"Total loss": float(total_loss), "gnn loss": float(gnn_loss),
                                                 "SCG loss": float(diff_loss),
@@ -201,6 +186,26 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             mlflow.log_metrics(epoch_metrics, step=step)
             gnn_loss = gnn_loss.numpy()
             diff_loss = diff_loss.numpy()
+
+            if args.eval_split > 0:
+                eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
+                eval_vae_losses = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
+                #eval_loss = eval_mse1 + eval_mse2 - eval_kld
+                eval_vae_epoch_losses = {}
+                eval_vae_epoch_losses["vae_loss"] = float(eval_vae_losses[0])
+                eval_vae_epoch_losses["kmer_loss"] = float(eval_vae_losses[1])
+                eval_vae_epoch_losses["ab_loss"] = float(eval_vae_losses[2])
+                eval_vae_epoch_losses["kld_loss"] = float(eval_vae_losses[3])
+                mlflow.log_metrics(eval_vae_epoch_losses, step=step)
+                eval_total_loss, eval_gnn_loss, eval_diff_loss, eval_pos_loss, \
+                    eval_neg_loss = th.train_unsupervised(eval_idx, training=False)
+                eval_metrics = {"Eval loss": float(eval_total_loss),
+                                 "eval gnn loss": float(eval_gnn_loss),
+                                 "eval SCG loss": float(eval_diff_loss),
+                                 "eval pos loss": float(eval_pos_loss), "neg loss": float(eval_neg_loss)}
+                log_to_tensorboard(summary_writer, eval_metrics, step)
+                mlflow.log_metrics(eval_metrics, step=step)
+
 
             #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
             gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0

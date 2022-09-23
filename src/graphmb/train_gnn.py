@@ -135,22 +135,25 @@ def run_model_gnn(dataset, args, logger, nrun):
             np.random.shuffle(train_idx)
             step += 1
             total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
-            epoch_losses = {"gnn loss": gnn_loss, "SCG loss": diff_loss, "GNN loss": total_loss,
-                                                "GNN LR": th.opt.learning_rate, "pos loss": pos_loss,
-                                                "neg_loss": neg_loss}
+            epoch_losses = {"gnn loss": float(gnn_loss), "SCG loss": float(diff_loss), "GNN loss": float(total_loss),
+                                                "GNN LR": float(th.opt.learning_rate), "pos loss": float(pos_loss),
+                                                "neg_loss": float(neg_loss)}
             log_to_tensorboard(summary_writer, epoch_losses, step)
             mlflow.log_metrics(epoch_losses, step=step)
             gnn_loss = gnn_loss.numpy()
             diff_loss = diff_loss.numpy()
 
             if args.eval_split > 0:
-                total_loss, gnn_loss, diff_loss = th.train_unsupervised(eval_idx, training=False)
-                eval_losses = {"eval_kmer": eval_mse2, "eval_ab": eval_mse1,
-                                                    "eval_kld": eval_kld, "eval loss": eval_loss}
-                log_to_tensorboard(summary_writer, eval_losses, step)
-                mlflow.log_metrics(eval_losses, step=step)
-            else:
-                eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
+                eval_total_loss, eval_gnn_loss, eval_diff_loss, eval_pos_loss, \
+                    eval_neg_loss = th.train_unsupervised(eval_idx, training=False)
+                eval_epoch_losses = {"Eval gnn loss": float(eval_gnn_loss), "Eval SCG loss": float(eval_diff_loss),
+                                     "Eval GNN loss": float(eval_total_loss),
+                                     "Eval pos loss": float(eval_pos_loss),
+                                     "Eval neg_loss": float(eval_neg_loss)}
+                log_to_tensorboard(summary_writer, eval_epoch_losses, step)
+                mlflow.log_metrics(eval_epoch_losses, step=step)
+            #else:
+            #    eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
 
             #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
             gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
