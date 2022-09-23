@@ -83,8 +83,8 @@ class LabelClassifier(Model):
         self.model = Model(in_, x)
         self.loss_fn = SparseCategoricalCrossentropy()
  
-    def call(self, z, training=False):
-        predictions = self.model(z, training=training)
+    def call(self, z, mask, training=False):
+        predictions = self.model(z[mask], training=training)
         return predictions
 
     def loss(self, gold_labels, predicted_labels):
@@ -92,7 +92,8 @@ class LabelClassifier(Model):
 
 class TrainHelperVAE:
     def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.,
-                train_weights=False, classification=False, n_classes=0, gold_labels=None):
+                train_weights=False, classification=False, n_classes=0,
+                gold_labels=None, mask_labels=0.1):
         self.encoder = encoder
         self.decoder = decoder
         self.train_weights = train_weights
@@ -119,6 +120,7 @@ class TrainHelperVAE:
         if self.classify:
             self.classifier = LabelClassifier(n_classes, zdim=encoder.zdim)
             self.gold_labels = gold_labels
+            self.mask_labels = mask_labels
             
             
         
@@ -144,8 +146,13 @@ class TrainHelperVAE:
             kld = tf.convert_to_tensor(0.0)
         x_hat = self.decoder(z, training=training)
         if self.classify:
-            predictions = self.classifier(z)
-            prediction_loss = self.classifier.loss(gold_labels, predictions)
+            breakpoint()
+            if self.mask_labels > 0:
+                use_labels = np.random.choice(z.shape[0], int(z.shape[0]*(1-self.mask_labels)))
+            else:
+                mask = np.arange(z.shape[0])
+            predictions = self.classifier(z, mask=self.mask_labels)
+            prediction_loss = self.classifier.loss(gold_labels[mask], predictions[mask])
         else:
             prediction_loss = tf.convert_to_tensor(0.0)
         if writer is not None:

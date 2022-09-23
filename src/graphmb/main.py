@@ -656,11 +656,11 @@ def main():
             seed=args.seed,
         )
 
-        if args.labels is not None:
+        if args.labels is not None and "contig2bin" in args.post:
             from amber_eval import amber_eval
 
             amber_metrics, bin_counts = amber_eval(
-                os.path.join(args.assembly, args.labels), f"{args.outdir}/{args.outname}_best_contig2bin.tsv", ["graphmb"]
+                os.path.join(args.assembly, args.labels), args.outdir + f"/{args.outname}_best_contig2bin.tsv", ["graphmb"]
             )
             hq = bin_counts["> 90% completeness"][1]
             mq = bin_counts["> 50% completeness"][1]

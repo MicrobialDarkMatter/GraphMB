@@ -135,10 +135,13 @@ def run_model_vae(dataset, args, logger, nrun):
 
             if args.eval_split > 0:
                 eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
-                eval_mse1, eval_mse2, eval_kld = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
-                eval_loss = eval_mse1 + eval_mse2 - eval_kld
-                log_to_tensorboard(summary_writer, {"eval loss": eval_loss, "eval kmer loss": eval_mse2,
-                                                    "eval ab loss": eval_mse1, "eval kld loss": eval_kld}, step)
+                eval_mse1, eval_mse2, eval_kld, eval_pred = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma,
+                                                                                  vae=True, training=False, gold_labels=gold_labels[eval_idx])
+                eval_loss = eval_mse1 + eval_mse2 + eval_kld + eval_pred
+                eval_losses = {"eval loss": eval_loss, "eval kmer loss": eval_mse2, "eval ab loss": eval_mse1, 
+                               "eval kld loss": eval_kld, "eval pred loss": eval_pred}
+                log_to_tensorboard(summary_writer, eval_losses, step)
+                    
 
             else:
                 eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
