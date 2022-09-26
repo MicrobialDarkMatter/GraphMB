@@ -84,7 +84,7 @@ class LabelClassifier(Model):
         self.loss_fn = SparseCategoricalCrossentropy()
  
     def call(self, z, mask, training=False):
-        predictions = self.model(z[mask], training=training)
+        predictions = self.model(tf.gather(params=z, indices=mask), training=training)
         return predictions
 
     def loss(self, gold_labels, predicted_labels):
@@ -93,7 +93,7 @@ class LabelClassifier(Model):
 class TrainHelperVAE:
     def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.,
                 train_weights=False, classification=False, n_classes=0,
-                gold_labels=None, mask_labels=0.1):
+                gold_labels=None, mask_labels=0.0):
         self.encoder = encoder
         self.decoder = decoder
         self.train_weights = train_weights
@@ -125,7 +125,6 @@ class TrainHelperVAE:
             
         
     def train_step(self, x, writer=None, epoch=0, vae=True, gold_labels=None):
-        #breakpoint()
         losses = self._train_step(x, vae=vae, writer=writer, epoch=epoch, gold_labels=gold_labels)
         if writer is not None:
             with writer.as_default():
@@ -146,13 +145,12 @@ class TrainHelperVAE:
             kld = tf.convert_to_tensor(0.0)
         x_hat = self.decoder(z, training=training)
         if self.classify:
-            breakpoint()
             if self.mask_labels > 0:
                 use_labels = np.random.choice(z.shape[0], int(z.shape[0]*(1-self.mask_labels)))
             else:
-                mask = np.arange(z.shape[0])
-            predictions = self.classifier(z, mask=self.mask_labels)
-            prediction_loss = self.classifier.loss(gold_labels[mask], predictions[mask])
+                use_labels = np.arange(z.shape[0])
+            predictions = self.classifier(z, mask=use_labels)
+            prediction_loss = self.classifier.loss(gold_labels[use_labels], predictions)
         else:
             prediction_loss = tf.convert_to_tensor(0.0)
         if writer is not None:
@@ -267,7 +265,6 @@ class TH:
     @tf.function
     def train_unsupervised(self, idx, training=True):
         with tf.GradientTape() as tape:
-            #breakpoint()
             # run encoder first
             if self.use_ae:
                 ae_embs = self.encoder(self.features)[0]
@@ -312,7 +309,6 @@ class TH:
                 neg_loss = tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs),
                                                               negative_pairs, from_logits=True)
                 #gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
-                #breakpoint()
                 y_true = tf.concat((tf.ones_like(positive_pairwise), tf.ones_like(negative_pairs)), axis=0)
                 y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
                 gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
@@ -368,7 +364,6 @@ class TH:
     @tf.function
     def train_unsupervised_decode(self, idx):
         with tf.GradientTape() as tape:
-            #breakpoint()
             # run gnn model
             z_sample, mu, logvar, x_orginal, x_hat = self.gnn_model(self.features, self.adj,
                                                            indices=idx, training=True)

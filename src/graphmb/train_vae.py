@@ -157,7 +157,7 @@ def run_model_vae(dataset, args, logger, nrun):
                 latent_features = encoder(features)[0]
                 node_new_features = latent_features.numpy()
                 if args.classify:
-                    labels = th_vae.classifier(latent_features, training=False)
+                    labels = th_vae.classifier(latent_features, mask=np.arange(latent_features.shape[0]), training=False)
 
                 with summary_writer.as_default():
                     tf.summary.scalar('Embs average', np.mean(node_new_features), step=step)
