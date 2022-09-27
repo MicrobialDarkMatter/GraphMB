@@ -203,7 +203,8 @@ def train_graphsage(
     epsilon=0.1,
     evalepochs=1,
     seed=0,
-    eval_skip=0
+    eval_skip=0,
+    quick=False
 ):
 
     nfeat = dataset.graph.ndata.pop("feat")
@@ -325,7 +326,7 @@ def train_graphsage(
                 device=device,
                 clusteringloss=False,
                 logger=logger,
-                use_marker_contigs_only=False,
+                use_marker_contigs_only=quick,
                 seed=seed,
             )
             if best_hq_epoch == epoch:

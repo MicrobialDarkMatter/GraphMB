@@ -29,7 +29,8 @@ from graphmb.graph_functions import (
     calculate_bin_metrics,
     draw_nx_graph,
     set_seed,
-    run_tsne
+    run_tsne,
+    get_cluster_mask
 )
 
 from graphmb.version import __version__
@@ -157,6 +158,7 @@ def run_graphmb(dataset, args, device, logger):
     if model is not None:
         model = model.to(device)
 
+    cluster_mask = get_cluster_mask(args.quick, dataset.assembly)
     logging.info(model)
     if (
         dataset.assembly.ref_marker_sets is not None
@@ -166,13 +168,13 @@ def run_graphmb(dataset, args, device, logger):
         # cluster using only input features
         logger.info("pre train clustering:")
         pre_cluster_to_contig, centroids = cluster_embs(
-            dataset.graph.ndata["feat"].detach().cpu().numpy(),
-            dataset.assembly.node_names,
+            dataset.graph.ndata["feat"].detach().cpu().numpy()[cluster_mask],
+            np.array(dataset.assembly.node_names)[cluster_mask],
             args.clusteringalgo,
             args.kclusters,
             device=device,
             # node_lens=np.array([c[0] for c in dataset.assembly.nodes_len]),
-            node_lens=np.array(dataset.assembly.node_lengths),
+            node_lens=np.array(dataset.assembly.node_lengths)[cluster_mask],
             seed=args.seed,
         )
         results = evaluate_contig_sets(
@@ -201,7 +203,8 @@ def run_graphmb(dataset, args, device, logger):
         epsilon=args.early_stopping,
         evalepochs=args.evalepochs,
         seed=args.seed,
-        eval_skip=args.evalskip
+        eval_skip=args.evalskip,
+        quick=args.quick
     )
     return best_train_embs, best_model, last_train_embs, last_model, metrics
 

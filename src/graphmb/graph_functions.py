@@ -865,3 +865,19 @@ def compute_loss_para(adj, device):
     weight_tensor = torch.ones(weight_mask.size(0)).to(device)
     weight_tensor[weight_mask] = pos_weight
     return weight_tensor, norm
+
+
+def get_cluster_mask(quick, dataset):
+    if quick and dataset.contig_markers is not None:
+        #connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
+        nodes_with_markers = [
+            i
+            for i, n in enumerate(dataset.node_names)
+            if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
+        ]
+        print("eval cluster with ", len(nodes_with_markers), "contigds with markers")
+        cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
+    else:
+        cluster_mask = [True] * len(dataset.node_names)
+    return cluster_mask
+
