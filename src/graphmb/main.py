@@ -150,7 +150,7 @@ def run_graphmb(dataset, args, device, logger):
         args.layers_gnn,
         activation,
         args.dropout_gnn,
-        agg=args.aggtype,
+        agg=args.aggtype
     )
     model = model.to(device)
 
@@ -178,10 +178,10 @@ def run_graphmb(dataset, args, device, logger):
         results = evaluate_contig_sets(
             dataset.assembly.ref_marker_sets, dataset.assembly.contig_markers, pre_cluster_to_contig
         )
-        metrics = calculate_bin_metrics(results, logger=logger)
+        metrics = calculate_bin_metrics(results)
         logger.info(f"HQ: {len(metrics['hq'])}, MQ:, {len(metrics['mq'])} Total bins: {len(metrics['total'])}")
 
-    best_train_embs, best_model, last_train_embs, last_model = train_graphsage(
+    best_train_embs, best_model, last_train_embs, last_model, metrics = train_graphsage(
         dataset,
         model,
         batch_size=args.batchsize,
@@ -189,7 +189,7 @@ def run_graphmb(dataset, args, device, logger):
         num_negs=args.negatives,
         neg_share=False,
         num_epochs=args.epoch,
-        lr=args.lr,
+        lr=args.lr_gnn,
         k=args.kclusters,
         clusteringalgo=args.clusteringalgo,
         cluster_features=args.concat_features,
@@ -201,8 +201,9 @@ def run_graphmb(dataset, args, device, logger):
         epsilon=args.early_stopping,
         evalepochs=args.evalepochs,
         seed=args.seed,
+        eval_skip=args.evalskip
     )
-    return best_train_embs, best_model, last_train_embs, last_model
+    return best_train_embs, best_model, last_train_embs, last_model, metrics
 
 
 def write_bins(args, dataset, cluster_to_contig, logger):
@@ -491,7 +492,7 @@ def main():
     print("logging to {}".format(logfile))
     stdout_handler = logging.StreamHandler(sys.stdout)
     logger.addHandler(output_file_handler)
-    logger.addHandler(stdout_handler)
+    #logger.addHandler(stdout_handler)
     logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
     logging.getLogger("matplotlib").disabled = True
     logging.getLogger("matplotlib.pyplot").disabled = True
@@ -517,24 +518,24 @@ def main():
     # specify data properties for caching
     if args.features is None:
         if args.assembly != "":
-            features_dir = os.path.join(args.assembly, "features.tsv")
+            features_path = os.path.join(args.assembly, "features.tsv")
         else:
-            features_dir = os.path.join(args.outdir, "features.tsv")
+            features_path = os.path.join(args.outdir, "features.tsv")
     else:
-        features_dir = os.path.join(args.assembly, args.features)
+        features_path = os.path.join(args.assembly, args.features)
 
     # create assembly object
     dataset = AssemblyDataset(
-        args.outname,
-        logger,
-        args.assembly,
-        args.assembly_name,
-        args.graph_file,
-        args.depth,
-        args.markers,
-        args.labels,
-        features_dir,
-        args.outdir,
+        name=args.outname,
+        logger=logger,
+        data_dir=args.assembly, #every file is appended to this this
+        fastafile=args.assembly_name,
+        graphfile=args.graph_file,
+        depthfile=args.depth,
+        scgfile=args.markers,
+        labelsfile=args.labels,
+        featuresfile=features_path,
+        cache_dir=args.outdir,
         min_contig_length=args.mincontig,
         contignodes=args.contignodes
     )
@@ -559,8 +560,7 @@ def main():
     # zscore Kmer features (kmer are already loaded from reading the dataset)
     # dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
 
-    vamb_emb_exists = os.path.exists(features_dir)
-
+    vamb_emb_exists = os.path.exists(features_path)
     if not args.rawfeatures and (args.vamb or not vamb_emb_exists) and args.model_name != "vae":
         vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
         dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
@@ -619,9 +619,9 @@ def main():
 
             model = None
             if args.embs is None and args.read_embs is False:
-                best_train_embs, model, last_train_embs, last_model = run_graphmb(dgl_dataset, args, device, logger)
+                best_train_embs, model, last_train_embs, last_model, metrics = run_graphmb(dgl_dataset, args, device, logger)
                 emb_file = args.outdir + f"/{args.outname}_train_embs.pickle"
-
+                metrics = {k: len(v) for k, v in metrics.items()}
             if model is None:
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]

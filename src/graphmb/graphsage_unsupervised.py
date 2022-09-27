@@ -203,6 +203,7 @@ def train_graphsage(
     epsilon=0.1,
     evalepochs=1,
     seed=0,
+    eval_skip=0
 ):
 
     nfeat = dataset.graph.ndata.pop("feat")
@@ -248,6 +249,7 @@ def train_graphsage(
     best_hq_epoch = 0
     total_steps = 0
     losses = []
+    stop_run = False
     for epoch in range(num_epochs):
         tic = time.time()
         # Loop over the dataloader to sample the computation dependency graph as a list of
@@ -303,14 +305,14 @@ def train_graphsage(
             and (losses[-3] - losses[-2]) < epsilon
         ):
             logger.info("Early stopping {}".format(str(losses[-5:])))
-            break
+            stop_run = True
 
-        if dataset.assembly.ref_marker_sets is not None and epoch % evalepochs == 0:
+        if dataset.assembly.ref_marker_sets is not None and ((epoch % evalepochs == 0 and epoch > eval_skip) or stop_run):
             model.eval()
             encoded = model.inference(dataset.graph, nfeat, device, batch_size, num_workers)
             if cluster_features:
                 encoded = torch.cat((encoded, nfeat), axis=1)
-            best_hq, best_hq_epoch, kmeans_loss, clusters = cluster_eval(
+            best_hq, best_hq_epoch, kmeans_loss, clusters, epoch_metrics = cluster_eval(
                 model=model,
                 dataset=dataset.assembly,
                 logits=encoded,
@@ -326,7 +328,8 @@ def train_graphsage(
                 use_marker_contigs_only=False,
                 seed=seed,
             )
-
+            if best_hq_epoch == epoch:
+                metrics = epoch_metrics
             # compare clusters
             new_assignments = np.zeros(len(dataset.assembly.node_names))
             for i, cluster in enumerate(clusters):
@@ -337,6 +340,8 @@ def train_graphsage(
         toc = time.time()
         if epoch >= 5:
             avg += toc - tic
+        if stop_run:
+            break
         # = encoded.cpu().detach().numpy()
 
     last_train_embs = encoded
@@ -364,4 +369,4 @@ def train_graphsage(
     best_train_embs = best_train_embs.detach()
     if cluster_features:
         best_train_embs = torch.cat((best_train_embs, nfeat), axis=1).detach()
-    return best_train_embs, best_model, last_train_embs, last_model
+    return best_train_embs, best_model, last_train_embs, last_model, metrics

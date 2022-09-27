@@ -682,20 +682,28 @@ def read_contigs_scg(ref_file, marker_file, node_names):
     return np.array(counts)
 
 
-def calculate_bin_metrics(results, extra_metrics=False, logger=None):
-    # TODO zero division
+def calculate_bin_metrics(results, extra_metrics=False):
+    """Calculate overall scores over a set of bins for which we already have scores
+
+    :param results: scores of each bin
+    :type results: dict
+    :param extra_metrics: Calculate more metrics, defaults to False
+    :type extra_metrics: bool, optional
+    :return: overall metrics for this bin set
+    :rtype: dict
+    """
     hq_bins = [bin for bin in results if results[bin]["comp"] >= 90 and results[bin]["cont"] < 5]
     mq_bins = [bin for bin in results if results[bin]["comp"] >= 50 and results[bin]["cont"] < 10]
     metrics = {"hq": hq_bins, "mq": mq_bins, "total": results}
-    if extra_metrics:
+    if extra_metrics and len(results) > 0:
         metrics["avg_comp"] = sum([results[bin]["comp"] for bin in results]) / len(results)
         metrics["avg_cont"] = sum([results[bin]["cont"] for bin in results]) / len(results)
         cont_comp50 = [results[bin]["cont"] for bin in results if results[bin]["comp"] > 50]
-        metrics["cont_comp50"] = sum(cont_comp50) / len(cont_comp50)
+        metrics["cont_comp50"] = sum(cont_comp50) / len(cont_comp50) if len(cont_comp50) > 0 else 0
         cont_comp90 = [results[bin]["cont"] for bin in results if results[bin]["comp"] > 90]
-        metrics["cont_comp90"] = sum(cont_comp90) / len(cont_comp90)
+        metrics["cont_comp90"] = sum(cont_comp90) / len(cont_comp90) if len(cont_comp90) > 0 else 0
         comp_cont5 = [results[bin]["comp"] for bin in results if results[bin]["cont"] < 5]
-        metrics["comp_cont5"] = sum(comp_cont5) / len(comp_cont5)
+        metrics["comp_cont5"] = sum(comp_cont5) / len(comp_cont5) if len(comp_cont5) > 0 else 0
     return metrics
 
 
@@ -784,7 +792,7 @@ def cluster_eval(
         calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
     if dataset.ref_marker_sets is not None:
         results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
-        metrics = calculate_bin_metrics(results, logger=logger)
+        metrics = calculate_bin_metrics(results)
         logger.info(
             f"HQ: {len(metrics['hq'])}, MQ:, {len(metrics['mq'])} Total bins: {len(metrics['total'])} Best HQ: {best_hq} Best HQ epoch: {best_hq_epoch}"
         )
@@ -847,7 +855,7 @@ def cluster_eval(
             loss.detach(),
         )
     )
-    return best_hq, best_hq_epoch, kmeans_loss, cluster_to_contig
+    return best_hq, best_hq_epoch, kmeans_loss, cluster_to_contig, metrics
 
 
 def compute_loss_para(adj, device):
