@@ -481,7 +481,6 @@ def main():
         exit(0)
 
     check_dirs(args)
-
     # set up logging
     now = datetime.now()
     logger = logging.getLogger(__name__)
@@ -492,7 +491,7 @@ def main():
     print("logging to {}".format(logfile))
     stdout_handler = logging.StreamHandler(sys.stdout)
     logger.addHandler(output_file_handler)
-    #logger.addHandler(stdout_handler)
+    logger.addHandler(stdout_handler)
     logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
     logging.getLogger("matplotlib").disabled = True
     logging.getLogger("matplotlib.pyplot").disabled = True
@@ -544,7 +543,8 @@ def main():
     else:
         check_dirs(args, use_features=False)
         dataset.read_assembly()
-    dataset.read_scgs()
+    #dataset.read_scgs()
+    dataset.read_gtdbtk_files()
     if os.path.exists(os.path.join(args.assembly, "assembly_info.txt")):
         logger.info("Reading assembly info file")
         dataset.read_assembly_info()

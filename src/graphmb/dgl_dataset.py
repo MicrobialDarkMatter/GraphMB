@@ -32,7 +32,7 @@ class DGLAssemblyDataset(DGLDataset):
 
         self.logger.info("done")
         self.graph.ndata["label"] = torch.LongTensor(
-            [self.assembly.labels.index(self.assembly.node_to_label[n]) for n in self.assembly.node_names]
+            [self.assembly.labels.index(self.assembly.node_to_label[n]) if self.assembly.node_to_label[n] in self.assembly.labels else 0 for n in self.assembly.node_names]
         )
 
         nx_graph = self.graph.to_networkx().to_undirected()

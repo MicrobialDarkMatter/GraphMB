@@ -152,7 +152,8 @@ def get_markers_to_contigs(marker_sets, contigs):
 
 
 def evaluate_contig_sets(marker_sets, contig_marker_counts, bin_to_contigs):
-    """Calculate completeness and contamination for each bin given a set of marker gene sets and contig marker counts
+    """Calculate completeness and contamination for each bin given a set of
+       marker gene sets and contig marker counts
 
     :param marker_sets: reference marker sets, from Bacteria
     :type marker_sets: list

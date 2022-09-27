@@ -24,8 +24,8 @@ BACTERIA_MARKERS = "data/Bacteria.ms"
 
 def process_node_name(name: str, assembly_type: str) -> str:
     contig_name = name.strip().split(" ")[0]
-    if assembly_type == "spades":
-        contig_name = "_".join(contig_name.split("_")[:2])
+    #if assembly_type == "spades":
+    contig_name = "_".join(contig_name.split("_")[:2])
     return contig_name
 
 
@@ -648,5 +648,72 @@ class AssemblyDataset:
             print("Run this on a machine with CheckM installed")
             for cmd in commands:
                 print(cmd)
-        
+
+
+    def read_gtdbtk_files(self, prefix="gtdbtk", suffix_labels="summary.tsv",
+                          suffix_markers="markers_summary.tsv", reset=True):
+        # use summary to add species level labels
+        # also save full lineages
+        roots = ["bac120"] #, "ar53"]
+        no_species = 0
+        no_genus = 0
+        species_labels = set()
+        # reset labels
+        if reset:
+            self.node_to_label = {n: "NA" for n in self.node_names}
+            self.labels = ["NA"]
+        contig_markers = {n: {} for n in self.node_names}
+        ref_markers = set()
+        for root in roots:
+            # read labels
+            with open(os.path.join(self.data_dir, f"{prefix}.{root}.{suffix_labels}"), 'r') as f:
+                next(f) # skip header
+                for line in f:
+                    values = line.strip().split("\t")
+                    node_name = process_node_name(values[0], self.assembly_type)
+                    if values[1].startswith("Unclassified"):
+                        continue # do not add unclassified nodes
+                    classification = values[1].split(";")
+                    node_slabel = classification[-1]
+                    node_glabel = classification[-2]
+                    #if values[5] != "N/A":
+                    #    fast_ani = float(values[5])
+                    #    anis.append(fast_ani)
+                    if node_slabel == "s__":
+                        no_species += 1
+                    else:
+                        self.node_to_label[node_name] = node_slabel
+                        species_labels.add(node_slabel)
+                    #if node_slabel == "g__":
+                    #    no_genus += 1
+                    #else:
+                    #    node_to_glabel[node_name] = node_glabel
+                    #    genus_labels.add(node_glabel)
+
+            # read markers
+            with open(os.path.join(self.data_dir, f"{prefix}.{root}.{suffix_markers}"), 'r') as f:
+                next(f) # skip header
+                for line in f:
+                    values = line.strip().split("\t")
+                    node_name = process_node_name(values[0], self.assembly_type)
+                    if int(values[1]) > 0:
+                        contig_markers[node_name] = {g: 1 for g in values[5].split(",")}
+                        ref_markers.update(set(contig_markers[node_name]))
+                    if int(values[4]) > 0:
+                        ref_markers.update(set(values[-1].split(",")))
+        # create ref labels and ref markers
+        self.labels += list(species_labels)
+        self.label_to_node = {s: [] for s in self.labels}
+        for n in self.node_to_label:
+            s = self.node_to_label[n]
+            self.label_to_node[s].append(n)
+        assert len(ref_markers) == 120 # GTDB-tk bac and ar markers
+        if reset:
+            self.ref_marker_sets = [ref_markers]    
+            self.contig_markers = contig_markers
+            marker_counts = get_markers_to_contigs(self.ref_marker_sets, contig_markers)
+            self.markers = marker_counts
+
+   
+
 
