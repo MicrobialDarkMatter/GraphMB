@@ -6,7 +6,7 @@ import pickle
 import pdb
 import shutil
 from typing import Dict, List, Tuple, Sequence
-
+from collections import Counter
 import numpy as np
 import networkx as nx
 import scipy.stats as stats
@@ -150,7 +150,7 @@ class AssemblyDataset:
             print("No assembly graph loaded")
         #   contigs with markers on marker_gene_stats
         #   stats with SCGs (max/min # of contigs, etc)
-        #   TODO: contigs wiht same SCGs
+
         if len(self.contig_markers) > 0:
             print("total ref markers sets: {}".format(len(self.ref_marker_sets)))
             print("total ref markers: {}".format(len(self.markers)))
@@ -162,6 +162,7 @@ class AssemblyDataset:
                                                             round(np.mean(n_of_markers), 3)))
             self.estimate_n_genomes()
             print("SCG contig count min: {} contigs".format(min(self.scg_counts.values())))
+            self.get_nodes_with_same_scgs()
         else:
             print("No SCG markers")
         # labels
@@ -424,7 +425,7 @@ class AssemblyDataset:
                 print("---", edge_id, edge_name, self.node_lengths[edge_id],
                       [round(d, 4) for d in self.node_depths[edge_id]],
                       self.node_to_label[edge_name],
-                      len(self.contig_markers[edge_name]),
+                      len(self.contig_markers.get(edge_name, [])),
                       list(self.adj_matrix.getrow(edge_id).data))
 
     def read_depths(self) -> None:
@@ -577,9 +578,8 @@ class AssemblyDataset:
                 nlatent=int(vambdim),
                 norefcheck=True,
             )
-            if self.data_dir != "":
+            if self.data_dir != "" and self.featuresfile.endswith(".tsv"):
                 shutil.copyfile(os.path.join(vamb_outdir, "embs.tsv"), self.featuresfile)
-            # args.features = "features.tsv"
             self.logger.info("Contig features saved to {}".format(self.featuresfile))
 
     def read_features(self):
@@ -714,6 +714,22 @@ class AssemblyDataset:
             marker_counts = get_markers_to_contigs(self.ref_marker_sets, contig_markers)
             self.markers = marker_counts
 
-   
+    def get_nodes_with_same_scgs(self):
+        """Check every edge to see if nodes have SCGs in common
+
+        :return: edges IDs (edges_src, edges_dst, edge_weight)
+        :rtype: list
+        """
+        edge_ids_with_same_scgs = []
+        scg_counter = Counter()
+        for x, (i, j) in enumerate(zip(self.edges_src, self.edges_dst)):
+            overlap = len(self.contig_markers[self.node_names[i]].keys() & \
+                self.contig_markers[self.node_names[j]].keys())
+            if overlap > 0 and i != j:
+                #remove edge
+                scg_counter[overlap] += 1
+                edge_ids_with_same_scgs.append(x)
+        print("edges with overlapping scgs (max=20):", scg_counter.most_common(20))
+        return edge_ids_with_same_scgs
 
 
