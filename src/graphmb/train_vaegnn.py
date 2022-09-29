@@ -12,7 +12,7 @@ from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
-def run_model_vaegnn(dataset, args, logger, nrun):
+def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_gnn=False):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -28,38 +28,35 @@ def run_model_vaegnn(dataset, args, logger, nrun):
 
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
-        if gname == "vae":
-            args.ae_only = True
-        else:
-            gmodel_type = name_to_model[gname.split("_")[0].upper()]
+        
+        # pick one of the LAF models
+        gmodel_type = name_to_model[gname.split("_")[0].upper()] 
         clustering = args.clusteringalgo
         k = args.kclusters
+        
         use_edge_weights = True
-        use_disconnected = not args.quick
         cluster_markers_only = args.quick
         decay = 0.5 ** (2.0 / epochs)
         concat_features = args.concat_features
-        use_ae = gname.endswith("_ae") or args.ae_only or gname == "vae"
+        use_ae = True
+        args.rawfeatures = True
 
+        # setup logging
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
         summary_writer = tf.summary.create_file_writer(train_log_dir)
-        args.rawfeatures = True
         tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
         logger.addHandler(tb_handler)
 
-        X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+        X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
             dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
 
         if nrun == 0:
             print("logging to tensorboard")
-            
-        #tf.summary.trace_on(graph=True)
-
+            #tf.summary.trace_on(graph=True)
             logger.info("******* Running model: {} **********".format(gname))
             logger.info("***** using edge weights: {} ******".format(use_edge_weights))
-            logger.info("***** using disconnected: {} ******".format(use_disconnected))
             logger.info("***** concat features: {} *****".format(concat_features))
             logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
             logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
@@ -82,19 +79,20 @@ def run_model_vaegnn(dataset, args, logger, nrun):
         pname = ""
 
         #plot edges vs initial embs
-        id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
-        plot_edges_sim(X, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_pretrain_")
+        if plot:
+            id_to_scg = {i: set(dataset.contig_markers[node_name].keys()) for i, node_name in enumerate(dataset.node_names)}
+            plot_edges_sim(X, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_pretrain_")
 
+        # initialize variables
         scores = [stats]
         losses = {"total": [], "ae": [], "gnn": [], "scg": []}
         all_cluster_labels = []
         X = X.astype(np.float32)
         features = tf.constant(X)
-        input_dim_gnn = output_dim_vae
+        input_dim_gnn = output_dim_vae #+ dataset.node_depths.shape[1]
 
-        logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim_gnn}, use_ae: {use_ae}, run AE only: {args.ae_only}")
-        
-        S = []
+        logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim_gnn}")
+        logger.info(f"use_ae: {use_ae}, run AE only: {args.ae_only} output clustering dim {output_dim_gnn}")
 
         gnn_model = gmodel_type(
             features_shape=features.shape,
@@ -106,13 +104,13 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             layers=nlayers_gnn,
             conv_last=False,
         )  # , use_bn=True, use_vae=False)
-        logger.info(f"*** output clustering dim {output_dim_gnn}")
 
-        encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
-        decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
-        th_vae = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae, kld_weight=1/args.kld_alpha)
-
-        th = TH(
+        encoder = VAEEncoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
+                             hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+        decoder = VAEDecoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
+                             hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+        vae_trainer = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae, kld_weight=1/args.kld_alpha)
+        gnn_trainer = TH(
             features,
             gnn_model=gnn_model,
             lr=lr_gnn,
@@ -126,10 +124,12 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             scg_weight=float(args.scg_alpha),
             num_negatives=args.negatives,
             decoder_input=args.decoder_input,
-            kmers_dim=kmer_dim,
-            abundance_dim=ab_dim,
+            kmers_dim=dataset.node_kmers.shape[1],
+            abundance_dim=dataset.node_depths.shape[1],
+            use_gnn=use_gnn
         )
 
+        # create eval split
         if args.eval_split == 0:
             train_idx = np.arange(len(features))
             eval_idx = []
@@ -137,10 +137,13 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             train_idx = np.array(random.sample(list(range(len(features))), int(len(features)*(1-args.eval_split))))
             eval_idx = np.array([x for x in np.arange(len(features)) if x not in train_idx])
             logging.info(f"**** using {len(train_idx)} for training and {len(eval_idx)} for eval")
+        
         features = np.array(features)
         pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
         scores = [stats]
         best_embs, best_vae_embs, best_model, best_hq, best_epoch = None, None, None, 0, 0
+        
+        # increasing batch size
         batch_size = args.batchsize
         if batch_size == 0:
             batch_size = len(train_idx)
@@ -148,6 +151,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
         batch_steps = [25, 75, 150, 300]
         batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
+        
         vae_losses = []
         step = 0
         for e in pbar_epoch:
@@ -159,12 +163,14 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             if e in batch_steps:
                 #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
                 batch_size = batch_size * 2
+
+            # train VAE ########
             np.random.shuffle(train_idx)
             n_batches = len(train_idx)//batch_size + 1
             pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
-                vae_losses = th_vae.train_step(X[batch_idx], summary_writer, step, vae=True)
+                vae_losses = vae_trainer.train_step(X[batch_idx], summary_writer, step, vae=True)
                 vae_epoch_losses["vae_loss"].append(vae_losses[0])
                 vae_epoch_losses["kmer_loss"].append(vae_losses[1])
                 vae_epoch_losses["ab_loss"].append(vae_losses[2])
@@ -174,22 +180,27 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
             log_to_tensorboard(summary_writer, vae_epoch_losses, step)
             mlflow.log_metrics(vae_epoch_losses, step=step)
-
             recon_loss = np.mean(vae_epoch_losses["vae_loss"])
-            th.encoder = th_vae.encoder
-            total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
+            ############################################################
+
+            # train GNN ################################################
+            gnn_trainer.encoder = vae_trainer.encoder
+            total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = gnn_trainer.train_unsupervised(train_idx)
             epoch_metrics = {"Total loss": float(total_loss), "gnn loss": float(gnn_loss),
                                                 "SCG loss": float(diff_loss),
-                                                'GNN  LR': float(th.opt.learning_rate),
+                                                'GNN  LR': float(gnn_trainer.opt.learning_rate),
                                                 "pos loss": float(pos_loss), "neg loss": float(neg_loss)}
             log_to_tensorboard(summary_writer, epoch_metrics, step)
             mlflow.log_metrics(epoch_metrics, step=step)
             gnn_loss = gnn_loss.numpy()
             diff_loss = diff_loss.numpy()
+            ##############################################################
 
+
+            # eval loss ########################################################
             if args.eval_split > 0:
-                eval_mu, eval_logsigma = th_vae.encoder(X[eval_idx], training=False)
-                eval_vae_losses = th_vae.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
+                eval_mu, eval_logsigma = vae_trainer.encoder(X[eval_idx], training=False)
+                eval_vae_losses = vae_trainer.loss(X[eval_idx], eval_mu, eval_logsigma, vae=True, training=False)
                 #eval_loss = eval_mse1 + eval_mse2 - eval_kld
                 eval_vae_epoch_losses = {}
                 eval_vae_epoch_losses["vae_loss"] = float(eval_vae_losses[0])
@@ -198,7 +209,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
                 eval_vae_epoch_losses["kld_loss"] = float(eval_vae_losses[3])
                 mlflow.log_metrics(eval_vae_epoch_losses, step=step)
                 eval_total_loss, eval_gnn_loss, eval_diff_loss, eval_pos_loss, \
-                    eval_neg_loss = th.train_unsupervised(eval_idx, training=False)
+                    eval_neg_loss = gnn_trainer.train_unsupervised(eval_idx, training=False)
                 eval_metrics = {"Eval loss": float(eval_total_loss),
                                  "eval gnn loss": float(eval_gnn_loss),
                                  "eval SCG loss": float(eval_diff_loss),
@@ -209,15 +220,21 @@ def run_model_vaegnn(dataset, args, logger, nrun):
 
             #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
             gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
+            # eval checkpoint ##############################################################
             if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
-                gnn_input_features = th.encoder(features)[0]
-                node_new_features = th.gnn_model(gnn_input_features, None, training=False)
-                node_new_features = node_new_features.numpy()
+                #gnn_input_features = tf.concat((features[:,:dataset.node_depths.shape[1]],
+                #                                gnn_trainer.encoder(features)[0]), axis=1)
+                gnn_input_features = gnn_trainer.encoder(features)[0]
+                if use_gnn:
+                    node_new_features = gnn_trainer.gnn_model(gnn_input_features, None, training=False)
+                    node_new_features = node_new_features.numpy()
+                    if concat_features:
+                        node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
+                else:
+                    node_new_features = gnn_input_features.numpy()
 
-
-                if concat_features:
-                    node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
-                weights = (th.encoder.get_weights(), th.gnn_model.get_weights())
+                
+                weights = (gnn_trainer.encoder.get_weights(), gnn_trainer.gnn_model.get_weights())
                 best_hq, best_embs, best_epoch, scores, best_model = eval_epoch(logger, summary_writer, node_new_features,
                                                                     cluster_mask, weights, step, args, dataset, e, scores,
                                                                     best_hq, best_embs, best_epoch, best_model)
@@ -242,7 +259,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
             #        summary_writer.flush()
 
-    
+        #################################################################
 
         # concat with original features
         if concat_features:
@@ -264,8 +281,6 @@ def run_model_vaegnn(dataset, args, logger, nrun):
         # else:  # use F1
         #    f1s = [s["f1"] for s in scores]
         #    best_idx = np.argmax(f1s)
-        # S.append(stats)
-        S.append(scores[best_idx])
         logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
         logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
         #with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_{pname}_results.tsv", "w") as f:
@@ -284,5 +299,6 @@ def run_model_vaegnn(dataset, args, logger, nrun):
 
         #plot edges vs initial embs
         #plot_edges_sim(best_vae_embs, dataset.adj_matrix, id_to_scg, "vae_")
-        plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
+        if plot:
+            plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
         return best_embs, scores[best_idx]

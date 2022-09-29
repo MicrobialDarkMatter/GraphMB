@@ -29,8 +29,8 @@ class VAEEncoder(Model):
             if dropout > 0:
                 x = Dropout(dropout)(x)
             x = BatchNormalization()(x)
-        mu = Dense(zdim)(x)
-        logvar = Dense(zdim, kernel_initializer='zeros')(x)
+        mu = Dense(zdim, name="mu")(x)
+        logvar = Dense(zdim, kernel_initializer='zeros', name="logvar")(x)
         self.model = Model(in_, [mu, logvar])
  
     def call(self, x, training=False):
@@ -224,8 +224,8 @@ class TH:
         decoder_input="gnn",
         kmers_dim=103,
         abundance_dim=4,
-        labels=None
-        #no_gnn=False
+        labels=None,
+        use_gnn=True
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -261,19 +261,28 @@ class TH:
         self.train_ae = False
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
+        self.use_gnn = use_gnn
 
     @tf.function
     def train_unsupervised(self, idx, training=True):
         with tf.GradientTape() as tape:
             # run encoder first
             if self.use_ae:
-                ae_embs = self.encoder(self.features)[0]
+                # make logvar non trainable
+                layer_names = [layer.name for layer in self.encoder.layers[0].layers]
+                logvar_idx = layer_names.index("logvar")
+                self.encoder.layers[0].layers[logvar_idx].trainable = False
+                #ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
+                ae_embs =  self.encoder(self.features, training=True)[0]
 
             else:
                 ae_embs = self.features
 
             # run gnn model
-            node_hat = self.gnn_model(ae_embs, idx)
+            if self.use_gnn:
+                node_hat = self.gnn_model(ae_embs, idx)
+            else:
+                node_hat = ae_embs
             gnn_loss = tf.constant(0, dtype=tf.float32)
             if not self.no_gnn:
                 # create random negatives for gnn_loss
@@ -334,7 +343,13 @@ class TH:
                 )
                 loss += scg_loss
         if training:
-            tw = self.gnn_model.trainable_weights
+            if self.use_gnn:
+                tw = self.gnn_model.trainable_weights
+            else:
+                tw = []
+            if self.use_ae:
+                tw += self.encoder.trainable_weights # skip logvar 
+                self.encoder.layers[0].layers[logvar_idx].trainable = True
             grads = tape.gradient(loss, tw)
             self.opt.apply_gradients(zip(grads, tw))
         return loss, gnn_loss, scg_loss, pos_loss, neg_loss
