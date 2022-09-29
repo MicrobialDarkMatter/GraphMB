@@ -55,9 +55,9 @@ class THAug:
         self.opt_gnn.apply_gradients(zip(grads, tw))
         return loss
 
-    def train_vae_step(self, x, writer=None, epoch=0, vae=True):
+    def train_vae_step(self, x, agraph, writer=None, epoch=0, vae=True):
         #breakpoint()
-        losses, z = self._train_step(x, vae=vae, writer=writer, epoch=epoch)
+        losses, z = self._train_step(x, agraph, vae=vae, writer=writer, epoch=epoch)
         if writer is not None:
             with writer.as_default():
                 tf.summary.scalar('mean logvar', self.logvar, step=epoch)
@@ -319,7 +319,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
     tf.config.experimental_run_functions_eagerly(True)
 
 
-    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
             dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
@@ -365,8 +365,10 @@ def run_model_vaegnn(dataset, args, logger, nrun):
         )
     logger.info(f"*** output clustering dim {output_dim_gnn}")
 
-    encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
-    decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+    encoder = VAEEncoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
+                         hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+    decoder = VAEDecoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
+                         hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
 
     th = THAug(
         gnn_model=gnn_model,
@@ -427,7 +429,7 @@ def run_model_vaegnn(dataset, args, logger, nrun):
             for b in pbar_vaebatch:
                 
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
-                vae_losses, batch_z = th.train_vae_step(X[batch_idx], summary_writer, step, vae=True)
+                vae_losses, batch_z = th.train_vae_step(X[batch_idx], th.gnn_model.adj, summary_writer, step, vae=True)
                 vae_epoch_losses_list["total vae loss"].append(vae_losses[0])
                 vae_epoch_losses_list["kmer"].append(vae_losses[1])
                 vae_epoch_losses_list["ab"].append(vae_losses[2])

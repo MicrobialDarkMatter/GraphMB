@@ -162,7 +162,7 @@ class AssemblyDataset:
                                                             round(np.mean(n_of_markers), 3)))
             self.estimate_n_genomes()
             print("SCG contig count min: {} contigs".format(min(self.scg_counts.values())))
-            self.get_nodes_with_same_scgs()
+            self.get_edges_with_same_scgs()
         else:
             print("No SCG markers")
         # labels
@@ -714,7 +714,7 @@ class AssemblyDataset:
             marker_counts = get_markers_to_contigs(self.ref_marker_sets, contig_markers)
             self.markers = marker_counts
 
-    def get_nodes_with_same_scgs(self):
+    def get_edges_with_same_scgs(self):
         """Check every edge to see if nodes have SCGs in common
 
         :return: edges IDs (edges_src, edges_dst, edge_weight)

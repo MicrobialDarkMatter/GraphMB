@@ -60,7 +60,7 @@ def run_model_gnn_recon(dataset, args, logger, nrun):
         tf.config.experimental_run_functions_eagerly(True)
 
 
-        X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+        X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
                 dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
                 binarize=args.binarize, remove_edges=args.noedges)
         logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
@@ -94,7 +94,9 @@ def run_model_gnn_recon(dataset, args, logger, nrun):
         S = []
         logger.info(f"*** output clustering dim {output_dim_gnn}")
         
-        model = GVAE(ab_dim, kmer_dim, X.shape[0], hidden_vae, zdim=output_dim_gnn, dropout=args.dropout_vae, layers=nlayers_gnn)
+        model = GVAE(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
+                     X.shape[0], hidden_vae, zdim=output_dim_gnn,
+                     dropout=args.dropout_vae, layers=nlayers_gnn)
         model.adj = adj
         th = TH(
             features,
@@ -110,8 +112,8 @@ def run_model_gnn_recon(dataset, args, logger, nrun):
             scg_weight=float(args.scg_alpha),
             num_negatives=args.negatives,
             decoder_input=args.decoder_input,
-            kmers_dim=kmer_dim,
-            abundance_dim=ab_dim,
+            kmers_dim=dataset.node_kmers.shape[1],
+            abundance_dim=dataset.node_depth.shape[1],
         )
         th.adj = adj
         #model.summary()

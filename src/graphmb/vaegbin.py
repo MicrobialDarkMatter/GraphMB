@@ -18,7 +18,7 @@ from rich.table import Table
 from scipy.sparse import coo_matrix, diags
 
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder, VGAE
-from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
+from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim, get_cluster_mask
 from graphmb.evaluate import calculate_overall_prf
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
@@ -264,33 +264,22 @@ def prepare_data_for_gnn(
     dataset, use_edge_weights=True, cluster_markers_only=False, use_raw=False,
     binarize=False, remove_edges=False, remove_same_scg=True
 ):
+
     if use_raw: # use raw features instead of precomputed embeddings
         node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
+        # features are already normalized
         #node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
-        ab_dim = dataset.node_depths.shape[1]
-        kmer_dim = dataset.node_kmers.shape[1]
         X = node_raw
     else:
         node_features = (dataset.node_embs - dataset.node_embs.mean(axis=0, keepdims=True)) / dataset.node_embs.std(
             axis=0, keepdims=True
         )
         X = node_features
-        ab_dim, kmer_dim = 0, 0
 
     depth = 2
     # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth) 
-    if cluster_markers_only and dataset.contig_markers is not None:
-        #connected_marker_nodes = filter_disconnected(dataset.adj_matrix, dataset.node_names, dataset.contig_markers)
-        nodes_with_markers = [
-            i
-            for i, n in enumerate(dataset.node_names)
-            if n in dataset.contig_markers and len(dataset.contig_markers[n]) > 0
-        ]
-        print("eval cluster with ", len(nodes_with_markers), "contigds with markers")
-        cluster_mask = [n in nodes_with_markers for n in range(len(dataset.node_names))]
-    else:
-        cluster_mask = [True] * len(dataset.node_names)
-        #connected_marker_nodes = set(range(len(dataset.node_names)))
+    cluster_mask = get_cluster_mask(cluster_markers_only, dataset)
+    #connected_marker_nodes = set(range(len(dataset.node_names)))
     
     adj_matrix = dataset.adj_matrix.copy()
     edge_weights = dataset.edge_weights.copy()
@@ -309,27 +298,23 @@ def prepare_data_for_gnn(
         print(f"reduce matrix to {len(edge_weights)} edges")
     
     if remove_same_scg:
-        edges_with_same_scgs = 0
-        scg_counter = Counter()
-        for x, (i, j) in enumerate(zip(adj_matrix.row, adj_matrix.col)):
-            overlap = len(dataset.contig_markers[dataset.node_names[i]].keys() & \
-                dataset.contig_markers[dataset.node_names[j]].keys())
-            if overlap > 0 and i != j:
-                #remove edge
-                scg_counter[overlap] += 1
+        edges_with_same_scgs = dataset.get_edges_with_same_scgs()
+        for x in edges_with_same_scgs:
                 adj_matrix.data[x] = 0
                 edge_weights[x] = 0
-                edges_with_same_scgs += 1
         adj_matrix.eliminate_zeros()
         print(f"deleted {edges_with_same_scgs} edges with same SCGs")
-        print(scg_counter.most_common(20))
+    
     if remove_edges:
         # create self loops only sparse adj matrix
         n = len(dataset.node_names)
         adj_matrix = coo_matrix((np.ones(n), (np.array(range(n)), np.array(range(n)))), shape=(n,n))
         edge_weights = np.ones(len(adj_matrix.row))
         print(f"reduce matrix to {len(edge_weights)} edges")
+    
+    # gcn transform
     adj_norm = normalize_adj_sparse(adj_matrix)
+    
     if use_edge_weights:
         #edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
         #    dataset.edge_weights.max() - dataset.edge_weights.min()
@@ -354,6 +339,8 @@ def prepare_data_for_gnn(
     else:
         adj_norm.data = np.ones(len(adj_norm.row))
         #new_values = adj_norm.data.astype(np.float32)
+    
+    # convert to tf.SparseTensor
     adj = tf.SparseTensor(
         indices=np.array([adj_norm.row, adj_norm.col]).T, values=new_values, dense_shape=adj_norm.shape
     )
@@ -362,7 +349,7 @@ def prepare_data_for_gnn(
     # neg_pair_idx = None
     pos_pair_idx = None
     print("**** Num of edges:", adj.indices.shape[0])
-    return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx, ab_dim, kmer_dim
+    return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
 
 def save_model(args, epoch, th, th_vae):
     if th_vae is not None:
@@ -501,7 +488,6 @@ def run_model_vgae(dataset, args, logger, nrun):
     clustering = args.clusteringalgo
     k = args.kclusters
     use_edge_weights = True
-    use_disconnected = not args.quick
     cluster_markers_only = args.quick
     decay = 0.5 ** (2.0 / epochs)
     concat_features = args.concat_features
@@ -516,7 +502,6 @@ def run_model_vgae(dataset, args, logger, nrun):
 
     logger.info("******* Running model: VGAE **********")
     logger.info("***** using edge weights: {} ******".format(use_edge_weights))
-    logger.info("***** using disconnected: {} ******".format(use_disconnected))
     logger.info("***** concat features: {} *****".format(concat_features))
     logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
     logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
@@ -525,7 +510,7 @@ def run_model_vgae(dataset, args, logger, nrun):
     tf.config.experimental_run_functions_eagerly(True)
 
 
-    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+    X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
             dataset, use_edge_weights, cluster_markers_only, use_raw=True,
             binarize=args.binarize, remove_edges=args.noedges)
     logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))

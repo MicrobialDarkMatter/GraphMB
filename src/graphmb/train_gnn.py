@@ -41,7 +41,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         logger.addHandler(tb_handler)
         tf.config.experimental_run_functions_eagerly(True)
 
-        X, adj, cluster_mask, neg_pair_idx, pos_pair_idx, ab_dim, kmer_dim = prepare_data_for_gnn(
+        X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
                 dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
                 binarize=args.binarize, remove_edges=args.noedges)
         if nrun == 0:

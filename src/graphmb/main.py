@@ -457,7 +457,8 @@ def main():
     parser.add_argument("--read_embs", help="Read embeddings from file", action="store_true")
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
-    parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval", default=None)
+    parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval",
+                        default="marker_gene_stats.tsv")
     parser.add_argument("--post", help="Output options", default="writeembs")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
@@ -546,8 +547,12 @@ def main():
     else:
         check_dirs(args, use_features=False)
         dataset.read_assembly()
-    #dataset.read_scgs()
-    dataset.read_gtdbtk_files()
+    
+    if args.markers.startswith("gtdb"):
+        dataset.read_gtdbtk_files()
+    else:
+        dataset.read_scgs()
+    
     if os.path.exists(os.path.join(args.assembly, "assembly_info.txt")):
         logger.info("Reading assembly info file")
         dataset.read_assembly_info()
