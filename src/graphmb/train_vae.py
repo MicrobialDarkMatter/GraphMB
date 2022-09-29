@@ -216,6 +216,7 @@ def run_model_vae(dataset, args, logger, nrun):
     hqs = [s["hq"] for s in scores]
     epoch_hqs = [s["epoch"] for s in scores]
     best_idx = np.argmax(hqs)
+    mlflow.log_metrics(scores[best_idx], step=step+1)
     # else:  # use F1
     #    f1s = [s["f1"] for s in scores]
     #    best_idx = np.argmax(f1s)

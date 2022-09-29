@@ -81,8 +81,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         input_dim_gnn = X.shape[1]
     
         logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim_gnn}")
-        
-        S = []
+
         gnn_model = gmodel_type(
             features_shape=features.shape,
             input_dim=input_dim_gnn,
@@ -203,7 +202,7 @@ def run_model_gnn(dataset, args, logger, nrun):
     hqs = [s["hq"] for s in scores]
     epoch_hqs = [s["epoch"] for s in scores]
     best_idx = np.argmax(hqs)
-    S.append(scores[best_idx])
+    mlflow.log_metrics(scores[best_idx], step=step+1)
     logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
     with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_results.tsv", "w") as f:
