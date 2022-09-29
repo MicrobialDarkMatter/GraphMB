@@ -609,7 +609,7 @@ class GCN(Model):
         predict=False
     ):
         super(GCN, self).__init__()
-        assert layers > 0
+        #assert layers > 0
         self.features_shape = features_shape
         self.labels = labels
         self.adj = adj
@@ -658,7 +658,7 @@ class GCN(Model):
 class GCNLAF(Model):
     def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
         super(GCNLAF, self).__init__()
-        assert layers > 0
+        #assert layers > 0
         self.features = features
         self.labels = labels
         self.adj = adj

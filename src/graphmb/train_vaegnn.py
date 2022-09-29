@@ -12,7 +12,7 @@ from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
-def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_gnn=False):
+def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -25,6 +25,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_gnn=False):
     lr_gnn = args.lr_gnn
     nlayers_gnn = args.layers_gnn
     gname = args.model_name
+    use_gnn = args.layers_gnn > 0
 
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
@@ -61,6 +62,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_gnn=False):
             logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
             logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
             logger.info("***** self edges only: {} *****".format(args.noedges))
+            logger.info("***** use gnn: {} *****".format(use_gnn))
             logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
             logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
             logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
@@ -278,6 +280,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_gnn=False):
         hqs = [s["hq"] for s in scores]
         #epoch_hqs = [s["epoch"] for s in scores]
         best_idx = np.argmax(hqs)
+        mlflow.log_metrics(scores[best_idx], step=step+1)
         # else:  # use F1
         #    f1s = [s["f1"] for s in scores]
         #    best_idx = np.argmax(f1s)
