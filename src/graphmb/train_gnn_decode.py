@@ -193,7 +193,7 @@ def run_model_gnn_recon(dataset, args, logger, nrun):
                 #node_new_features = th.gnn_model(features, None)
                 node_new_features = node_new_features.numpy()
                 weights = th.gnn_model.get_weights()
-                best_hq, best_embs, best_epoch, scores, best_model = eval_epoch(logger, summary_writer, node_new_features,
+                best_hq, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer, node_new_features,
                                                                     cluster_mask, weights, step, args, dataset, e, scores,
                                                                     best_hq, best_embs, best_epoch, best_model)
                 if args.quiet:

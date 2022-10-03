@@ -128,7 +128,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         batch_size = args.batchsize
         if batch_size == 0:
             batch_size = len(train_idx)
-        vae_losses = []
+        all_cluster_labels = []
         step = 0
         for e in pbar_epoch:
             np.random.shuffle(train_idx)
@@ -162,18 +162,21 @@ def run_model_gnn(dataset, args, logger, nrun):
                 node_new_features = node_new_features.numpy()
                 if concat_features:
                     node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
-                best_hq, best_embs, best_epoch, scores, best_model = eval_epoch(logger, summary_writer, node_new_features,
+                best_hq, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer, node_new_features,
                                                                     cluster_mask, th.gnn_model.get_weights(), step, args, dataset, e, scores,
                                                                     best_hq, best_embs, best_epoch, best_model)
                 
+                stats = scores[-1]
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
-                    logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} HQ={stats['hq']} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+                    scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+                    logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
-                mlflow.log_metrics(scores[-1], step=step)
-
+                mlflow.log_metrics(stats, step=step)
+                all_cluster_labels.append(cluster_labels)
+            scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
             pbar_epoch.set_description(
-                f"[{args.outname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f}  HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+                f"[{args.outname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )
             total_loss = gnn_loss + diff_loss
             losses["gnn"].append(gnn_loss)
@@ -185,30 +188,30 @@ def run_model_gnn(dataset, args, logger, nrun):
             #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
             #        summary_writer.flush()
 
-    if best_embs is None:
-        best_embs = node_new_features
-    gnn_model.set_weights(best_model)
-    node_new_features = th.gnn_model(gnn_input_features, None, training=False)
-    node_new_features = node_new_features.numpy()
-    if concat_features:
-        node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
-    cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        node_new_features, node_names, dataset,
-        clustering=clustering, k=k, #cuda=args.cuda,
-    )
-    stats["epoch"] = e
-    scores.append(stats)
-    # get best stats:
-    hqs = [s["hq"] for s in scores]
-    epoch_hqs = [s["epoch"] for s in scores]
-    best_idx = np.argmax(hqs)
-    mlflow.log_metrics(scores[best_idx], step=step+1)
+        if best_embs is None:
+            best_embs = node_new_features
+        gnn_model.set_weights(best_model)
+        node_new_features = th.gnn_model(gnn_input_features, None, training=False)
+        node_new_features = node_new_features.numpy()
+        if concat_features:
+            node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
+        cluster_labels, stats, _, _ = compute_clusters_and_stats(
+            node_new_features, node_names, dataset,
+            clustering=clustering, k=k, #cuda=args.cuda,
+        )
+        stats["epoch"] = e
+        scores.append(stats)
+        # get best stats:
+        hqs = [s["hq"] for s in scores]
+        epoch_hqs = [s["epoch"] for s in scores]
+        best_idx = np.argmax(hqs)
+        mlflow.log_metrics(scores[best_idx], step=step+1)
     logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
-    with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_results.tsv", "w") as f:
+    with open(f"{dataset.cache_dir}/{dataset.name}_best_contig2bin.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
-        for i in range(len(cluster_labels)):
-            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
+        for i in range(len(all_cluster_labels[best_idx])):
+            f.write(f"{node_names[i]}\t{all_cluster_labels[best_idx][i]}\n")
     #plot edges vs final embs
     #plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_posttrain_")
     return best_embs, scores[best_idx]

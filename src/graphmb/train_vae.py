@@ -63,8 +63,7 @@ def run_model_vae(dataset, args, logger, nrun):
         if nrun == 0:
             logger.info(f"*** Model input dim {X.shape[1]}")
             logger.info(f"*** output clustering dim {output_dim_vae}")
-        S = []
-        
+
         gold_labels=np.array([dataset.labels.index(dataset.node_to_label[n]) for n in dataset.node_names])
         encoder = VAEEncoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
         decoder = VAEDecoder(ab_dim, kmer_dim, hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
@@ -167,17 +166,17 @@ def run_model_vae(dataset, args, logger, nrun):
         
                 cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                     node_new_features[cluster_mask], node_names[cluster_mask],
-                    dataset, clustering=clustering, k=k, tsne=args.tsne, use_labels=args.classify
+                    dataset, clustering=clustering, k=k, tsne=args.tsne,
+                    use_labels=args.classify, amber="amber" in args.labels
                     #cuda=args.cuda,
                 )
-
                 stats["epoch"] = e
                 scores.append(stats)
                 #logger.info(str(stats))
                 with summary_writer.as_default():
                     tf.summary.scalar('hq_bins',  stats["hq"], step=step)
                     tf.summary.scalar('mq_bins',  stats["mq"], step=step)
-                mlflow.log_metrics({'hq_bins': stats["hq"], 'mq_bins': stats["mq"]}, step=step)
+                mlflow.log_metrics(stats, step=step)
                 all_cluster_labels.append(cluster_labels)
                 if dataset.contig_markers is not None and stats["hq"] > best_hq:
                     best_hq = stats["hq"]
@@ -193,39 +192,36 @@ def run_model_vae(dataset, args, logger, nrun):
                 # print('--- END ---')
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
-                    logger.info(f"[VAE] R={recon_loss:.3f}  HQ={stats['hq']} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
+                    logger.info(f"[VAE] L={recon_loss:.3f}  HQ={stats['hq']} BestHQ={best_hq} BestEp={best_epoch} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
-
+            scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
             pbar_epoch.set_description(
-                f"[VAE {losses_string}  HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+                f"[VAE {losses_string} {scores_string} Max GPU MB={gpu_mem_alloc:.1f}"
             )
             total_loss = recon_loss
             losses["ae"].append(recon_loss)
             losses["total"].append(total_loss)
-    if best_embs is None:
-        best_embs = node_new_features
-    
-    cluster_labels, stats, _, _ = compute_clusters_and_stats(
-        best_embs[cluster_mask], node_names[cluster_mask],
-        dataset, clustering=clustering, k=k, #cuda=args.cuda,
-    )
-    stats["epoch"] = e
-    scores.append(stats)
-    # get best stats:
-    # if concat_features:  # use HQ
-    hqs = [s["hq"] for s in scores]
-    epoch_hqs = [s["epoch"] for s in scores]
-    best_idx = np.argmax(hqs)
-    mlflow.log_metrics(scores[best_idx], step=step+1)
+        if best_embs is None:
+            best_embs = node_new_features
+        
+        cluster_labels, stats, _, _ = compute_clusters_and_stats(
+            best_embs[cluster_mask], node_names[cluster_mask],
+            dataset, clustering=clustering, k=k, #cuda=args.cuda,
+        )
+        stats["epoch"] = e
+        scores.append(stats)
+        # get best stats:
+        # if concat_features:  # use HQ
+        hqs = [s["hq"] for s in scores]
+        epoch_hqs = [s["epoch"] for s in scores]
+        best_idx = np.argmax(hqs)
+        mlflow.log_metrics(scores[best_idx], step=step+1)
     # else:  # use F1
     #    f1s = [s["f1"] for s in scores]
     #    best_idx = np.argmax(f1s)
-    # S.append(stats)
-    S.append(scores[best_idx])
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
-    with open(f"{dataset.name}_vae_{clustering}{k}_results.tsv", "w") as f:
+    with open(f"{dataset.cache_dir}/{dataset.name}_best_contig2bin.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
-        for i in range(len(cluster_labels)):
-            f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
-    
+        for i in range(len(all_cluster_labels[best_idx])):
+            f.write(f"{node_names[i]}\t{all_cluster_labels[best_idx][i]}\n")
     return best_embs, scores[best_idx]

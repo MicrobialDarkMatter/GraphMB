@@ -18,7 +18,7 @@ from rich.table import Table
 from scipy.sparse import coo_matrix, diags
 
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder, VGAE
-from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim, get_cluster_mask
+from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim, get_cluster_mask, write_bins
 from graphmb.evaluate import calculate_overall_prf
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
@@ -111,7 +111,8 @@ def compute_clusters_and_stats(
     tsne=False,
     tsne_path=None,
     max_pos_pairs=None,
-    use_labels=False
+    use_labels=False,
+    amber=False
 ):
     reference_markers = dataset.ref_marker_sets
     contig_genes = dataset.contig_markers
@@ -159,6 +160,10 @@ def compute_clusters_and_stats(
         cluster_to_contig = {i: [] for i in range(k)}
         for i in range(len(node_names)):
             cluster_to_contig[labels[i]].append(node_names[i])
+
+    scores = {"precision": 0, "recall": 0, "f1": 0, "ari": 0, "hq": 0, "mq": 0,
+        "n_clusters": len(np.unique(labels)), "unresolved": 0}
+
     if contig_genes is not None and len(contig_genes) > 0:
         hq, positive_clusters = compute_hq(
             reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
@@ -194,18 +199,31 @@ def compute_clusters_and_stats(
             resolved_clusters=positive_clusters)
         # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
         positive_pairs = get_positive_pairs(node_names, positive_clusters, cluster_to_contig, max_pos_pairs)
-
-    else:
-        positive_pairs, positive_clusters, unresolved_mags = None, None, 0
-        # TODO use p/r/ to get positive_clusters
-        hq, mq = 0, 0
+        scores["hq"] = hq
+        scores["mq"] = mq
+        scores["unresolved"] = unresolved_mags
+    
+    # TODO use p/r/ to get positive_clusters
     if node_to_gt_idx_label is not None:
         p, r, f1, ari = calculate_overall_prf(
             cluster_to_contig, contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )
-    else:
-        p, r, f1, ari = 0, 0, 0, 0
+        scores["precision"] = p
+        scores["recall"] = r
+        scores["f1"] = f1
+        scores["ari"] = ari
 
+    if amber == True:
+        from amber_eval import amber_eval
+        # save to file
+        output_bins_filename = dataset.cache_dir + f"/{dataset.name}_temp_contig2bin.tsv"
+        write_bins(contig_to_bin, output_bins_filename)
+        amber_metrics, bin_counts = amber_eval(os.path.join(dataset.data_dir, dataset.labelsfile), output_bins_filename, ["graphmb"])
+        p_amber = amber_metrics["precision_avg_bp"]
+        r_amber = amber_metrics["recall_avg_bp"]
+        scores["precision_avg_bp"] = p_amber
+        scores["recall_avg_bp"] = r_amber
+        scores["f1_avg_bp"] = (2*p_amber*r_amber)/(p_amber+r_amber) if p_amber+r_amber > 0 else 0
     #plot tSNE
     if tsne:
         cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(labels) if x == cluster] for cluster in set(labels)}
@@ -222,8 +240,7 @@ def compute_clusters_and_stats(
         )
     return (
         labels,
-        {"precision": p, "recall": r, "f1": f1, "ari": ari, "hq": hq, "mq": mq,
-        "n_clusters": len(np.unique(labels)), "unresolved": unresolved_mags},
+        scores,
         positive_pairs,
         positive_clusters,
     )
@@ -388,14 +405,15 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
 
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
         node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
-        dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne, #cuda=args.cuda,
+        dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne,
+        amber="amber" in args.labels #cuda=args.cuda,
     )
     
     stats["epoch"] = epoch
     scores.append(stats)
     #logger.info(str(stats))
 
-    log_to_tensorboard(summary_writer, {"hq_bins": stats["hq"], "mq_bins": stats["mq"]}, step)
+    log_to_tensorboard(summary_writer, {"hq": stats["hq"], "mq": stats["mq"]}, step)
     #all_cluster_labels.append(cluster_labels)
 
     if dataset.contig_markers is not None and stats["hq"] > best_hq:
@@ -419,7 +437,7 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
     #)
     #log_to_tensorboard(summary_writer, {"hq_bins_all": stats["hq"], "mq_bins_all": stats["mq"]}, step)
 
-    return best_hq, best_embs, best_epoch, scores, best_model
+    return best_hq, best_embs, best_epoch, scores, best_model, cluster_labels
 
 
 def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, best_hq,
@@ -556,7 +574,7 @@ def run_model_vgae(dataset, args, logger, nrun):
             _, embs, _, _, _ = model((X_train, A_train), training=False)
             node_new_features = embs.numpy()
 
-            best_hq, best_embs, best_epoch, scores = eval_epoch(logger, summary_writer, node_new_features,
+            best_hq, best_embs, best_epoch, scores, cluster_labels = eval_epoch(logger, summary_writer, node_new_features,
                                                                 cluster_mask, e, args, dataset, e, scores,
                                                                 best_hq, best_embs, best_epoch)
 

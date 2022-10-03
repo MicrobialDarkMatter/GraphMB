@@ -413,7 +413,7 @@ def main():
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=1)
     parser.add_argument("--kld_alpha", type=float, help="Coeficient for KLD loss", default=200)
     parser.add_argument("--ae_alpha", type=float, help="Coeficient for AE loss", default=1)
-    parser.add_argument("--scg_alpha", type=float, help="Coeficient for SCG loss", default=100)
+    parser.add_argument("--scg_alpha", type=float, help="Coeficient for SCG loss", default=1)
     parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
     parser.add_argument("--kclusters", help="Number of clusters (only for some clustering methods)", default=None)
     # GraphSAGE params
@@ -459,7 +459,7 @@ def main():
 
     parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval",
                         default="marker_gene_stats.tsv")
-    parser.add_argument("--post", help="Output options", default="writeembs")
+    parser.add_argument("--post", help="Output options", default="writeembs_contig2bin")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
@@ -664,7 +664,7 @@ def main():
             seed=args.seed,
         )
 
-        if args.labels is not None or "contig2bin" in args.post:
+        if args.labels is not None: # or "contig2bin" in args.post:
             from amber_eval import amber_eval
 
             amber_metrics, bin_counts = amber_eval(

@@ -237,18 +237,23 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
 
                 
                 weights = (gnn_trainer.encoder.get_weights(), gnn_trainer.gnn_model.get_weights())
-                best_hq, best_embs, best_epoch, scores, best_model = eval_epoch(logger, summary_writer, node_new_features,
-                                                                    cluster_mask, weights, step, args, dataset, e, scores,
+                best_hq, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer,
+                                                                    node_new_features, cluster_mask, weights,
+                                                                    step, args, dataset, e, scores,
                                                                     best_hq, best_embs, best_epoch, best_model)
-                
+                stats = scores[-1]
+                all_cluster_labels.append(cluster_labels)
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
-                    logger.info(f"[{gname} {nlayers_gnn}l {pname}] L={gnn_loss:.3f} D={diff_loss:.3f} R={recon_loss:.3f} HQ={stats['hq']}   BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
-                    logger.info(str(scores[-1]))
-                mlflow.log_metrics(scores[-1], step=step)
+                    scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+                    losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
+                    logger.info(f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
+                    logger.info(str(stats))
+                mlflow.log_metrics(stats, step=step)
             losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
+            scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
             pbar_epoch.set_description(
-                f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} HQ={scores[-1]['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}"
+                f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )
             total_loss = gnn_loss + diff_loss + recon_loss
             losses["gnn"].append(gnn_loss)
@@ -286,10 +291,10 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
         #    best_idx = np.argmax(f1s)
         logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
         logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
-        #with open(f"{dataset.name}_{gname}_{clustering}{k}_{nlayers_gnn}l_{pname}_results.tsv", "w") as f:
-        #    f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
-        #    for i in range(len(cluster_labels)):
-        #        f.write(f"{node_names[i]}\t{cluster_labels[i]}\n")
+        with open(f"{dataset.cache_dir}/{dataset.name}_best_contig2bin.tsv", "w") as f:
+            f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+            for i in range(len(all_cluster_labels[best_idx])):
+                f.write(f"{node_names[i]}\t{all_cluster_labels[best_idx][i]}\n")
         #del gnn_model, th
         # res_table.add_row(f"{gname} {clustering}{k} {nlayers}l {pname}", S)
         # if gt_idx_label_to_node is not None:
