@@ -170,7 +170,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
 
             # train VAE ########
             np.random.shuffle(train_idx)
-            n_batches = len(train_idx)//batch_size + 1
+            n_batches = len(train_idx)//batch_size
+            if n_batches < len(train_idx)/batch_size:
+                n_batches += 1 # add final batch
             pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
