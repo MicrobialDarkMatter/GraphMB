@@ -225,7 +225,8 @@ class TH:
         kmers_dim=103,
         abundance_dim=4,
         labels=None,
-        use_gnn=True
+        use_gnn=True,
+        use_noise=False
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -262,6 +263,9 @@ class TH:
         self.abundance_dim = abundance_dim
         self.kmers_dim = kmers_dim
         self.use_gnn = use_gnn
+        self.use_noise = use_noise
+        if self.use_noise:
+            self.noise_weights = tf.Variable(tf.random_normal_initializer()(shape=[1,2], dtype=tf.float32), trainable=True)
 
     @tf.function
     def train_unsupervised(self, idx, training=True):
@@ -312,10 +316,23 @@ class TH:
                     negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
                 except:
                     breakpoint()
-
-                pos_loss = tf.keras.losses.binary_crossentropy(tf.ones_like(positive_pairwise),
-                                                               positive_pairwise, from_logits=True)
-                neg_loss = tf.keras.losses.binary_crossentropy(tf.zeros_like(negative_pairs),
+                if self.use_noise:
+                    #breakpoint()
+                    weights = Softmax()(self.noise_weights)
+                    positive_noise = tf.random.normal(positive_pairwise.shape.concatenate(weights.shape[1]), mean=0, stddev=1) * weights
+                    positive_noise = tf.math.reduce_sum(positive_noise, axis=1)
+                    negative_noise = tf.random.normal(negative_pairs.shape.concatenate(1), mean=0, stddev=1) * weights
+                    negative_noise = tf.math.reduce_sum(negative_noise, axis=1)
+                    positive_y = tf.ones_like(positive_pairwise)
+                    positive_pairwise = tf.clip_by_value(tf.nn.sigmoid(positive_pairwise) + positive_noise, 0, 1)
+                    negative_y = tf.zeros_like(negative_pairs)
+                    negative_pairs = tf.clip_by_value(tf.nn.sigmoid(negative_pairs) + negative_noise, 0, 1) 
+                else:
+                    positive_y = tf.ones_like(positive_pairwise)
+                    negative_y = tf.zeros_like(negative_pairs)
+                pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
+                                                               positive_pairwise, from_logits=False)
+                neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
                                                               negative_pairs, from_logits=True)
                 #gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
                 y_true = tf.concat((tf.ones_like(positive_pairwise), tf.ones_like(negative_pairs)), axis=0)
@@ -350,6 +367,9 @@ class TH:
             if self.use_ae:
                 tw += self.encoder.trainable_weights # skip logvar 
                 self.encoder.layers[0].layers[logvar_idx].trainable = True
+            if self.use_noise:
+                #breakpoint()
+                tw += [self.noise_weights]
             grads = tape.gradient(loss, tw)
             self.opt.apply_gradients(zip(grads, tw))
         return loss, gnn_loss, scg_loss, pos_loss, neg_loss
