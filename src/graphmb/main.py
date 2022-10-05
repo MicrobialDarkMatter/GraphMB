@@ -475,6 +475,7 @@ def main():
     parser.add_argument("--contignodes", help="Use contigs as nodes instead of edges", action="store_true")
     parser.add_argument("--seed", help="Set seed", default=1, type=int)
     parser.add_argument("--quiet", "-q", help="Do not output epoch progress", action="store_true")
+    parser.add_argument("--read_cache", help="Do not check assembly files, read cached files only", action="store_true")
     parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
     parser.add_argument("--loglevel", "-l", help="Log level", default="info")
     parser.add_argument('--configfile', type=open, action=LoadFromFile)
@@ -483,8 +484,8 @@ def main():
     if args.version:
         print(f"GraphMB {__version__}")
         exit(0)
-
-    check_dirs(args)
+    if not args.read_cache:
+        check_dirs(args)
     # set up logging
     now = datetime.now()
     logger = logging.getLogger(__name__)
@@ -517,7 +518,7 @@ def main():
     clustering_device = "cuda:0" if args.cuda else "cpu"
     logger.info("setting seed to {}".format(args.seed))
     set_seed(args.seed)
-    use_graph = os.path.exists(os.path.join(args.assembly, args.graph_file))
+    use_graph = os.path.exists(os.path.join(args.assembly, args.graph_file)) or args.read_cache
     # specify data properties for caching
     if args.features is None:
         if args.assembly != "":
@@ -542,7 +543,7 @@ def main():
         min_contig_length=args.mincontig,
         contignodes=args.contignodes
     )
-    if dataset.check_cache(use_graph) and not args.reload:
+    if args.read_cache or (dataset.check_cache(use_graph) and not args.reload):
         dataset.read_cache(use_graph)
     else:
         check_dirs(args, use_features=False)
@@ -550,7 +551,7 @@ def main():
     
     if args.markers.startswith("gtdb"):
         dataset.read_gtdbtk_files()
-    else:
+    elif args.markers != "":
         dataset.read_scgs()
     
     if os.path.exists(os.path.join(args.assembly, "assembly_info.txt")):
