@@ -69,7 +69,9 @@ def run_model_gnn_recon(dataset, args, logger, nrun):
         if not args.skip_preclustering:
             cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                         X[cluster_mask], node_names[cluster_mask],
-                        dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+                        dataset, clustering=clustering, k=k, tsne=args.tsne, 
+                        amber=(args.labels is not None and "amber" in args.labels),
+                        #cuda=args.cuda,
                     )
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:

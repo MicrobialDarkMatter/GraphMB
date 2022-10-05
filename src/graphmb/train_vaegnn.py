@@ -72,7 +72,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
         if not args.skip_preclustering and nrun == 0:
             cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                         X[cluster_mask], node_names[cluster_mask],
-                        dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+                        dataset, clustering=clustering, k=k, tsne=args.tsne,
+                        amber=(args.labels is not None and "amber" in args.labels),
+                        cuda=args.cuda,
                     )
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:
@@ -224,6 +226,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
             # eval checkpoint ##############################################################
             if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
+                evalstarttime = datetime.datetime.now()
                 #gnn_input_features = tf.concat((features[:,:dataset.node_depths.shape[1]],
                 #                                gnn_trainer.encoder(features)[0]), axis=1)
                 gnn_input_features = gnn_trainer.encoder(features)[0]
@@ -250,6 +253,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                     logger.info(f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
                 mlflow.log_metrics(stats, step=step)
+                print("total eval time", datetime.datetime.now() - evalstarttime)
             losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
             scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
             pbar_epoch.set_description(
@@ -276,8 +280,10 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
         
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
             best_embs, node_names, dataset, clustering=clustering, k=k,
+            amber=(args.labels is not None and "amber" in args.labels),
             #cuda=args.cuda,
         )
+        all_cluster_labels.append(cluster_labels)
         stats["epoch"] = e
         scores.append(stats)
         # get best stats:

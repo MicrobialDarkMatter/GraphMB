@@ -68,7 +68,8 @@ def run_model_gnn(dataset, args, logger, nrun):
             cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                         X[cluster_mask], node_names[cluster_mask],
                         dataset, clustering=clustering, k=k,
-                        #cuda=args.cuda,
+                        amber=(args.labels is not None and "amber" in args.labels),
+                        cuda=args.cuda,
                     )
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:
@@ -197,7 +198,8 @@ def run_model_gnn(dataset, args, logger, nrun):
             node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
             node_new_features, node_names, dataset,
-            clustering=clustering, k=k, #cuda=args.cuda,
+            clustering=clustering, k=k, amber=(args.labels is not None and "amber" in args.labels),
+            #cuda=args.cuda,
         )
         stats["epoch"] = e
         scores.append(stats)
