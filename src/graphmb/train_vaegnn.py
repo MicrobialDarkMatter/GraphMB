@@ -79,6 +79,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:
             stats = {"hq": 0, "epoch":0 }
+            cluster_labels = []
         
         pname = ""
 
@@ -89,8 +90,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
 
         # initialize variables
         scores = [stats]
-        losses = {"total": [], "ae": [], "gnn": [], "scg": []}
         all_cluster_labels = []
+        all_cluster_labels.append(cluster_labels)
+        losses = {"total": [], "ae": [], "gnn": [], "scg": []}
         X = X.astype(np.float32)
         features = tf.constant(X)
         input_dim_gnn = output_dim_vae #+ dataset.node_depths.shape[1]
@@ -130,7 +132,8 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             decoder_input=args.decoder_input,
             kmers_dim=dataset.node_kmers.shape[1],
             abundance_dim=dataset.node_depths.shape[1],
-            use_gnn=use_gnn
+            use_gnn=use_gnn,
+            use_noise=args.noise
         )
 
         # create eval split
@@ -255,7 +258,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                     logger.info(f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
                 mlflow.log_metrics(stats, step=step)
-                print("total eval time", datetime.datetime.now() - evalstarttime)
+                #print("total eval time", datetime.datetime.now() - evalstarttime)
             losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
             scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
             pbar_epoch.set_description(

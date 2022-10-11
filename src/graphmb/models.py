@@ -265,7 +265,7 @@ class TH:
         self.use_gnn = use_gnn
         self.use_noise = use_noise
         if self.use_noise:
-            self.noise_weights = tf.Variable(tf.random_normal_initializer()(shape=[1,2], dtype=tf.float32), trainable=True)
+            self.noise_weights = tf.Variable(tf.random_normal_initializer()(shape=[1,10], dtype=tf.float32), trainable=True)
 
     @tf.function
     def train_unsupervised(self, idx, training=True):
@@ -289,11 +289,11 @@ class TH:
                 node_hat = ae_embs
             gnn_loss = tf.constant(0, dtype=tf.float32)
             if not self.no_gnn:
-                # create random negatives for gnn_loss
                 row_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 0], params=node_hat)
                 col_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 1], params=node_hat)
                 positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
 
+                # create random negatives for gnn_loss
                 neg_idx = tf.random.uniform(
                     shape=(self.num_negatives * len(self.gnn_model.adj.indices),),
                     minval=0,
@@ -330,14 +330,16 @@ class TH:
                 else:
                     positive_y = tf.ones_like(positive_pairwise)
                     negative_y = tf.zeros_like(negative_pairs)
+                    positive_pairwise = tf.nn.sigmoid(positive_pairwise)
+                    negative_pairs = tf.nn.sigmoid(negative_pairs)
                 pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
                                                                positive_pairwise, from_logits=False)
                 neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
-                                                              negative_pairs, from_logits=True)
+                                                              negative_pairs, from_logits=False)
                 #gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
                 y_true = tf.concat((tf.ones_like(positive_pairwise), tf.ones_like(negative_pairs)), axis=0)
                 y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
-                gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
+                gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
                 gnn_loss = gnn_loss * self.gnn_weight
                 loss = gnn_loss
             

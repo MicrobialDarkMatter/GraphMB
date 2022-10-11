@@ -463,6 +463,7 @@ def main():
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
     parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
+    parser.add_argument("--noise", help="Use noise generator", action="store_true")
     parser.add_argument("--vamb", help="Run vamb instead of loading features file", action="store_true")
     parser.add_argument("--savemodel", help="Save best model to disk", action="store_true")
     parser.add_argument("--tsne", help="Plot tsne at checkpoints", action="store_true")
@@ -671,7 +672,7 @@ def main():
             amber_metrics, bin_counts = amber_eval(
                 os.path.join(args.assembly, args.labels), args.outdir + f"/{args.outname}_best_contig2bin.tsv", ["graphmb"]
             )
-        if args.labels is not None:
+        #if args.labels is not None:
             hq = bin_counts["> 90% completeness"][1]
             mq = bin_counts["> 50% completeness"][1]
             amber_metrics["hq"] = hq
@@ -683,8 +684,8 @@ def main():
 
     metrics_names = metrics_per_run[0].keys()
     for mname in metrics_names:
-        values = [m[mname] for m in metrics_per_run]
-        logger.info("### SCG {}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
+        values = [m.get(mname, 0) for m in metrics_per_run]
+        logger.info("### {}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
     hqs = [m["hq"] for m in metrics_per_run]
     mqs = [m["mq"] for m in metrics_per_run]
     logger.info("{:.1f} {:.1f} {:.1f} {:.1f}".format(np.mean(hqs), np.std(hqs), np.mean(mqs), np.std(mqs)))
