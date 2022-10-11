@@ -112,7 +112,8 @@ def compute_clusters_and_stats(
     tsne_path=None,
     max_pos_pairs=None,
     use_labels=False,
-    amber=False
+    amber=False,
+    compute_pospairs=False
 ):
     reference_markers = dataset.ref_marker_sets
     contig_genes = dataset.contig_markers
@@ -121,20 +122,29 @@ def compute_clusters_and_stats(
 
     from vamb.cluster import cluster as vamb_cluster
     if clustering == "vamb":
-        #breakpoint()
+        starttime = datetime.datetime.now()
+        X = X.astype(np.float32)
         cluster_to_contig = {
-            i: c for (i, (n, c)) in enumerate(vamb_cluster(X.astype(np.float32), node_names, cuda=cuda))
+            i: c for (i, (n, c)) in enumerate(vamb_cluster(X, node_names, cuda=cuda))
         }
+        clustering_time = datetime.datetime.now()
+        #print("clustering time", clustering_time-starttime)
         contig_to_bin = {}
-        for b in cluster_to_contig:
-            for contig in cluster_to_contig[b]:
-                contig_to_bin[contig] = b
+        #for b in cluster_to_contig:
+        #    for contig in cluster_to_contig[b]:
+        #        contig_to_bin[contig] = b
+        for k, v in cluster_to_contig.items():
+            contig_to_bin.update({n: k for n in v})
         labels = np.array([contig_to_bin[n] for n in node_names])
-        cluster_to_embs = {
-            c: np.array([X[i] for i, n in enumerate(node_names) if n in cluster_to_contig[c]])
-            for c in cluster_to_contig
-        }
-        cluster_centroids = np.array([cluster_to_embs[c].mean(0) for c in cluster_to_contig])
+        # very slow code:
+        if tsne:
+            cluster_to_embs = {
+                c: np.array([X[i] for i, n in enumerate(node_names) if n in cluster_to_contig[c]])
+                for c in cluster_to_contig
+            }
+            cluster_centroids = np.array([cluster_to_embs[c].mean(0) for c in cluster_to_contig])
+        processing_time = datetime.datetime.now()
+        #print("processing time",  processing_time - clustering_time)
     elif clustering == "kmeansbatch":
         kmeans = MiniBatchKMeans(n_clusters=k, random_state=0, batch_size=2048, verbose=0) #, init=seed_matrix)
         labels = kmeans.fit_predict(X)
@@ -160,10 +170,10 @@ def compute_clusters_and_stats(
         cluster_to_contig = {i: [] for i in range(k)}
         for i in range(len(node_names)):
             cluster_to_contig[labels[i]].append(node_names[i])
-
     scores = {"precision": 0, "recall": 0, "f1": 0, "ari": 0, "hq": 0, "mq": 0,
         "n_clusters": len(np.unique(labels)), "unresolved": 0}
-
+    positive_pairs = []
+    positive_clusters = []
     if contig_genes is not None and len(contig_genes) > 0:
         hq, positive_clusters = compute_hq(
             reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
@@ -176,7 +186,7 @@ def compute_clusters_and_stats(
             comp_th=50,
             cont_th=10,
         )
-        non_comp, _ = compute_hq(
+        """non_comp, _ = compute_hq(
             reference_markers=reference_markers,
             contig_genes=contig_genes,
             node_names=node_names,
@@ -191,20 +201,22 @@ def compute_clusters_and_stats(
             node_labels=labels,
             comp_th=90,
             cont_th=1000,
-        )
+        )"""
         unresolved_mags = compute_unresolved(reference_markers=reference_markers,
             contig_genes=contig_genes,
             node_names=node_names,
             node_labels=labels,
             resolved_clusters=positive_clusters)
         # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
-        positive_pairs = get_positive_pairs(node_names, positive_clusters, cluster_to_contig, max_pos_pairs)
+        positive_pairs = None
+        if compute_pospairs:
+            positive_pairs = get_positive_pairs(node_names, positive_clusters, cluster_to_contig, max_pos_pairs)
         scores["hq"] = hq
         scores["mq"] = mq
         scores["unresolved"] = unresolved_mags
     
     # TODO use p/r/ to get positive_clusters
-    if node_to_gt_idx_label is not None:
+    if node_to_gt_idx_label is not None and len(dataset.labels) > 1:
         p, r, f1, ari = calculate_overall_prf(
             cluster_to_contig, contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )
@@ -238,6 +250,7 @@ def compute_clusters_and_stats(
             node_sizes=None,
             outputname=tsne_path,
         )
+    #print("calc metrics time", datetime.datetime.now() - processing_time)
     return (
         labels,
         scores,
@@ -406,14 +419,15 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
         node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
         dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne,
-        amber="amber" in args.labels #cuda=args.cuda,
+        amber=(args.labels is not None and "amber" in args.labels), cuda=args.cuda,
+        compute_pospairs=False
     )
     
     stats["epoch"] = epoch
     scores.append(stats)
     #logger.info(str(stats))
 
-    log_to_tensorboard(summary_writer, {"hq": stats["hq"], "mq": stats["mq"]}, step)
+    #log_to_tensorboard(summary_writer, {"hq": stats["hq"], "mq": stats["mq"]}, step)
     #all_cluster_labels.append(cluster_labels)
 
     if dataset.contig_markers is not None and stats["hq"] > best_hq:
@@ -448,7 +462,8 @@ def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, 
         tsne_path = os.path.join(args.outdir, f"{args.outname}_tsne_clusters_epoch_{epoch}.png")
         cluster_labels, stats, positive_pairs, hq_bins = compute_clusters_and_stats(
             node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
-            dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=tsne, tsne_path=tsne_path, max_pos_pairs=None #cuda=args.cuda,
+            dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=tsne, tsne_path=tsne_path, max_pos_pairs=None,
+            amber=(args.labels is not None and "amber" in args.labels), #cuda=args.cuda,
         )
     else:
         breakpoint()
@@ -537,7 +552,9 @@ def run_model_vgae(dataset, args, logger, nrun):
     if not args.skip_preclustering:
         cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
                     X[cluster_mask], node_names[cluster_mask],
-                    dataset, clustering=clustering, k=k, tsne=args.tsne, #cuda=args.cuda,
+                    dataset, clustering=clustering, k=k, tsne=args.tsne,
+                    amber=(args.labels is not None and "amber" in args.labels),
+                    #cuda=args.cuda,
                 )
         logger.info(f">>> Pre train stats: {str(stats)}")
 
