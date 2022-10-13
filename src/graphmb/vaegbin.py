@@ -76,8 +76,7 @@ def compute_cluster_score(reference_markers, contig_genes, node_names, node_labe
     return results
 
 
-def compute_hq(reference_markers, contig_genes, node_names, node_labels, comp_th=90, cont_th=5):
-    cluster_stats = compute_cluster_score(reference_markers, contig_genes, node_names, node_labels)
+def compute_hq(cluster_stats, comp_th=90, cont_th=5):
     hq = 0
     positive_clusters = []
     for label in cluster_stats:
@@ -93,7 +92,7 @@ def compute_unresolved(reference_markers, contig_genes, node_names, node_labels,
                                           unresolved_contigs, np.ones(len(unresolved_contigs)))
     contamination = cluster_stats[1]["cont"]
     potential_mags = int(contamination / 100)
-    return potential_mags
+    return potential_mags, unresolved_contigs
 
 def run_kmedoids(X):
     import kmedoids
@@ -113,7 +112,8 @@ def compute_clusters_and_stats(
     max_pos_pairs=None,
     use_labels=False,
     amber=False,
-    compute_pospairs=False
+    compute_pospairs=False,
+    unresolved=True
 ):
     reference_markers = dataset.ref_marker_sets
     contig_genes = dataset.contig_markers
@@ -171,49 +171,37 @@ def compute_clusters_and_stats(
         for i in range(len(node_names)):
             cluster_to_contig[labels[i]].append(node_names[i])
     scores = {"precision": 0, "recall": 0, "f1": 0, "ari": 0, "hq": 0, "mq": 0,
-        "n_clusters": len(np.unique(labels)), "unresolved": 0}
+        "n_clusters": len(np.unique(labels)), "unresolved_mags": 0}
     positive_pairs = []
     positive_clusters = []
     if contig_genes is not None and len(contig_genes) > 0:
-        hq, positive_clusters = compute_hq(
-            reference_markers=reference_markers, contig_genes=contig_genes, node_names=node_names, node_labels=labels
-        )
-        mq, _ = compute_hq(
-            reference_markers=reference_markers,
-            contig_genes=contig_genes,
-            node_names=node_names,
-            node_labels=labels,
-            comp_th=50,
-            cont_th=10,
-        )
-        """non_comp, _ = compute_hq(
-            reference_markers=reference_markers,
-            contig_genes=contig_genes,
-            node_names=node_names,
-            node_labels=labels,
-            comp_th=0,
-            cont_th=10,
-        )
-        all_cont, _ = compute_hq(
-            reference_markers=reference_markers,
-            contig_genes=contig_genes,
-            node_names=node_names,
-            node_labels=labels,
-            comp_th=90,
-            cont_th=1000,
-        )"""
-        unresolved_mags = compute_unresolved(reference_markers=reference_markers,
-            contig_genes=contig_genes,
-            node_names=node_names,
-            node_labels=labels,
-            resolved_clusters=positive_clusters)
+        cluster_stats = compute_cluster_score(reference_markers, contig_genes, node_names, labels)
+        hq, positive_clusters = compute_hq(cluster_stats)
+        mq, _ = compute_hq(cluster_stats, comp_th=50,cont_th=10)
+        """non_comp, _ = compute_hq(cluster_stats, comp_th=0, cont_th=10)
+        all_cont, _ = compute_hq(cluster_stats, comp_th=90, cont_th=1000)
+        """
+        scores["hq"] = hq
+        scores["mq"] = mq
+        #TODO avg comp and cont of hq bins
+        scores["hq_comp"] = np.mean([cluster_stats[c]["comp"] for c in positive_clusters])
+        scores["hq_cont"] = np.mean([cluster_stats[c]["cont"] for c in positive_clusters])
+        
+        if unresolved:
+            unresolved_mags, unresolved_contigs = compute_unresolved(reference_markers=reference_markers,
+                contig_genes=contig_genes,
+                node_names=node_names,
+                node_labels=labels,
+                resolved_clusters=positive_clusters)
+            scores["unresolved_mags"] = unresolved_mags
+            scores["unresolved_contigs"] = len(unresolved_contigs)
+            unresolved_contigs_with_scgs = np.array([n for i,n in enumerate(node_names) \
+                if labels[i] not in positive_clusters and len(dataset.contig_markers[n]) > 0])
+            scores["unresolved_contigs_with_scgs"] = len(unresolved_contigs_with_scgs)
         # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
         positive_pairs = None
         if compute_pospairs:
             positive_pairs = get_positive_pairs(node_names, positive_clusters, cluster_to_contig, max_pos_pairs)
-        scores["hq"] = hq
-        scores["mq"] = mq
-        scores["unresolved"] = unresolved_mags
     
     # TODO use p/r/ to get positive_clusters
     if node_to_gt_idx_label is not None and len(dataset.labels) > 1:
@@ -420,7 +408,7 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
         node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
         dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne,
         amber=(args.labels is not None and "amber" in args.labels), cuda=args.cuda,
-        compute_pospairs=False
+        compute_pospairs=False, unresolved=True
     )
     
     stats["epoch"] = epoch
@@ -554,7 +542,7 @@ def run_model_vgae(dataset, args, logger, nrun):
                     X[cluster_mask], node_names[cluster_mask],
                     dataset, clustering=clustering, k=k, tsne=args.tsne,
                     amber=(args.labels is not None and "amber" in args.labels),
-                    #cuda=args.cuda,
+                    unresolved=True, cuda=args.cuda, 
                 )
         logger.info(f">>> Pre train stats: {str(stats)}")
 
