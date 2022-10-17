@@ -76,6 +76,18 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                         amber=(args.labels is not None and "amber" in args.labels),
                         cuda=args.cuda,
                     )
+            if args.noise and hasattr(dataset, "true_adj_matrix"):
+                # eval edge acc if true adj matrix exists
+                # full adj matrix may be too big to compute, use only indices from true_adj
+                #breakpoint()
+                #row_embs = tf.gather(indices=dataset.true_adj_matrix.col, params=X)
+                #col_embs = tf.gather(indices=dataset.true_adj_matrix.row, params=X)
+                #positive_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1))
+                new_adj = tf.sigmoid(X @ X.transpose())
+                predicted_edges = set([tuple(v) for v in tf.where(new_adj>0.5).numpy()])
+                true_edges = set(zip(dataset.true_adj_matrix.col, dataset.true_adj_matrix.row))
+                correct_edges = predicted_edges & true_edges
+                print(len(correct_edges), len(true_edges), len(predicted_edges))
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:
             stats = {"hq": 0, "epoch":0 }
@@ -197,8 +209,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = gnn_trainer.train_unsupervised(train_idx)
             epoch_metrics = {"Total loss": float(total_loss), "gnn loss": float(gnn_loss),
                                                 "SCG loss": float(diff_loss),
-                                                'GNN  LR': float(gnn_trainer.opt.learning_rate),
+                                                #'GNN  LR': float(gnn_trainer.opt._decayed_lr(float)),
                                                 "pos loss": float(pos_loss), "neg loss": float(neg_loss)}
+            #print(float(gnn_trainer.opt._decayed_lr(float)))
             log_to_tensorboard(summary_writer, epoch_metrics, step)
             mlflow.log_metrics(epoch_metrics, step=step)
             gnn_loss = gnn_loss.numpy()
@@ -242,8 +255,23 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                         node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
                 else:
                     node_new_features = gnn_input_features.numpy()
-
-                
+                if args.noise: mlflow.log_metrics({"avg positive noise": gnn_trainer.positive_noises.numpy().mean(),
+                                                   "avg scg noise": gnn_trainer.scg_noises.numpy().mean()}, step=step)
+                if args.noise and hasattr(dataset, "true_adj_matrix"):
+                    # eval edge acc if true adj matrix exists
+                    # full adj matrix may be too big to compute, use only indices from true_adj
+                    breakpoint()
+                    #row_embs = tf.gather(indices=dataset.true_adj_matrix.col, params=node_new_features)
+                    #col_embs = tf.gather(indices=dataset.true_adj_matrix.row, params=node_new_features)
+                    #positive_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1))
+                    new_adj = tf.sigmoid(node_new_features @ node_new_features.transpose())
+                    predicted_edges = set([tuple(v) for v in tf.where(new_adj>0.5).numpy()])
+                    true_edges = set(zip(dataset.true_adj_matrix.col, dataset.true_adj_matrix.row))
+                    correct_edges = predicted_edges & true_edges
+                    print(len(correct_edges), len(true_edges), len(predicted_edges))
+                    #correct_edges = dataset.true_adj_matrix.indices & 
+                    #pass
+                    
                 weights = (gnn_trainer.encoder.get_weights(), gnn_trainer.gnn_model.get_weights())
                 best_hq, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer,
                                                                     node_new_features, cluster_mask, weights,
@@ -286,7 +314,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
             best_embs, node_names, dataset, clustering=clustering, k=k,
             amber=(args.labels is not None and "amber" in args.labels),
-            #cuda=args.cuda,
+            cuda=args.cuda,
         )
         all_cluster_labels.append(cluster_labels)
         stats["epoch"] = e

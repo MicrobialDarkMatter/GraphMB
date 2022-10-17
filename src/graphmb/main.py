@@ -405,7 +405,7 @@ def main():
     parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of GNN", default=512)
     parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=64)
     parser.add_argument("--embsize_vae", "--zl", type=int, help="Output embedding dimension of VAE", default=64)
-    parser.add_argument("--batchsize", type=int, help="batchsize to train the VAE", default=0)
+    parser.add_argument("--batchsize", type=int, help="batchsize to train the VAE", default=256)
     parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.0)
     parser.add_argument("--dropout_vae", type=float, help="dropout of the VAE", default=0.0)
     parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-4)
@@ -512,7 +512,7 @@ def main():
     sys.excepthook = handle_exception
 
     logger.info(f"Running GraphMB {__version__}")
-    logger.info(args)
+    logger.debug(args)
     # setup cuda and cpu
     logger.info("using cuda: {}".format(str(args.cuda)))
     device = "cuda:0" if args.cuda else "cpu"
@@ -654,6 +654,7 @@ def main():
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
             best_train_embs, metrics = run_model(dataset, args, logger, nrun=n)
+            tf.keras.backend.clear_session()
 
         run_post_processing(
             best_train_embs,

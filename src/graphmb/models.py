@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Activation, Softmax, Embedding, LayerNormalization
 #from tensorflow.keras import Sequential
@@ -245,7 +245,7 @@ class TH:
         self.num_negatives = num_negatives
         self.nlatent = latentdim
         self.decoder_input = decoder_input
-        self.all_different_idx = all_different_idx
+        self.scg_pairs = all_different_idx
         self.all_same_idx = all_same_idx
         
         self.encoder = ae_encoder
@@ -265,7 +265,26 @@ class TH:
         self.use_gnn = use_gnn
         self.use_noise = use_noise
         if self.use_noise:
-            self.noise_weights = tf.Variable(tf.random_normal_initializer()(shape=[1,10], dtype=tf.float32), trainable=True)
+            self.positive_noises = tf.Variable(tf.random_normal_initializer()(shape=self.gnn_model.adj.values.shape, dtype=tf.float32), trainable=True)
+            self.scg_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.scg_pairs.shape[0],), dtype=tf.float32), trainable=True)
+
+    def sample_negatives(self):
+        neg_idx = tf.random.uniform(
+            shape=(self.num_negatives * len(self.gnn_model.adj.indices),),
+            minval=0,
+            maxval=self.adj_shape[0] * self.adj_shape[1] - 1,
+            dtype=tf.int64,
+        )
+        neg_idx_row = tf.math.minimum(
+            tf.cast(self.adj_shape[0] - 1, tf.float32),
+            tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32),
+        )
+        neg_idx_row = tf.cast(neg_idx_row, tf.int64) #[:, None]
+        neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)#[
+        #    :, None
+        #]
+        #neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
+        return neg_idx_row, neg_idx_col
 
     @tf.function
     def train_unsupervised(self, idx, training=True):
@@ -288,79 +307,56 @@ class TH:
             else:
                 node_hat = ae_embs
             gnn_loss = tf.constant(0, dtype=tf.float32)
-            if not self.no_gnn:
-                row_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 0], params=node_hat)
-                col_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 1], params=node_hat)
-                positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
+            #breakpoint()
+            row_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 0], params=node_hat)
+            col_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 1], params=node_hat)
+            positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
 
-                # create random negatives for gnn_loss
-                neg_idx = tf.random.uniform(
-                    shape=(self.num_negatives * len(self.gnn_model.adj.indices),),
-                    minval=0,
-                    maxval=self.adj_shape[0] * self.adj_shape[1] - 1,
-                    dtype=tf.int64,
-                )
-                neg_idx_row = tf.math.minimum(
-                    tf.cast(self.adj_shape[0] - 1, tf.float32),
-                    tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32),
-                )
-                neg_idx_row = tf.cast(neg_idx_row, tf.int64) #[:, None]
-                neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)#[
-                #    :, None
-                #]
-                neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
-                try:
-                    #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
-                    neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
-                    neg_col_embs = tf.gather(indices=neg_idx_col, params=node_hat)
-                    negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
-                except:
-                    breakpoint()
-                if self.use_noise:
-                    #breakpoint()
-                    weights = Softmax()(self.noise_weights)
-                    positive_noise = tf.random.normal(positive_pairwise.shape.concatenate(weights.shape[1]), mean=0, stddev=1) * weights
-                    positive_noise = tf.math.reduce_sum(positive_noise, axis=1)
-                    negative_noise = tf.random.normal(negative_pairs.shape.concatenate(1), mean=0, stddev=1) * weights
-                    negative_noise = tf.math.reduce_sum(negative_noise, axis=1)
-                    positive_y = tf.ones_like(positive_pairwise)
-                    positive_pairwise = tf.clip_by_value(tf.nn.sigmoid(positive_pairwise) + positive_noise, 0, 1)
-                    negative_y = tf.zeros_like(negative_pairs)
-                    negative_pairs = tf.clip_by_value(tf.nn.sigmoid(negative_pairs) + negative_noise, 0, 1) 
-                else:
-                    positive_y = tf.ones_like(positive_pairwise)
-                    negative_y = tf.zeros_like(negative_pairs)
-                    positive_pairwise = tf.nn.sigmoid(positive_pairwise)
-                    negative_pairs = tf.nn.sigmoid(negative_pairs)
-                pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
-                                                               positive_pairwise, from_logits=False)
+            # create random negatives for gnn_loss
+            neg_idx_row, neg_idx_col = self.sample_negatives()
+            try:
+                #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
+                neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
+                neg_col_embs = tf.gather(indices=neg_idx_col, params=node_hat)
+                negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
+            except:
+                breakpoint()
+            positive_y = tf.ones_like(positive_pairwise)
+            negative_y = tf.zeros_like(negative_pairs)
+            positive_pairwise = tf.nn.sigmoid(positive_pairwise)
+            negative_pairs = tf.nn.sigmoid(negative_pairs)
+            if self.use_noise:
+                positive_pairwise = tf.clip_by_value(tf.nn.sigmoid(positive_pairwise) + self.positive_noises, 0, 1)
+            pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
+                                                            positive_pairwise, from_logits=False)
+            if self.num_negatives > 0:
                 neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
-                                                              negative_pairs, from_logits=False)
-                #gnn_loss = 0.5 * (pos_loss + neg_loss) * self.gnn_weight
-                y_true = tf.concat((tf.ones_like(positive_pairwise), tf.ones_like(negative_pairs)), axis=0)
-                y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
-                gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
-                gnn_loss = gnn_loss * self.gnn_weight
-                loss = gnn_loss
+                                                            negative_pairs, from_logits=False)
+            else:
+                neg_loss = 0
+            #gnn_loss = (pos_loss + neg_loss) * self.gnn_weight
+            #neg_loss = 0
+            y_true = tf.concat((tf.ones_like(positive_pairwise), tf.zeros_like(negative_pairs)), axis=0)
+            y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
+            gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
+            gnn_loss = gnn_loss * self.gnn_weight
+            #loss = gnn_loss
             
             # SCG loss
             scg_loss = tf.constant(0, dtype=tf.float32)
-            #if self.all_different_idx is not None and self.scg_weight > 0:
-            #    ns1 = tf.gather(node_hat, self.all_different_idx[:, 0])
-            #    ns2 = tf.gather(node_hat, self.all_different_idx[:, 1])
-            #    all_diff_pairs = tf.math.exp(-0.5 * tf.reduce_sum((ns1 - ns2) ** 2, axis=-1))
-            #    scg_loss = tf.reduce_mean(all_diff_pairs) * self.scg_weight
-            #    loss += scg_loss
-
-            # scg loss alt
-            if self.all_different_idx is not None and self.scg_weight > 0:
-                scg_row_embs = tf.gather(node_hat, self.all_different_idx[:, 0])
-                scg_col_embs = tf.gather(node_hat, self.all_different_idx[:, 1])
-                scg_pairwise = tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1)
+            if self.scg_pairs is not None and self.scg_weight > 0:
+                scg_row_embs = tf.gather(node_hat, self.scg_pairs[:, 0])
+                scg_col_embs = tf.gather(node_hat, self.scg_pairs[:, 1])
+                scg_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1))
+                if self.use_noise:
+                    scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1) + self.scg_noises
                 scg_loss = tf.keras.losses.binary_crossentropy(
-                        tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=True
+                        tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=False
                 )
-                loss += scg_loss
+                gnn_loss += scg_loss #* self.scg_weight
+            if self.use_noise:
+                gnn_loss += 1*(tf.reduce_sum(self.positive_noises ** 2) + tf.reduce_sum(self.scg_noises ** 2))
+        loss = gnn_loss
         if training:
             if self.use_gnn:
                 tw = self.gnn_model.trainable_weights
@@ -371,7 +367,7 @@ class TH:
                 self.encoder.layers[0].layers[logvar_idx].trainable = True
             if self.use_noise:
                 #breakpoint()
-                tw += [self.noise_weights]
+                tw += [self.positive_noises, self.scg_noises]
             grads = tape.gradient(loss, tw)
             self.opt.apply_gradients(zip(grads, tw))
         return loss, gnn_loss, scg_loss, pos_loss, neg_loss
@@ -410,9 +406,9 @@ class TH:
             gnn_loss = tf.constant(0, dtype=tf.float32)
             # SCG loss
             scg_loss = tf.constant(0, dtype=tf.float32)
-            if self.all_different_idx is not None and self.scg_weight > 0:
-                ns1 = tf.gather(z_sample, self.all_different_idx[:, 0])
-                ns2 = tf.gather(z_sample, self.all_different_idx[:, 1])
+            if self.scg_pairs is not None and self.scg_weight > 0:
+                ns1 = tf.gather(z_sample, self.scg_pairs[:, 0])
+                ns2 = tf.gather(z_sample, self.scg_pairs[:, 1])
                 all_diff_pairs = tf.math.exp(-0.5 * tf.reduce_sum((ns1 - ns2) ** 2, axis=-1))
                 scg_loss = tf.reduce_mean(all_diff_pairs) * self.scg_weight
                 loss += scg_loss
