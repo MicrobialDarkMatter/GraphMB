@@ -206,7 +206,15 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
 
             # train GNN ################################################
             gnn_trainer.encoder = vae_trainer.encoder
-            total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = gnn_trainer.train_unsupervised(train_idx)
+            edges_idx = np.arange(gnn_model.adj.indices.shape[0])
+            np.random.shuffle(edges_idx)
+            n_batches = len(edges_idx)//batch_size
+            if n_batches < len(edges_idx)/batch_size:
+                n_batches += 1 # add final batch
+            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
+            for b in pbar_gnnbatch:
+                batch_idx = edges_idx[b*batch_size:(b+1)*batch_size]
+                total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = gnn_trainer.train_unsupervised(edges_idx=edges_idx, nodes_idx=train_idx)
             epoch_metrics = {"Total loss": float(total_loss), "gnn loss": float(gnn_loss),
                                                 "SCG loss": float(diff_loss),
                                                 #'GNN  LR': float(gnn_trainer.opt._decayed_lr(float)),

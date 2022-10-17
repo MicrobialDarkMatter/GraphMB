@@ -268,9 +268,9 @@ class TH:
             self.positive_noises = tf.Variable(tf.random_normal_initializer()(shape=self.gnn_model.adj.values.shape, dtype=tf.float32), trainable=True)
             self.scg_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.scg_pairs.shape[0],), dtype=tf.float32), trainable=True)
 
-    def sample_negatives(self):
+    def sample_negatives(self, edge_idx):
         neg_idx = tf.random.uniform(
-            shape=(self.num_negatives * len(self.gnn_model.adj.indices),),
+            shape=[len(edge_idx)*self.num_negatives,],
             minval=0,
             maxval=self.adj_shape[0] * self.adj_shape[1] - 1,
             dtype=tf.int64,
@@ -287,7 +287,11 @@ class TH:
         return neg_idx_row, neg_idx_col
 
     @tf.function
-    def train_unsupervised(self, idx, training=True):
+    def train_unsupervised(self, nodes_idx, edges_idx=None, scgs_idx=None, training=True):
+        if edges_idx is None:
+            edges_idx = range(0,self.gnn_model.adj.indices.shape[0])
+        if scgs_idx is None:
+            scgs_idx = range(0, len(self.scg_pairs))
         with tf.GradientTape() as tape:
             # run encoder first
             if self.use_ae:
@@ -303,17 +307,19 @@ class TH:
 
             # run gnn model
             if self.use_gnn:
-                node_hat = self.gnn_model(ae_embs, idx)
+                node_hat = self.gnn_model(ae_embs, nodes_idx)
             else:
                 node_hat = ae_embs
             gnn_loss = tf.constant(0, dtype=tf.float32)
             #breakpoint()
-            row_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 0], params=node_hat)
-            col_embs = tf.gather(indices=self.gnn_model.adj.indices[:, 1], params=node_hat)
+            train_rows = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,0])
+            row_embs = tf.gather(indices=train_rows, params=node_hat)
+            train_cols = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,1])
+            col_embs = tf.gather(indices=train_cols, params=node_hat)
             positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
 
             # create random negatives for gnn_loss
-            neg_idx_row, neg_idx_col = self.sample_negatives()
+            neg_idx_row, neg_idx_col = self.sample_negatives(edges_idx)
             try:
                 #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
                 neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
@@ -345,8 +351,8 @@ class TH:
             # SCG loss
             scg_loss = tf.constant(0, dtype=tf.float32)
             if self.scg_pairs is not None and self.scg_weight > 0:
-                scg_row_embs = tf.gather(node_hat, self.scg_pairs[:, 0])
-                scg_col_embs = tf.gather(node_hat, self.scg_pairs[:, 1])
+                scg_row_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 0])
+                scg_col_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 1])
                 scg_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1))
                 if self.use_noise:
                     scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1) + self.scg_noises
@@ -371,6 +377,7 @@ class TH:
             grads = tape.gradient(loss, tw)
             self.opt.apply_gradients(zip(grads, tw))
         return loss, gnn_loss, scg_loss, pos_loss, neg_loss
+    
     
     @tf.function
     def ae_loss(self, x, x_hat, mu, logvar, vae, training=True, writer=None, epoch=0):
