@@ -17,7 +17,7 @@ import scipy
 import random
 #import tensorflow
 
-from graphmb.evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets, calculate_overall_prf
+from graphmb.evaluate import read_contig_genes, read_marker_gene_sets, evaluate_contig_sets, calculate_overall_prf, calculate_sim_between_same_labels
 
 # import torch
 
@@ -789,7 +789,8 @@ def cluster_eval(
         #    dataset.label_to_node,
         #   contig_sizes={dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))},
         # )
-        calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
+        #calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
+        calculate_sim_between_same_labels(dataset.node_names, embeds, dataset.node_to_label, dataset.label_to_node)
     if dataset.ref_marker_sets is not None:
         results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
         metrics = calculate_bin_metrics(results)

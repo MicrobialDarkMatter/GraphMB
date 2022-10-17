@@ -19,7 +19,7 @@ from scipy.sparse import coo_matrix, diags
 
 from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder, VGAE
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim, get_cluster_mask, write_bins
-from graphmb.evaluate import calculate_overall_prf
+from graphmb.evaluate import calculate_overall_prf, calculate_sim_between_same_labels
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
 
@@ -100,6 +100,62 @@ def run_kmedoids(X):
     #D = tf.math.sum((X[:,None]-X[None])**2, axis=-1)
     D = 0.5 - tf.math.multiply(X, X)
 
+
+def run_clustering(X, node_names, clustering_algo, cuda, tsne=False):
+    
+    if clustering_algo == "vamb":
+        from vamb.cluster import cluster as vamb_cluster
+        starttime = datetime.datetime.now()
+        X = X.astype(np.float32)
+        cluster_to_contig = {
+            i: c for (i, (n, c)) in enumerate(vamb_cluster(X, node_names, cuda=cuda))
+        }
+        clustering_time = datetime.datetime.now()
+        #print("clustering time", clustering_time-starttime)
+        contig_to_bin = {}
+        #for b in cluster_to_contig:
+        #    for contig in cluster_to_contig[b]:
+        #        contig_to_bin[contig] = b
+        for k, v in cluster_to_contig.items():
+            contig_to_bin.update({n: k for n in v})
+        labels = np.array([contig_to_bin[n] for n in node_names])
+        # very slow code:
+        cluster_centroids = None
+        if tsne:
+            cluster_to_embs = {
+                c: np.array([X[i] for i, n in enumerate(node_names) if n in cluster_to_contig[c]])
+                for c in cluster_to_contig
+            }
+            cluster_centroids = np.array([cluster_to_embs[c].mean(0) for c in cluster_to_contig])
+        processing_time = datetime.datetime.now()
+        #print("processing time",  processing_time - clustering_time)
+    elif clustering_algo == "kmeansbatch":
+        kmeans = MiniBatchKMeans(n_clusters=k, random_state=0, batch_size=2048, verbose=0) #, init=seed_matrix)
+        labels = kmeans.fit_predict(X)
+        contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
+        cluster_to_contig = {i: [] for i in range(k)}
+        for i in range(len(node_names)):
+            cluster_to_contig[labels[i]].append(node_names[i])
+        #cluster_centroids = kmeans.cluster_centers_
+    elif clustering_algo == "kmeansgpu":
+        pass
+    elif clustering_algo == "kmedoids":
+        import kmedoids
+        breakpoint()
+        # TODO do this on gpu if avail
+        D = np.sum((X[:,None]-X[None])**2, axis=-1)
+        # TODO find best k
+        km = kmedoids.KMedoids(20, method='fasterpam')
+        cluster_labels = km.fit_predict(D).astype(np.int64)
+    elif clustering_algo == "kmeans":
+        clf = KMeans(k, random_state=1234)
+        labels = clf.fit_predict(X)
+        contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
+        cluster_to_contig = {i: [] for i in range(k)}
+        for i in range(len(node_names)):
+            cluster_to_contig[labels[i]].append(node_names[i])
+    return cluster_to_contig, contig_to_bin, labels, cluster_centroids
+
 def compute_clusters_and_stats(
     X,
     node_names,
@@ -120,56 +176,8 @@ def compute_clusters_and_stats(
     node_to_gt_idx_label = dataset.node_to_label
     gt_idx_label_to_node = dataset.label_to_node
 
-    from vamb.cluster import cluster as vamb_cluster
-    if clustering == "vamb":
-        starttime = datetime.datetime.now()
-        X = X.astype(np.float32)
-        cluster_to_contig = {
-            i: c for (i, (n, c)) in enumerate(vamb_cluster(X, node_names, cuda=cuda))
-        }
-        clustering_time = datetime.datetime.now()
-        #print("clustering time", clustering_time-starttime)
-        contig_to_bin = {}
-        #for b in cluster_to_contig:
-        #    for contig in cluster_to_contig[b]:
-        #        contig_to_bin[contig] = b
-        for k, v in cluster_to_contig.items():
-            contig_to_bin.update({n: k for n in v})
-        labels = np.array([contig_to_bin[n] for n in node_names])
-        # very slow code:
-        if tsne:
-            cluster_to_embs = {
-                c: np.array([X[i] for i, n in enumerate(node_names) if n in cluster_to_contig[c]])
-                for c in cluster_to_contig
-            }
-            cluster_centroids = np.array([cluster_to_embs[c].mean(0) for c in cluster_to_contig])
-        processing_time = datetime.datetime.now()
-        #print("processing time",  processing_time - clustering_time)
-    elif clustering == "kmeansbatch":
-        kmeans = MiniBatchKMeans(n_clusters=k, random_state=0, batch_size=2048, verbose=0) #, init=seed_matrix)
-        labels = kmeans.fit_predict(X)
-        contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
-        cluster_to_contig = {i: [] for i in range(k)}
-        for i in range(len(node_names)):
-            cluster_to_contig[labels[i]].append(node_names[i])
-        #cluster_centroids = kmeans.cluster_centers_
-    elif clustering == "kmeansgpu":
-        pass
-    elif clustering == "kmedoids":
-        import kmedoids
-        breakpoint()
-        # TODO do this on gpu if avail
-        D = np.sum((X[:,None]-X[None])**2, axis=-1)
-        # TODO find best k
-        km = kmedoids.KMedoids(20, method='fasterpam')
-        cluster_labels = km.fit_predict(D).astype(np.int64)
-    elif clustering == "kmeans":
-        clf = KMeans(k, random_state=1234)
-        labels = clf.fit_predict(X)
-        contig_to_bin = {node_names[i]: labels[i] for i in range(len(node_names))}
-        cluster_to_contig = {i: [] for i in range(k)}
-        for i in range(len(node_names)):
-            cluster_to_contig[labels[i]].append(node_names[i])
+    cluster_to_contig, contig_to_bin, labels, cluster_centroids = run_clustering(X, dataset.node_names, clustering, cuda)
+   
     scores = {"precision": 0, "recall": 0, "f1": 0, "ari": 0, "hq": 0, "mq": 0,
         "n_clusters": len(np.unique(labels)), "unresolved_mags": 0}
     positive_pairs = []
@@ -205,13 +213,14 @@ def compute_clusters_and_stats(
     
     # TODO use p/r/ to get positive_clusters
     if node_to_gt_idx_label is not None and len(dataset.labels) > 1:
-        p, r, f1, ari = calculate_overall_prf(
+        scores["avg_cluster_sim"] = calculate_sim_between_same_labels(dataset.node_names, X, dataset.node_to_label, dataset.label_to_node)
+        """p, r, f1, ari = calculate_overall_prf(
             cluster_to_contig, contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )
         scores["precision"] = p
         scores["recall"] = r
         scores["f1"] = f1
-        scores["ari"] = ari
+        scores["ari"] = ari"""
 
     if amber == True:
         from amber_eval import amber_eval

@@ -2,6 +2,7 @@ import sys
 import ast
 import numpy as np
 import scipy
+from sklearn.metrics.pairwise import cosine_similarity
 
 # code to run evaluation based on lineage.ms file (Bacteria) and marker_gene_stats.txt file
 
@@ -13,7 +14,7 @@ def getPrecision(mat, k, s, total):
         for j in range(s):
             if mat[i][j] > max_s:
                 max_s = mat[i][j]
-        sum_k += max_s
+        sum_k += max_s  
     return sum_k / total
 
 
@@ -79,11 +80,28 @@ def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, l
     my_recall = getRecall(
         bins_species, n_pred_labels, n_true_labels, total_binned, (ground_truth_count - total_binned)
     )
-    my_ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
+    #my_ari = getARI(bins_species, n_pred_labels, n_true_labels, total_binned)
     my_f1 = getF1(my_precision, my_recall)
     #print("### Evaluation {} cluster/{} labels:".format(n_pred_labels, n_true_labels))
     #print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (my_precision, my_recall, my_f1, my_ari))
-    return my_precision, my_recall, my_f1, my_ari
+    return my_precision, my_recall, my_f1, 0
+
+def calculate_sim_between_same_labels(node_names, embeddings, node_to_label, label_to_node):
+    # divide sim between node of same label by avg sim between all nodes
+    avg_label_sims = {}
+    all_cosine_sim = cosine_similarity(embeddings, embeddings)
+    all_cosine_sim = np.triu(all_cosine_sim)
+    all_cosine_sim = all_cosine_sim.mean()
+    for l in label_to_node:
+        label_node_idxs = [node_names.index(n) for n in label_to_node[l]]
+        label_embs = np.array(embeddings)[label_node_idxs]
+        if label_embs.shape[0] > 1: # at least two nodes
+            avg_label_sims[l] = (np.triu(cosine_similarity(label_embs, label_embs))/ all_cosine_sim).mean()
+        # pick a random 
+    avg = sum(avg_label_sims.values())/len(avg_label_sims.values())       
+    print(round(avg, 4), round(all_cosine_sim, 4))
+          #[(x, round(avg_label_sims[x], 4), len(label_to_node[x])) for x in avg_label_sims][:10]])
+    return avg
 
 
 def read_marker_gene_sets(lineage_file):
