@@ -332,7 +332,8 @@ class TH:
             positive_pairwise = tf.nn.sigmoid(positive_pairwise)
             negative_pairs = tf.nn.sigmoid(negative_pairs)
             if self.use_noise:
-                positive_pairwise = tf.clip_by_value(tf.nn.sigmoid(positive_pairwise) + self.positive_noises, 0, 1)
+                positive_pairwise = tf.nn.sigmoid(positive_pairwise) + tf.gather(indices=edges_idx, params=self.positive_noises)
+                positive_pairwise = tf.clip_by_value(positive_pairwise, 0, 1)
             pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
                                                             positive_pairwise, from_logits=False)
             if self.num_negatives > 0:
@@ -355,7 +356,8 @@ class TH:
                 scg_col_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 1])
                 scg_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1))
                 if self.use_noise:
-                    scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1) + self.scg_noises
+                    scg_pairwise = scg_pairwise + tf.gather(indices=scgs_idx, params=self.scg_noises)
+                    scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1) 
                 scg_loss = tf.keras.losses.binary_crossentropy(
                         tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=False
                 )
