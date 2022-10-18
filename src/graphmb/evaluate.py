@@ -96,12 +96,12 @@ def calculate_sim_between_same_labels(node_names, embeddings, node_to_label, lab
         label_node_idxs = [node_names.index(n) for n in label_to_node[l]]
         label_embs = np.array(embeddings)[label_node_idxs]
         if label_embs.shape[0] > 1: # at least two nodes
-            avg_label_sims[l] = (np.triu(cosine_similarity(label_embs, label_embs))/ all_cosine_sim).mean()
+            avg_label_sims[l] = (np.triu(cosine_similarity(label_embs, label_embs))).mean()
         # pick a random 
-    avg = sum(avg_label_sims.values())/len(avg_label_sims.values())       
+    avg = sum(avg_label_sims.values())/len(avg_label_sims.values())      
     print(round(avg, 4), round(all_cosine_sim, 4))
           #[(x, round(avg_label_sims[x], 4), len(label_to_node[x])) for x in avg_label_sims][:10]])
-    return avg
+    return avg, all_cosine_sim
 
 
 def read_marker_gene_sets(lineage_file):

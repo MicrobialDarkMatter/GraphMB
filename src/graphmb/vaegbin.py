@@ -213,7 +213,9 @@ def compute_clusters_and_stats(
     
     # TODO use p/r/ to get positive_clusters
     if node_to_gt_idx_label is not None and len(dataset.labels) > 1:
-        scores["avg_cluster_sim"] = calculate_sim_between_same_labels(dataset.node_names, X, dataset.node_to_label, dataset.label_to_node)
+        scores["avg_cluster_sim"], scores["avg_total_sim"] = calculate_sim_between_same_labels(dataset.node_names, X,
+                                                                                               dataset.node_to_label,
+                                                                                               dataset.label_to_node)
         """p, r, f1, ari = calculate_overall_prf(
             cluster_to_contig, contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )
