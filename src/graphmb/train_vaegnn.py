@@ -169,9 +169,11 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             logger.info("**** initial batch size: {} ****".format(batch_size))
         batch_steps = [25, 75, 150, 300]
         batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
+        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
         
         vae_losses = []
+        gnn_losses = []
         step = 0
         for e in pbar_epoch:
             vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
@@ -179,9 +181,10 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             recon_loss = 0
 
             # train VAE in batches
-            if e in batch_steps:
+            #if e in batch_steps:
                 #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
-                batch_size = batch_size * 2
+                #batch_size = batch_size * 2
+
 
             # train VAE ########
             np.random.shuffle(train_idx)
@@ -191,29 +194,37 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
-                vae_losses = vae_trainer.train_step(X[batch_idx], summary_writer, step, vae=True)
-                vae_epoch_losses["vae_loss"].append(vae_losses[0])
-                vae_epoch_losses["kmer_loss"].append(vae_losses[1])
-                vae_epoch_losses["ab_loss"].append(vae_losses[2])
-                vae_epoch_losses["kld_loss"].append(vae_losses[3])
+                batch_vae_losses = vae_trainer.train_step(X[batch_idx], summary_writer, step, vae=True)
+                vae_epoch_losses["vae_loss"].append(batch_vae_losses[0])
+                vae_epoch_losses["kmer_loss"].append(batch_vae_losses[1])
+                vae_epoch_losses["ab_loss"].append(batch_vae_losses[2])
+                vae_epoch_losses["kld_loss"].append(batch_vae_losses[3])
                 pbar_vaebatch.set_description(f'E={e} L={np.mean(vae_epoch_losses["vae_loss"][-10:]):.4f}')
                 step += 1
             vae_epoch_losses = {k: np.mean(v) for k, v in vae_epoch_losses.items()}
+            vae_losses.append(vae_epoch_losses["vae_loss"])
             log_to_tensorboard(summary_writer, vae_epoch_losses, step)
             mlflow.log_metrics(vae_epoch_losses, step=step)
             recon_loss = np.mean(vae_epoch_losses["vae_loss"])
+            # update batch size
+            if len(vae_losses) > 20 and sum(recon_loss < np.array(vae_losses[-20:-1])) < 5 and batch_size*2 < len(train_idx):
+                batch_size *= 2
+                print("duplicate batch size", e, batch_size, recon_loss, vae_losses[-5:])
+                vae_losses = []
             ############################################################
 
             # train GNN ################################################
             gnn_trainer.encoder = vae_trainer.encoder
             edges_idx = np.arange(gnn_model.adj.indices.shape[0])
             np.random.shuffle(edges_idx)
-            n_batches = len(edges_idx)//batch_size
-            if n_batches < len(edges_idx)/batch_size:
+            #graph_batch_size = batch_size
+            graph_batch_size = len(edges_idx)
+            n_batches = len(edges_idx)//graph_batch_size
+            if n_batches < len(edges_idx)/graph_batch_size:
                 n_batches += 1 # add final batch
-            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
+            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or graph_batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_gnnbatch:
-                batch_idx = edges_idx[b*batch_size:(b+1)*batch_size]
+                batch_idx = edges_idx[b*graph_batch_size:(b+1)*graph_batch_size]
                 total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = gnn_trainer.train_unsupervised(edges_idx=edges_idx, nodes_idx=train_idx)
             epoch_metrics = {"Total loss": float(total_loss), "gnn loss": float(gnn_loss),
                                                 "SCG loss": float(diff_loss),
