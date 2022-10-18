@@ -99,7 +99,7 @@ def calculate_sim_between_same_labels(node_names, embeddings, node_to_label, lab
             avg_label_sims[l] = (np.triu(cosine_similarity(label_embs, label_embs))).mean()
         # pick a random 
     avg = sum(avg_label_sims.values())/len(avg_label_sims.values())      
-    print(round(avg, 4), round(all_cosine_sim, 4))
+    #print(round(avg, 4), round(all_cosine_sim, 4))
           #[(x, round(avg_label_sims[x], 4), len(label_to_node[x])) for x in avg_label_sims][:10]])
     return avg, all_cosine_sim
 
