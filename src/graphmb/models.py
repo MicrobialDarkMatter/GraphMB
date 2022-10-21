@@ -28,7 +28,7 @@ class VAEEncoder(Model):
             x = LeakyReLU(0.01)(x)
             if dropout > 0:
                 x = Dropout(dropout)(x)
-            x = BatchNormalization()(x)
+            #x = BatchNormalization()(x)
         mu = Dense(zdim, name="mu")(x)
         logvar = Dense(zdim, kernel_initializer='zeros', name="logvar")(x)
         self.model = Model(in_, [mu, logvar])
@@ -51,7 +51,7 @@ class VAEDecoder(Model):
             x = LeakyReLU(0.01)(x)
             if dropout > 0:
                 x = Dropout(dropout)(x)
-            x = BatchNormalization()(x)
+            #x = BatchNormalization()(x)
             
         x1 = Dense(abundance_dim)(x)
         x2 = Dense(kmers_dim)(x)
@@ -93,12 +93,13 @@ class LabelClassifier(Model):
 class TrainHelperVAE:
     def __init__(self, encoder, decoder, learning_rate=1e-3,  kld_weight=1/200.,
                 train_weights=False, classification=False, n_classes=0,
-                gold_labels=None, mask_labels=0.0):
+                gold_labels=None, mask_labels=0.0, ae_alpha=1):
         self.encoder = encoder
         self.decoder = decoder
         self.train_weights = train_weights
         self.abundance_dim = self.encoder.abundance_dim
         self.kmers_dim = self.encoder.kmers_dim
+        self.ae_alpha = ae_alpha
         if train_weights:
             #self.kld_weight = tf.Variable(kld_weight)
             self.kld_weight = kld_weight
@@ -180,7 +181,7 @@ class TrainHelperVAE:
                                                writer=writer, epoch=epoch,
                                                gold_labels=gold_labels)
             loss = mse1 + mse2 - kld + predl
-
+            loss *= self.ae_alpha
         tw = self.encoder.trainable_weights + self.decoder.trainable_weights 
         if self.train_weights:
             tw += [self.kmer_weight] # self.kld_weight
@@ -265,8 +266,10 @@ class TH:
         self.use_gnn = use_gnn
         self.use_noise = use_noise
         if self.use_noise:
-            self.positive_noises = tf.Variable(tf.random_normal_initializer()(shape=self.gnn_model.adj.values.shape, dtype=tf.float32), trainable=True)
-            self.scg_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.scg_pairs.shape[0],), dtype=tf.float32), trainable=True)
+            noise_units = 1
+            self.positive_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.gnn_model.adj.values.shape + noise_units), dtype=tf.float32), trainable=True)
+            self.scg_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.scg_pairs.shape[0], noise_units), dtype=tf.float32), trainable=True)
+            self.noise_weights = tf.Variable(tf.random_normal_initializer()(shape=(noise_units,), dtype=tf.float32), trainable=True)
 
     def sample_negatives(self, edge_idx):
         neg_idx = tf.random.uniform(
@@ -332,7 +335,10 @@ class TH:
             positive_pairwise = tf.nn.sigmoid(positive_pairwise)
             negative_pairs = tf.nn.sigmoid(negative_pairs)
             if self.use_noise:
-                positive_pairwise = tf.nn.sigmoid(positive_pairwise) + tf.gather(indices=edges_idx, params=self.positive_noises)
+                # reduce noises to one dim
+                noises_weights = Softmax()(self.noise_weights)[:, None]
+                noises = tf.matmul(tf.gather(indices=edges_idx, params=self.positive_noises), noises_weights)
+                positive_pairwise = tf.nn.sigmoid(positive_pairwise) + noises[:,0]
                 positive_pairwise = tf.clip_by_value(positive_pairwise, 0, 1)
             pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
                                                             positive_pairwise, from_logits=False)
@@ -356,7 +362,8 @@ class TH:
                 scg_col_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 1])
                 scg_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1))
                 if self.use_noise:
-                    scg_pairwise = scg_pairwise + tf.gather(indices=scgs_idx, params=self.scg_noises)
+                    scg_noises = tf.matmul(tf.gather(indices=scgs_idx, params=self.scg_noises), noises_weights)
+                    scg_pairwise = scg_pairwise + scg_noises[:,0]
                     scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1) 
                 scg_loss = tf.keras.losses.binary_crossentropy(
                         tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=False
@@ -364,6 +371,7 @@ class TH:
                 gnn_loss += scg_loss #* self.scg_weight
             if self.use_noise:
                 gnn_loss += 1*(tf.reduce_sum(self.positive_noises ** 2) + tf.reduce_sum(self.scg_noises ** 2))
+
         loss = gnn_loss
         if training:
             if self.use_gnn:
