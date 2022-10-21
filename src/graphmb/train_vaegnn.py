@@ -127,7 +127,8 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                              hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
         decoder = VAEDecoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
                              hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
-        vae_trainer = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae, kld_weight=1/args.kld_alpha)
+        vae_trainer = TrainHelperVAE(encoder, decoder, learning_rate=lr_vae,
+                                     kld_weight=1/args.kld_alpha, ae_alpha=args.ae_alpha)
         gnn_trainer = TH(
             features,
             gnn_model=gnn_model,
@@ -178,7 +179,6 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
         step = 0
         for e in pbar_epoch:
             vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
-            np.random.shuffle(train_idx)
             recon_loss = 0
 
             # train VAE in batches
@@ -220,7 +220,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             gnn_trainer.encoder = vae_trainer.encoder
             edges_idx = np.arange(gnn_model.adj.indices.shape[0])
             np.random.shuffle(edges_idx)
-            #graph_batch_size = batch_size
+            #graph_batch_size = 256
             graph_batch_size = len(edges_idx)
             n_batches = len(edges_idx)//graph_batch_size
             if n_batches < len(edges_idx)/graph_batch_size:
@@ -270,6 +270,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                 #gnn_input_features = tf.concat((features[:,:dataset.node_depths.shape[1]],
                 #                                gnn_trainer.encoder(features)[0]), axis=1)
                 gnn_input_features = gnn_trainer.encoder(features)[0]
+                logger.debug(str(gnn_input_features[0][:5].numpy()))
                 if use_gnn:
                     node_new_features = gnn_trainer.gnn_model(gnn_input_features, None, training=False)
                     node_new_features = node_new_features.numpy()

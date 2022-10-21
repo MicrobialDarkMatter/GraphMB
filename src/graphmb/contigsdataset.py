@@ -88,6 +88,7 @@ class AssemblyDataset:
         self.label_to_node = {}
         
         self.contig_markers = {}
+        self.ref_marker_sets = {}
 
     def read_assembly(self):
         """Read assembly files, convert to numpy arrays and save to disk"""
@@ -209,6 +210,8 @@ class AssemblyDataset:
         self.node_to_label = np.load("{}/node_to_label.npy".format(self.cache_dir), allow_pickle=True)[()]
         self.label_to_node = np.load("{}/label_to_node.npy".format(self.cache_dir), allow_pickle=True)[()]
         self.labels = list(np.load("{}/labels.npy".format(self.cache_dir)))
+        if os.path.exists(prefix.format("true_adj_sparse.npz")):
+            self.true_adj_matrix = scipy.sparse.load_npz(prefix.format("true_adj_sparse.npz"))
 
     def check_cache(self, require_graph=True):
         """check if all necessary files exist in cache"""
@@ -504,7 +507,8 @@ class AssemblyDataset:
             if self.node_to_label[self.node_names[u]] == self.node_to_label[self.node_names[v]]:
                 positive_edges += 1
         self.logger.info(
-            f"homophily: {round(positive_edges / (len(self.edge_weights) - edges_without_label),4)} {len(self.edge_weights) - edges_without_label}"
+            f"""homophily: {round(positive_edges / (len(self.edge_weights) - edges_without_label),4)} on
+            {len(self.edge_weights) - edges_without_label} edges between labeled nodes"""
         )
 
     def read_scgs(self):
@@ -723,12 +727,15 @@ class AssemblyDataset:
         edge_ids_with_same_scgs = []
         scg_counter = Counter()
         for x, (i, j) in enumerate(zip(self.edges_src, self.edges_dst)):
-            overlap = len(self.contig_markers[self.node_names[i]].keys() & \
-                self.contig_markers[self.node_names[j]].keys())
-            if overlap > 0 and i != j:
-                #remove edge
-                scg_counter[overlap] += 1
-                edge_ids_with_same_scgs.append(x)
+            if self.node_names[i] in self.contig_markers and self.node_names[j] in self.contig_markers and \
+                len(self.contig_markers[self.node_names[i]]) > 0 and len(self.contig_markers[self.node_names[j]]) > 0:
+            
+                overlap = len(self.contig_markers[self.node_names[i]].keys() & \
+                    self.contig_markers[self.node_names[j]].keys())
+                if overlap > 0 and i != j:
+                    #remove edge
+                    scg_counter[overlap] += 1
+                    edge_ids_with_same_scgs.append(x)
         print("edges with overlapping scgs (max=20):", scg_counter.most_common(20))
         return edge_ids_with_same_scgs
 

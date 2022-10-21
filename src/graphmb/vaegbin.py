@@ -213,9 +213,12 @@ def compute_clusters_and_stats(
     
     # TODO use p/r/ to get positive_clusters
     if node_to_gt_idx_label is not None and len(dataset.labels) > 1:
-        scores["avg_cluster_sim"], scores["avg_total_sim"] = calculate_sim_between_same_labels(dataset.node_names, X,
-                                                                                               dataset.node_to_label,
-                                                                                               dataset.label_to_node)
+        sims = calculate_sim_between_same_labels(dataset.node_names, X,
+                                                list(zip(dataset.edges_src, dataset.edges_dst)),
+                                                dataset.label_to_node)
+        scores["avg_label_sim"], scores["avg_edge_sim"], scores["avg_total_sim"] = sims
+        scores["ratio_labelsim"] = scores["avg_label_sim"]/scores["avg_total_sim"]
+        scores["ratio_edgesim"] = scores["avg_edge_sim"]/scores["avg_total_sim"]
         """p, r, f1, ari = calculate_overall_prf(
             cluster_to_contig, contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )

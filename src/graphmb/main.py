@@ -695,7 +695,7 @@ def main():
         amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "hq", "mq"]
         for mname in amber_metrics_names:
             values = [m[mname] for m in amber_metrics_per_run]
-            logger.info("### label eval {}: {:.4f} {:.4f} ###".format(mname, np.mean(values), np.std(values)))
+            logger.info("### amber eval {}: {:.4f} {:.4f} ###".format(mname, np.mean(values), np.std(values)))
     total_time = datetime.now() - now
     print("Total run time: {}".format(total_time))
     print("Seconds per run: {:.2f}".format(total_time.total_seconds() / args.nruns))

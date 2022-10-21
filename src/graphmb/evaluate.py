@@ -86,10 +86,15 @@ def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, l
     #print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (my_precision, my_recall, my_f1, my_ari))
     return my_precision, my_recall, my_f1, 0
 
-def calculate_sim_between_same_labels(node_names, embeddings, node_to_label, label_to_node):
+def calculate_sim_between_same_labels(node_names, embeddings, edges, label_to_node):
     # divide sim between node of same label by avg sim between all nodes
     avg_label_sims = {}
     all_cosine_sim = cosine_similarity(embeddings, embeddings)
+    #breakpoint()
+    #https://stackoverflow.com/a/69865919
+    i = np.ravel_multi_index(np.array(edges).T, all_cosine_sim.shape)
+    edge_sim = all_cosine_sim.take(i)
+    edge_sim = edge_sim.mean()
     all_cosine_sim = np.triu(all_cosine_sim)
     all_cosine_sim = all_cosine_sim.mean()
     for l in label_to_node:
@@ -101,7 +106,7 @@ def calculate_sim_between_same_labels(node_names, embeddings, node_to_label, lab
     avg = sum(avg_label_sims.values())/len(avg_label_sims.values())      
     #print(round(avg, 4), round(all_cosine_sim, 4))
           #[(x, round(avg_label_sims[x], 4), len(label_to_node[x])) for x in avg_label_sims][:10]])
-    return avg, all_cosine_sim
+    return avg, edge_sim, all_cosine_sim, 
 
 
 def read_marker_gene_sets(lineage_file):

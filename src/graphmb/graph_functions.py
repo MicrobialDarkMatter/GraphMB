@@ -790,7 +790,9 @@ def cluster_eval(
         #   contig_sizes={dataset.contig_names[i]: dataset.nodes_len[i][0] for i in range(len(dataset.contig_names))},
         # )
         #calculate_overall_prf(cluster_to_contig, contig_to_cluster, dataset.node_to_label, dataset.label_to_node)
-        calculate_sim_between_same_labels(dataset.node_names, embeds, dataset.node_to_label, dataset.label_to_node)
+        calculate_sim_between_same_labels(dataset.node_names, embeds,
+                                          zip(dataset.edges_src,dataset.edges_dst),
+                                          dataset.label_to_node)
     if dataset.ref_marker_sets is not None:
         results = evaluate_contig_sets(dataset.ref_marker_sets, dataset.contig_markers, cluster_to_contig)
         metrics = calculate_bin_metrics(results)
