@@ -258,6 +258,7 @@ class TH:
         self.kld_weight = kld_weight
         self.scg_weight = scg_weight
         self.kmer_weight = kmer_weight
+        self.noise_reg = 0.01
         self.abundance_weight = abundance_weight
         self.no_gnn = gnn_model is None
         self.train_ae = False
@@ -282,11 +283,9 @@ class TH:
             tf.cast(self.adj_shape[0] - 1, tf.float32),
             tf.cast(neg_idx, tf.float32) / tf.cast(self.adj_shape[1], tf.float32),
         )
-        neg_idx_row = tf.cast(neg_idx_row, tf.int64) #[:, None]
-        neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1, (neg_idx % self.adj_shape[1])), tf.int64)#[
-        #    :, None
-        #]
-        #neg_idx = tf.concat((neg_idx_row, neg_idx_col), axis=-1)
+        neg_idx_row = tf.cast(neg_idx_row, tf.int64)
+        neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1,
+                              (neg_idx % self.adj_shape[1])), tf.int64)
         return neg_idx_row, neg_idx_col
 
     @tf.function
@@ -370,7 +369,7 @@ class TH:
                 )
                 gnn_loss += scg_loss #* self.scg_weight
             if self.use_noise:
-                gnn_loss += 1*(tf.reduce_sum(self.positive_noises ** 2) + tf.reduce_sum(self.scg_noises ** 2))
+                gnn_loss += self.noise_reg*(tf.reduce_sum(self.positive_noises ** 2) + tf.reduce_sum(self.scg_noises ** 2))
 
         loss = gnn_loss
         if training:
