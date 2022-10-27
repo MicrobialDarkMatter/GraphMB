@@ -13,7 +13,7 @@ from tensorflow.keras.regularizers import l2
 from spektral.layers import GCNConv
 
 from graphmb.layers import BiasLayer, LAF, GraphAttention
-
+import tensorflow_probability as tfp
 
 class VAEEncoder(Model):
     def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0, layers=2):
@@ -23,12 +23,12 @@ class VAEEncoder(Model):
         self.zdim = zdim
         in_ = Input(shape=(abundance_dim+kmers_dim,))
         x = in_
-        for _ in range(layers):
-            x = Dense(hiddendim, activation='linear')(x)
+        for i in range(layers):
+            x = Dense(hiddendim, activation='linear', name=f"encoder_{i}")(x)
             x = LeakyReLU(0.01)(x)
             if dropout > 0:
                 x = Dropout(dropout)(x)
-            #x = BatchNormalization()(x)
+            x = BatchNormalization()(x)
         mu = Dense(zdim, name="mu")(x)
         logvar = Dense(zdim, kernel_initializer='zeros', name="logvar")(x)
         self.model = Model(in_, [mu, logvar])
@@ -46,15 +46,15 @@ class VAEDecoder(Model):
         self.zdim = zdim
         in_ = Input(shape=(zdim,))
         x = in_
-        for _ in range(layers):
-            x = Dense(hiddendim, activation='linear')(x)
+        for i in range(layers):
+            x = Dense(hiddendim, activation='linear', name=f"decoder_{i}")(x)
             x = LeakyReLU(0.01)(x)
             if dropout > 0:
                 x = Dropout(dropout)(x)
-            #x = BatchNormalization()(x)
+            x = BatchNormalization()(x)
             
-        x1 = Dense(abundance_dim)(x)
-        x2 = Dense(kmers_dim)(x)
+        x1 = Dense(abundance_dim, name="decoder_ab")(x)
+        x2 = Dense(kmers_dim, name="decoder_kmer")(x)
         if self.abundance_dim > 1:
             x1 = Softmax()(x1)
         x = Concatenate()((x1,x2))
@@ -289,7 +289,7 @@ class TH:
         return neg_idx_row, neg_idx_col
 
     @tf.function
-    def train_unsupervised(self, nodes_idx, edges_idx=None, scgs_idx=None, training=True):
+    def train_unsupervised(self, nodes_idx, edges_idx=None, scgs_idx=None, training=True, vae=True):
         if edges_idx is None:
             edges_idx = range(0,self.gnn_model.adj.indices.shape[0])
         if scgs_idx is None:
@@ -297,61 +297,87 @@ class TH:
         with tf.GradientTape() as tape:
             # run encoder first
             if self.use_ae:
-                # make logvar non trainable
-                layer_names = [layer.name for layer in self.encoder.layers[0].layers]
-                logvar_idx = layer_names.index("logvar")
-                self.encoder.layers[0].layers[logvar_idx].trainable = False
+                #breakpoint()
+                if not vae:
+                    # make logvar non trainable
+                    layer_names = [layer.name for layer in self.encoder.layers[0].layers]
+                    logvar_idx = layer_names.index("logvar")
+                    self.encoder.layers[0].layers[logvar_idx].trainable = False
+                    ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
+                ae_mu, ae_logvar = self.encoder(tf.gather(self.features, nodes_idx), training=True)
+                ae_recon = self.decoder(ae_mu, training=True)
+                ae_logvar = tf.clip_by_value(ae_logvar, -2, 2)
+                losses = self.ae_loss(tf.gather(self.features, nodes_idx), ae_recon, ae_mu, ae_logvar, vae=vae)
+                ae_loss = tf.reduce_sum(losses)
+                ae_losses = {"kmer_loss": losses[0].numpy(),
+                             "ab_loss": losses[1].numpy(),
+                             "kld": losses[2].numpy(),
+                             "vae_loss": ae_loss.numpy(),
+                             "mean_logvar": tf.reduce_mean(ae_logvar).numpy()}
+                if ae_losses["kld"] < -1:
+                    breakpoint()
+                #logvar_idx = layer_names.index("logvar")
+                #self.encoder.layers[0].layers[logvar_idx].trainable = False
                 #ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
-                ae_embs =  self.encoder(self.features, training=True)[0]
-
+                ae_embs = self.encoder(self.features)[0]
             else:
                 ae_embs = self.features
+                ae_losses = {}
 
             # run gnn model
             if self.use_gnn:
                 node_hat = self.gnn_model(ae_embs, nodes_idx)
             else:
                 node_hat = ae_embs
+            
             gnn_loss = tf.constant(0, dtype=tf.float32)
+            gnn_losses = {}
             #breakpoint()
-            train_rows = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,0])
-            row_embs = tf.gather(indices=train_rows, params=node_hat)
-            train_cols = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,1])
-            col_embs = tf.gather(indices=train_cols, params=node_hat)
-            positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
+            # TODO: take into account node_batches instead of edge_batches
+            if self.gnn_weight > 0:
+                train_rows = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,0])
+                row_embs = tf.gather(indices=train_rows, params=node_hat)
+                train_cols = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,1])
+                col_embs = tf.gather(indices=train_cols, params=node_hat)
+                positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
 
-            # create random negatives for gnn_loss
-            neg_idx_row, neg_idx_col = self.sample_negatives(edges_idx)
-            try:
-                #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
-                neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
-                neg_col_embs = tf.gather(indices=neg_idx_col, params=node_hat)
-                negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
-            except:
-                breakpoint()
-            positive_y = tf.ones_like(positive_pairwise)
-            negative_y = tf.zeros_like(negative_pairs)
-            positive_pairwise = tf.nn.sigmoid(positive_pairwise)
-            negative_pairs = tf.nn.sigmoid(negative_pairs)
-            if self.use_noise:
-                # reduce noises to one dim
-                noises_weights = Softmax()(self.noise_weights)[:, None]
-                noises = tf.matmul(tf.gather(indices=edges_idx, params=self.positive_noises), noises_weights)
-                positive_pairwise = tf.nn.sigmoid(positive_pairwise) + noises[:,0]
-                positive_pairwise = tf.clip_by_value(positive_pairwise, 0, 1)
-            pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
-                                                            positive_pairwise, from_logits=False)
-            if self.num_negatives > 0:
-                neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
-                                                            negative_pairs, from_logits=False)
-            else:
-                neg_loss = 0
-            #gnn_loss = (pos_loss + neg_loss) * self.gnn_weight
-            #neg_loss = 0
-            y_true = tf.concat((tf.ones_like(positive_pairwise), tf.zeros_like(negative_pairs)), axis=0)
-            y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
-            gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
-            gnn_loss = gnn_loss * self.gnn_weight
+                # create random negatives for gnn_loss
+                neg_idx_row, neg_idx_col = self.sample_negatives(edges_idx)
+                try:
+                    #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
+                    neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
+                    neg_col_embs = tf.gather(indices=neg_idx_col, params=node_hat)
+                    negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
+                except:
+                    breakpoint()
+                positive_y = tf.ones_like(positive_pairwise)
+                negative_y = tf.zeros_like(negative_pairs)
+                positive_pairwise = tf.nn.sigmoid(positive_pairwise)
+                negative_pairs = tf.nn.sigmoid(negative_pairs)
+                if self.use_noise:
+                    # reduce noises to one dim
+                    noises_weights = Softmax()(self.noise_weights)[:, None]
+                    noises = tf.matmul(tf.gather(indices=edges_idx, params=self.positive_noises), noises_weights)
+                    positive_pairwise = tf.nn.sigmoid(positive_pairwise) + noises[:,0]
+                    positive_pairwise = tf.clip_by_value(positive_pairwise, 0, 1)
+                    
+                    #negative_dist = tfp.distributions.Bernoulli(probs=negative_pairs)
+                #positive_pairwise = tfp.distributions.Bernoulli(probs=positive_pairwise, dtype=tf.float32).sample()
+                pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
+                                                                positive_pairwise, from_logits=False)
+                if self.num_negatives > 0:
+                    neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
+                                                                negative_pairs, from_logits=False)
+                else:
+                    neg_loss = tf.constant(0)
+                #gnn_loss = (pos_loss + neg_loss) * self.gnn_weight
+                #neg_loss = 0
+                gnn_losses["pos_loss"] = pos_loss.numpy()
+                gnn_losses["neg_loss"] = neg_loss.numpy()
+                y_true = tf.concat((tf.ones_like(positive_pairwise), tf.zeros_like(negative_pairs)), axis=0)
+                y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
+                gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
+                gnn_loss = gnn_loss * self.gnn_weight
             #loss = gnn_loss
             
             # SCG loss
@@ -364,13 +390,16 @@ class TH:
                     scg_noises = tf.matmul(tf.gather(indices=scgs_idx, params=self.scg_noises), noises_weights)
                     scg_pairwise = scg_pairwise + scg_noises[:,0]
                     scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1) 
+                #scg_pairwise = tfp.distributions.Bernoulli(probs=scg_pairwise, dtype=tf.float32).sample()
                 scg_loss = tf.keras.losses.binary_crossentropy(
                         tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=False
                 )
-                gnn_loss += scg_loss #* self.scg_weight
+                scg_loss *= self.scg_weight
+                gnn_loss += scg_loss
+                gnn_losses["scg_loss"] = scg_loss.numpy()
             if self.use_noise:
                 gnn_loss += self.noise_reg*(tf.reduce_sum(self.positive_noises ** 2) + tf.reduce_sum(self.scg_noises ** 2))
-
+            gnn_losses["gnn_loss"] = gnn_loss.numpy()
         loss = gnn_loss
         if training:
             if self.use_gnn:
@@ -378,29 +407,35 @@ class TH:
             else:
                 tw = []
             if self.use_ae:
-                tw += self.encoder.trainable_weights # skip logvar 
-                self.encoder.layers[0].layers[logvar_idx].trainable = True
+                loss += (self.ae_weight * ae_loss)
+                tw += self.encoder.trainable_weights + self.decoder.trainable_weights # skip logvar 
+                #self.encoder.layers[0].layers[logvar_idx].trainable = True
             if self.use_noise:
                 #breakpoint()
                 tw += [self.positive_noises, self.scg_noises]
-            grads = tape.gradient(loss, tw)
-            self.opt.apply_gradients(zip(grads, tw))
-        return loss, gnn_loss, scg_loss, pos_loss, neg_loss
+            grads = tape.gradient([ae_loss, gnn_loss, scg_loss], tw)
+            grad_norm = tf.linalg.global_norm(grads)
+            clip_grads, _ = tf.clip_by_global_norm(grads, 2,  use_norm=grad_norm)
+            new_grad_norm = tf.linalg.global_norm(clip_grads)
+            self.opt.apply_gradients(zip(clip_grads, tw))
+            ae_losses["grad_norm"] = grad_norm.numpy()
+            ae_losses["grad_norm_clip"] = new_grad_norm.numpy()
+        return loss, gnn_losses, ae_losses
     
     
-    @tf.function
+    #@tf.function
     def ae_loss(self, x, x_hat, mu, logvar, vae, training=True, writer=None, epoch=0):
         if vae:
             epsilon = tf.random.normal(tf.shape(mu))
             z = mu + epsilon * tf.math.exp(0.5 * logvar)
             kld  = 0.5*tf.math.reduce_mean(tf.math.reduce_mean(1.0 + logvar - tf.math.pow(mu, 2) - tf.math.exp(logvar), axis=1))
-            kld  = kld * self.kld_weight
+            kld  = -kld * self.kld_weight
         else:
             z = mu
-            kld = 0
-        if writer is not None:
-            with writer.as_default():
-                tf.summary.scalar('min ab', tf.reduce_min(x_hat[:, :self.abundance_dim]), step=epoch)
+            kld = tf.convert_to_tensor(0.0)
+        #if writer is not None:
+        #    with writer.as_default():
+        #        tf.summary.scalar('min ab', tf.reduce_min(x_hat[:, :self.abundance_dim]), step=epoch)
         if self.abundance_dim > 1:
             mse1 = - tf.reduce_mean(tf.reduce_sum((tf.math.log(x_hat[:, :self.abundance_dim] + 1e-9) * x[:, :self.abundance_dim]), axis=1))
         else:

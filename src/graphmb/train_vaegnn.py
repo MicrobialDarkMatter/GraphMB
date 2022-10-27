@@ -35,7 +35,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
         clustering = args.clusteringalgo
         k = args.kclusters
         
-        use_edge_weights = True
+        use_edge_weights = False
         cluster_markers_only = args.quick
         decay = 0.5 ** (2.0 / epochs)
         concat_features = args.concat_features
@@ -74,7 +74,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                         X[cluster_mask], node_names[cluster_mask],
                         dataset, clustering=clustering, k=k, tsne=args.tsne,
                         amber=(args.labels is not None and "amber" in args.labels),
-                        cuda=args.cuda,
+                        #cuda=args.cuda,
                     )
             if args.noise and hasattr(dataset, "true_adj_matrix"):
                 # eval edge acc if true adj matrix exists
@@ -178,23 +178,25 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
         gnn_losses = []
         step = 0
         for e in pbar_epoch:
-            vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
+            #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
             recon_loss = 0
 
             # train VAE in batches
-            #if e in batch_steps:
-                #print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
-                #batch_size = batch_size * 2
-                #mlflow.log_metric("cur_batch_size", batch_size, e )
+            if e in batch_steps:
+                print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
+                batch_size = batch_size * 2
+                mlflow.log_metric("cur_batch_size", batch_size, e )
 
 
             # train VAE ########
-            np.random.shuffle(train_idx)
+            #np.random.shuffle(train_idx)
             n_batches = len(train_idx)//batch_size
             if n_batches < len(train_idx)/batch_size:
                 n_batches += 1 # add final batch
-            pbar_vaebatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
-            for b in pbar_vaebatch:
+            pbar_vaebatch = tqdm(range(n_batches),
+                                 disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100),
+                                 position=1, ascii=' =')
+            """for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
                 batch_vae_losses = vae_trainer.train_step(X[batch_idx], summary_writer, step, vae=True)
                 vae_epoch_losses["vae_loss"].append(batch_vae_losses[0])
@@ -213,31 +215,43 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                 batch_size *= 2
                 print("duplicate batch size", e, batch_size, recon_loss, vae_losses[-5:])
                 mlflow.log_metric("cur_batch_size", batch_size, e)
-                vae_losses = []
+                vae_losses = []"""
             ############################################################
 
             # train GNN ################################################
-            gnn_trainer.encoder = vae_trainer.encoder
+            #gnn_trainer.encoder = vae_trainer.encoder
             edges_idx = np.arange(gnn_model.adj.indices.shape[0])
-            np.random.shuffle(edges_idx)
+            #np.random.shuffle(edges_idx)
             #graph_batch_size = 256
             graph_batch_size = len(edges_idx)
-            n_batches = len(edges_idx)//graph_batch_size
-            if n_batches < len(edges_idx)/graph_batch_size:
-                n_batches += 1 # add final batch
-            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or graph_batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
-            for b in pbar_gnnbatch:
-                batch_idx = edges_idx[b*graph_batch_size:(b+1)*graph_batch_size]
-                total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = gnn_trainer.train_unsupervised(edges_idx=edges_idx, nodes_idx=train_idx)
-            epoch_metrics = {"Total loss": float(total_loss), "gnn loss": float(gnn_loss),
-                                                "SCG loss": float(diff_loss),
+            #n_batches = len(edges_idx)//graph_batch_size
+            #if n_batches < len(edges_idx)/graph_batch_size:
+            #    n_batches += 1 # add final batch
+            #pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or graph_batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
+            #for b in pbar_gnnbatch:
+            for nodeb in pbar_vaebatch:
+                #batch_idx = edges_idx[b*graph_batch_size:(b+1)*graph_batch_size]
+                batch_idx = train_idx[nodeb*batch_size:(nodeb+1)*batch_size]
+                losses = gnn_trainer.train_unsupervised(edges_idx=edges_idx, nodes_idx=batch_idx, vae=True)
+                total_loss, gnn_losses, ae_losses = losses
+                #pos_loss, neg_loss, diff_loss, gnn_loss = gnn_losses
+            epoch_metrics = {"Total": float(total_loss), "gnn": gnn_losses.get("gnn_loss", 0),
+                                                "SCG": gnn_losses.get("scg_loss", 0),
                                                 #'GNN  LR': float(gnn_trainer.opt._decayed_lr(float)),
-                                                "pos loss": float(pos_loss), "neg loss": float(neg_loss)}
+                                                "pos": gnn_losses.get("pos_loss", 0),
+                                                "neg": gnn_losses.get("neg_loss", 0),
+                                                "kld": ae_losses["kld"],
+                                                "vae": ae_losses["vae_loss"],
+                                                "kmer": ae_losses["kmer_loss"],
+                                                "ab": ae_losses["ab_loss"]}
+                                                #"logvar": ae_losses["mean_logvar"],
+                                                #"grad_norm": ae_losses["grad_norm"],
+                                                #"grad_norm_clip": ae_losses["grad_norm_clip"]}
             #print(float(gnn_trainer.opt._decayed_lr(float)))
             log_to_tensorboard(summary_writer, epoch_metrics, step)
             mlflow.log_metrics(epoch_metrics, step=e)
-            gnn_loss = gnn_loss.numpy()
-            diff_loss = diff_loss.numpy()
+            #gnn_loss = gnn_loss.numpy()
+            #diff_loss = diff_loss.numpy()
             ##############################################################
 
 
@@ -270,7 +284,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                 #gnn_input_features = tf.concat((features[:,:dataset.node_depths.shape[1]],
                 #                                gnn_trainer.encoder(features)[0]), axis=1)
                 gnn_input_features = gnn_trainer.encoder(features)[0]
-                logger.debug(str(gnn_input_features[0][:5].numpy()))
+                logger.debug("encoder output " + str(gnn_input_features[0][:5].numpy()))
                 if use_gnn:
                     node_new_features = gnn_trainer.gnn_model(gnn_input_features, None, training=False)
                     node_new_features = node_new_features.numpy()
@@ -278,8 +292,22 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                         node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
                 else:
                     node_new_features = gnn_input_features.numpy()
-                if args.noise: mlflow.log_metrics({"avg positive noise": gnn_trainer.positive_noises.numpy().mean(),
+                if args.noise:
+                    mlflow.log_metrics({"avg positive noise": gnn_trainer.positive_noises.numpy().mean(),
                                                    "avg scg noise": gnn_trainer.scg_noises.numpy().mean()}, step=e)
+                    # get topk edge noises
+                    #breakpoint()
+                    topk_indices = tf.math.top_k(tf.math.abs(gnn_trainer.positive_noises[:, 0]), k=10).indices
+                    #breakpoint()
+                    print("            src dst observed predicted noise")
+                    for i in topk_indices:
+                        logger.debug("{} {} {:.4f} {:.4f} {}".format(dataset.node_names[gnn_model.adj.indices[i][0]],
+                                     dataset.node_names[gnn_model.adj.indices[i][1]], gnn_model.adj.values[i].numpy(),
+                                     tf.nn.sigmoid(tf.reduce_sum(tf.math.multiply(node_new_features[gnn_model.adj.indices[i][0]],
+                                                                    node_new_features[gnn_model.adj.indices[i][1]]))).numpy(),
+                                     gnn_trainer.positive_noises[i].numpy()))
+
+
                 if args.noise and hasattr(dataset, "true_adj_matrix"):
                     # eval edge acc if true adj matrix exists
                     # full adj matrix may be too big to compute, use only indices from true_adj
@@ -305,21 +333,21 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
                     scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
-                    losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
-                    logger.info(f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
+                    losses_string = " ".join([f"{k}={v:.3f}" for k, v in epoch_metrics.items()])
+                    logger.info(f"[{args.outname} {nlayers_gnn}l {pname}]{losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
                 mlflow.log_metrics(stats, step=e)
                 #print("total eval time", datetime.datetime.now() - evalstarttime)
-            losses_string = " ".join([f"{k}={v:.3f}" for k, v in vae_epoch_losses.items()])
-            scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+            losses_string = " ".join([f"{k}={v:.3f}" for k, v in epoch_metrics.items() if v != 0])
+            scores_string = f"HQ={stats['hq']} BestHQ={best_hq} BestEpoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
             pbar_epoch.set_description(
-                f"[{args.outname} {nlayers_gnn}l {pname}] GNN={gnn_loss:.3f} SCG={diff_loss:.3f} {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
+                f"[{args.outname} {pname}] {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )
-            total_loss = gnn_loss + diff_loss + recon_loss
-            losses["gnn"].append(gnn_loss)
-            losses["scg"].append(diff_loss)
-            losses["ae"].append(recon_loss)
-            losses["total"].append(total_loss)
+            #total_loss = gnn_loss + diff_loss + recon_loss
+            #losses["gnn"].append(gnn_loss)
+            #losses["scg"].append(diff_loss)
+            #losses["ae"].append(recon_loss)
+            #losses["total"].append(total_loss)
             #if e == 1:
                 #breakpoint()
             #    with summary_writer.as_default():
