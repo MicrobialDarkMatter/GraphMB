@@ -335,7 +335,7 @@ def prepare_data_for_gnn(
                 adj_matrix.data[x] = 0
                 edge_weights[x] = 0
         adj_matrix.eliminate_zeros()
-        print(f"deleted {edges_with_same_scgs} edges with same SCGs")
+        print(f"deleted {len(edges_with_same_scgs)} edges with same SCGs")
     
     if remove_edges:
         # create self loops only sparse adj matrix
@@ -370,7 +370,7 @@ def prepare_data_for_gnn(
     
     else:
         adj_norm.data = np.ones(len(adj_norm.row))
-        #new_values = adj_norm.data.astype(np.float32)
+        new_values = adj_norm.data.astype(np.float32)
     
     # convert to tf.SparseTensor
     adj = tf.SparseTensor(
@@ -421,7 +421,7 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
         node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
         dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne,
-        amber=(args.labels is not None and "amber" in args.labels), cuda=args.cuda,
+        amber=(args.labels is not None and "amber" in args.labels), #cuda=args.cuda,
         compute_pospairs=False, unresolved=True
     )
     

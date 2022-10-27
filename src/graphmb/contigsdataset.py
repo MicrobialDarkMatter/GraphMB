@@ -471,9 +471,11 @@ class AssemblyDataset:
                     if self.labelsfile.endswith(".csv"):
                         values = line.strip().split(",")
                     elif self.labelsfile.endswith(".tsv"):  # amber format
-                        if line.startswith("@"):
+                        if line.startswith("@") or line.startswith("#"):
                             continue
                         values = line.strip().split("\t")
+                    if len(values) < 2:
+                        breakpoint()
                     node = values[0]
                     label = values[1]
                     if node in node_to_label:
