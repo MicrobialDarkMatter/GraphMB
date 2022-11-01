@@ -36,7 +36,7 @@ from graphmb.graph_functions import (
 from graphmb.version import __version__
 
 def run_model(dataset, args, logger, nrun):
-    import vaegbin, train_vaegnn, train_gnn, train_gnn_decode, train_vae, train_auggnn
+    import vaegbin, train_vaegnn, train_gnn, train_vae, train_auggnn
     if args.model_name.endswith("_ae"):
         return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun)
     elif args.model_name == "vae":
@@ -45,8 +45,8 @@ def run_model(dataset, args, logger, nrun):
         return train_gnn.run_model_gnn(dataset, args, logger, nrun)
     elif args.model_name == "vgae":
         return vaegbin.run_model_vgae(dataset, args, logger, nrun)
-    elif args.model_name.endswith("decode"):
-        return train_gnn_decode.run_model_gnn_recon(dataset, args, logger, nrun)
+    #elif args.model_name.endswith("decode"):
+    #    return train_gnn_decode.run_model_gnn_recon(dataset, args, logger, nrun)
     elif args.model_name.endswith("aug"):
         return train_auggnn.run_model_vaegnn(dataset, args, logger, nrun)
 
@@ -114,14 +114,14 @@ def check_dirs(args, use_features=True):
 
     # check if other dirs exists
     if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
-        print(f"Assembly Graph file {args.graph_file} not found")
+        print(f"Assembly Graph file {args.graph_file} not found, check --graph_file option")
     if not os.path.exists(os.path.join(args.assembly, args.features)) or not use_features:
         # needs assembly files to calculate features
         if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
-            print(f"Assembly {args.assembly_name} not found")
+            print(f"Assembly {args.assembly_name} not found, check --assembly_name option")
             exit()
         if not os.path.exists(os.path.join(args.assembly, args.depth)):
-            print(f"Depth file {args.depth} not found")
+            print(f"Depth file {args.depth} not found, check --depth option")
             exit()
 
 

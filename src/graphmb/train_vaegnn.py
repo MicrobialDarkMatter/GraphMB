@@ -232,7 +232,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             for nodeb in pbar_vaebatch:
                 #batch_idx = edges_idx[b*graph_batch_size:(b+1)*graph_batch_size]
                 batch_idx = train_idx[nodeb*batch_size:(nodeb+1)*batch_size]
-                losses = gnn_trainer.train_unsupervised(edges_idx=edges_idx, nodes_idx=batch_idx, vae=True)
+                losses = gnn_trainer.train_unsupervised(edges_idx=edges_idx,
+                                                        nodes_idx=batch_idx,
+                                                        vae=True)
                 total_loss, gnn_losses, ae_losses = losses
                 #pos_loss, neg_loss, diff_loss, gnn_loss = gnn_losses
             epoch_metrics = {"Total": float(total_loss), "gnn": gnn_losses.get("gnn_loss", 0),
@@ -299,7 +301,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
                     #breakpoint()
                     topk_indices = tf.math.top_k(tf.math.abs(gnn_trainer.positive_noises[:, 0]), k=10).indices
                     #breakpoint()
-                    print("            src dst observed predicted noise")
+                    logger.debug("            src dst observed predicted noise")
                     for i in topk_indices:
                         logger.debug("{} {} {:.4f} {:.4f} {}".format(dataset.node_names[gnn_model.adj.indices[i][0]],
                                      dataset.node_names[gnn_model.adj.indices[i][1]], gnn_model.adj.values[i].numpy(),

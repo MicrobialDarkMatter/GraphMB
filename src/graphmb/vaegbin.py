@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.table import Table
 from scipy.sparse import coo_matrix, diags
 
-from graphmb.models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, TH, TrainHelperVAE, VAEDecoder, VAEEncoder, VGAE
+from graphmb.gnn_models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, VGAE
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim, get_cluster_mask, write_bins
 from graphmb.evaluate import calculate_overall_prf, calculate_sim_between_same_labels
 
