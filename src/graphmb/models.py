@@ -11,9 +11,10 @@ import numpy as np
 from tensorflow.keras.regularizers import l2    
 
 from spektral.layers import GCNConv
+from tqdm import tqdm
 
 from graphmb.layers import BiasLayer, LAF, GraphAttention
-import tensorflow_probability as tfp
+#import tensorflow_probability as tfp
 
 class VAEEncoder(Model):
     def __init__(self, abundance_dim, kmers_dim, hiddendim, zdim=64, dropout=0, layers=2):
@@ -123,8 +124,6 @@ class TrainHelperVAE:
             self.gold_labels = gold_labels
             self.mask_labels = mask_labels
             
-            
-        
     def train_step(self, x, writer=None, epoch=0, vae=True, gold_labels=None):
         losses = self._train_step(x, vae=vae, writer=writer, epoch=epoch, gold_labels=gold_labels)
         if writer is not None:
@@ -201,7 +200,6 @@ class TrainHelperVAE:
         return loss, mse2, mse1, kld, predl
 
 
-
 class TH:
     def __init__(
         self,
@@ -258,7 +256,7 @@ class TH:
         self.kld_weight = kld_weight
         self.scg_weight = scg_weight
         self.kmer_weight = kmer_weight
-        self.noise_reg = 0.01
+        self.noise_reg = 1
         self.abundance_weight = abundance_weight
         self.no_gnn = gnn_model is None
         self.train_ae = False
@@ -287,9 +285,21 @@ class TH:
         neg_idx_col = tf.cast(tf.math.minimum(self.adj_shape[1] - 1,
                               (neg_idx % self.adj_shape[1])), tf.int64)
         return neg_idx_row, neg_idx_col
+    
 
     @tf.function
-    def train_unsupervised(self, nodes_idx, edges_idx=None, scgs_idx=None, training=True, vae=True):
+    def nodesim(self, u, v):
+        #breakpoint()
+        #return tf.reduce_sum((tf.expand_dims(x, 0) - tf.expand_dims(y, 1)**2), axis=-1)
+        u = tf.nn.l2_normalize(u, axis=1)
+        v = tf.nn.l2_normalize(v, axis=1)
+        pairwise = tf.reduce_sum(tf.math.multiply(u, v), axis=1)
+        #pairwise = -tf.norm(tf.math.subtract(u, v) + + 1.0e-12, ord='euclidean', axis=1,)
+        return pairwise
+
+    @tf.function
+    def train_unsupervised(self, nodes_idx, edges_idx=None,
+                           scgs_idx=None,training=True, vae=True):
         if edges_idx is None:
             edges_idx = range(0,self.gnn_model.adj.indices.shape[0])
         if scgs_idx is None:
@@ -304,6 +314,7 @@ class TH:
                     logvar_idx = layer_names.index("logvar")
                     self.encoder.layers[0].layers[logvar_idx].trainable = False
                     ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
+
                 ae_mu, ae_logvar = self.encoder(tf.gather(self.features, nodes_idx), training=True)
                 ae_recon = self.decoder(ae_mu, training=True)
                 ae_logvar = tf.clip_by_value(ae_logvar, -2, 2)
@@ -339,35 +350,37 @@ class TH:
                 row_embs = tf.gather(indices=train_rows, params=node_hat)
                 train_cols = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,1])
                 col_embs = tf.gather(indices=train_cols, params=node_hat)
-                positive_pairwise = tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1)
-
+                positive_pairwise = self.nodesim(row_embs, col_embs)
                 # create random negatives for gnn_loss
                 neg_idx_row, neg_idx_col = self.sample_negatives(edges_idx)
                 try:
                     #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
                     neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
                     neg_col_embs = tf.gather(indices=neg_idx_col, params=node_hat)
-                    negative_pairs = tf.reduce_sum(tf.math.multiply(neg_row_embs, neg_col_embs), axis=1)
+                    negative_pairs = self.nodesim(neg_row_embs, neg_col_embs)
                 except:
                     breakpoint()
                 positive_y = tf.ones_like(positive_pairwise)
                 negative_y = tf.zeros_like(negative_pairs)
-                positive_pairwise = tf.nn.sigmoid(positive_pairwise)
-                negative_pairs = tf.nn.sigmoid(negative_pairs)
+                #positive_pairwise = tf.nn.sigmoid(positive_pairwise)
+                #negative_pairs = tf.nn.sigmoid(negative_pairs)
                 if self.use_noise:
                     # reduce noises to one dim
                     noises_weights = Softmax()(self.noise_weights)[:, None]
                     noises = tf.matmul(tf.gather(indices=edges_idx, params=self.positive_noises), noises_weights)
-                    positive_pairwise = tf.nn.sigmoid(positive_pairwise) + noises[:,0]
+                    positive_pairwise = positive_pairwise + noises[:,0]
                     positive_pairwise = tf.clip_by_value(positive_pairwise, 0, 1)
                     
                     #negative_dist = tfp.distributions.Bernoulli(probs=negative_pairs)
                 #positive_pairwise = tfp.distributions.Bernoulli(probs=positive_pairwise, dtype=tf.float32).sample()
+                #breakpoint()
                 pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
-                                                                positive_pairwise, from_logits=False)
+                                                                positive_pairwise, from_logits=True)
+                #pos_loss = -tf.reduce_mean(positive_pairwise)
                 if self.num_negatives > 0:
                     neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
-                                                                negative_pairs, from_logits=False)
+                                                                negative_pairs, from_logits=True)
+                    #neg_loss = tf.reduce_mean(negative_pairs)
                 else:
                     neg_loss = tf.constant(0)
                 #gnn_loss = (pos_loss + neg_loss) * self.gnn_weight
@@ -376,7 +389,7 @@ class TH:
                 gnn_losses["neg_loss"] = neg_loss.numpy()
                 y_true = tf.concat((tf.ones_like(positive_pairwise), tf.zeros_like(negative_pairs)), axis=0)
                 y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
-                gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
+                gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
                 gnn_loss = gnn_loss * self.gnn_weight
             #loss = gnn_loss
             
@@ -385,15 +398,19 @@ class TH:
             if self.scg_pairs is not None and self.scg_weight > 0:
                 scg_row_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 0])
                 scg_col_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 1])
-                scg_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1))
+                #scg_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(scg_row_embs, scg_col_embs), axis=1))
+                #scg_pairwise = tf.sigmoid(-tf.reduce_sum((scg_row_embs - scg_col_embs)**2, axis=1))
+                #scg_pairwise = -tf.norm(scg_row_embs-scg_col_embs, ord='euclidean', axis=1,)
+                scg_pairwise = self.nodesim(scg_row_embs, scg_col_embs)
                 if self.use_noise:
                     scg_noises = tf.matmul(tf.gather(indices=scgs_idx, params=self.scg_noises), noises_weights)
                     scg_pairwise = scg_pairwise + scg_noises[:,0]
                     scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1) 
                 #scg_pairwise = tfp.distributions.Bernoulli(probs=scg_pairwise, dtype=tf.float32).sample()
                 scg_loss = tf.keras.losses.binary_crossentropy(
-                        tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=False
+                        tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=True
                 )
+                #scg_loss = tf.reduce_mean(scg_pairwise)
                 scg_loss *= self.scg_weight
                 gnn_loss += scg_loss
                 gnn_losses["scg_loss"] = scg_loss.numpy()
@@ -483,472 +500,3 @@ class TH:
         s_idx = tf.gather_nd(idx, random_idx)
         return s_idx
 
-
-class GVAE(Model):
-    def __init__(self, abundance_dim, kmers_dim, nnodes, hiddendim, zdim=64, dropout=0, layers=2):
-        super(GVAE, self).__init__()
-        self.abundance_dim = abundance_dim
-        self.kmers_dim = kmers_dim
-        N = nnodes
-        F = self.abundance_dim + self.kmers_dim
-        x_in = Input(shape=(abundance_dim+kmers_dim,))
-        a_in = Input((N,), dtype=tf.float32)
-        #x = Embedding(N, F, trainable=False)(x_in)
-        x_orig = x_in
-        x = x_in
-        for _ in range(layers):
-            GCNConv( hiddendim,
-                     activation=None)([x, a_in])
-            x = LeakyReLU(0.01)(x)
-            if dropout > 0:
-                x = Dropout(dropout)(x)
-            x = BatchNormalization()(x)
-
-        z_mean = GCNConv(
-            zdim,
-            activation=None,
-        )([x, a_in])
-        
-        z_log_std = GCNConv(
-            zdim,
-            activation=None,
-        )([x, a_in])
-        
-        self.encoder = Model([x_in, a_in], [z_mean, z_log_std, x_orig])
-        self.encoder.build([ (None,F), (None,N) ])
-        self.decoder = VAEDecoder(self.abundance_dim, self.kmers_dim, hiddendim, zdim=zdim, dropout=dropout, layers=layers)
-        self.decoder.build([ (None,zdim)])
-    
-    def call(self, x, a, indices=None, training=True):
-        mu, logvar, x_orig = self.encoder((x,a), training=training)
-        #z_log_std = tf.nn.softplus(z_log_std)
-        logvar = tf.clip_by_value(logvar, -2, 2)
-        z_sample = tf.random.normal(tf.shape(mu)) * tf.exp(logvar)
-        if training:
-            z = mu + z_sample
-        else:
-            z = mu
-        if indices is not None:
-            z = tf.gather(z, indices)
-            mu = tf.gather(mu, indices)
-            logvar = tf.gather(logvar, indices)
-        
-        x_hat = self.decoder(z, training=training)
-        return z, mu, logvar, x_orig, x_hat
-    
-    def encode(self, x, a):
-        mu, _, _ = self.encoder((x,a))
-        return mu
-
-    def summary(self):
-        self.encoder.summary()
-        self.decoder.summary()
-    
-class VGAE(Model):
-    def __init__(self, emb_dim, embeddings=None, 
-                 hidden_dim1=None, hidden_dim2=None,
-                 dropout=None, l2_reg=None,
-                 freeze_embeddings=False, lr=1e-02):
-        
-        super(VGAE, self).__init__()
-        
-        N = emb_dim[0] # Number of nodes in the graph
-        F = emb_dim[1] # Original size of node features
-        self.freeze_embeddings = freeze_embeddings
-
-        x_in = Input(shape=(1,), dtype=tf.int64)
-        a_in = Input((N,), dtype=tf.float32)
-        if embeddings is not None:
-            x = Embedding(N, F, weights=[embeddings], 
-                          trainable=not freeze_embeddings)(x_in)
-        else:
-            x = Embedding(N, F, trainable=not freeze_embeddings)(x_in)
-        x = Flatten()(x)
-        x_orig = x
-        
-#         for _ in range(2):
-#             x = Dense(256)(x)
-#             x = LeakyReLU()(x)
-#             x = BatchNormalization(epsilon=1e-3)(x)
-        
-
-        x = GCNConv( hidden_dim1,
-                     activation=None,
-                     kernel_regularizer=l2(l2_reg))([x, a_in])
-        x = LeakyReLU()(x)
-        x = LayerNormalization(epsilon=1e-6)(x)
-        x = Dropout(dropout)(x)
-
-        z_mean = GCNConv(
-            hidden_dim2,
-            activation=None,
-            kernel_regularizer=l2(l2_reg),
-        )([x, a_in])
-        
-        z_log_std = GCNConv(
-            hidden_dim2,
-            activation=None,
-            kernel_regularizer=l2(l2_reg),
-        )([x, a_in])
-        
-        self.encoder = Model([x_in, a_in], [z_mean, z_log_std, x_orig])
-        self.encoder.build([ (None,1), (None,N) ])
-        
-        z_in = Input(shape=(hidden_dim2,))
-        x = z_in
-        for _ in range(2):
-            x = Dense(256)(x)
-            x = LeakyReLU()(x)
-            x = BatchNormalization(epsilon=1e-6)(x)
-        #x = Dense(emb_dim[1])(x)
-        
-        
-        self.decoder = Model(z_in, x)
-        self.decoder.build((None, hidden_dim2))
-        
-        self.optimizer = Adam(learning_rate=lr)#, clipnorm=1.0)
-    
-    def call(self, x, indices=None, training=True):
-        x,a = x
-        z_mean, z_log_std, x_orig = self.encoder((x,a), training=training)
-        #z_log_std = tf.nn.softplus(z_log_std)
-        z_log_std = tf.clip_by_value(z_log_std, -2, 2)
-        z_sample = tf.random.normal(tf.shape(z_mean)) * tf.exp(z_log_std)
-        if training:
-            z = z_mean + z_sample
-            z = tf.gather(z, indices)
-            out = tf.matmul(z, tf.transpose(z))
-            out = tf.nn.sigmoid(out)
-        else:
-            z = z_mean
-            out = None
-        
-        return out, z, z_mean, z_log_std, x_orig
-    
-    def train_step(self, x, a, y, pos_weight, norm, indices):
-        loss = self._train_step(x, a, y, pos_weight, norm, indices)
-        return loss.numpy()
-    
-    @tf.function
-    def _train_step(self, x, a, y, pos_weight, norm, indices, loss="graph"): #loss="features"
-        with tf.GradientTape() as tape:
-            predictions, z, model_z_mean, model_z_log_std, x_orig = self((x, a), indices, training=True)            
-            pairs = []
-            for i in indices:
-                for j in indices:
-                    pairs.append((i,j))
-            pairs = tf.convert_to_tensor(pairs, dtype=tf.int32)
-            y = tf.gather_nd(a, pairs)
-            y = tf.reshape(y, [-1])
-            predictions = tf.reshape(predictions, [-1])
-            rec_loss = norm*tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(logits=predictions, labels=y, pos_weight=pos_weight))
-
-            # latent loss
-            kl_loss = (0.5 / tf.cast(tf.shape(x)[-1], tf.float32)) * tf.reduce_mean(tf.reduce_sum(
-            1. + 2. * model_z_log_std - tf.square(model_z_mean) - tf.square(tf.exp(model_z_log_std)), 1
-            ))
-            
-            loss = rec_loss - kl_loss + tf.reduce_sum(self.encoder.losses)
-            ## Add reconstruction loss
-            if self.freeze_embeddings:
-                x_hat = self.decoder(z, training=True)
-                loss = loss + 0.5*tf.reduce_mean((x_hat - tf.gather(x_orig, indices))**2)
-                
-        tw = self.encoder.trainable_weights
-        if self.freeze_embeddings:
-            tw += self.decoder.trainable_weights
-        gradients = tape.gradient(loss,tw)
-        self.optimizer.apply_gradients(zip(gradients, tw))
-        return loss
-
-class GCN(Model):
-    def __init__(
-        self,
-        features_shape,
-        input_dim,
-        labels,
-        adj,
-        embsize=None,
-        n_labels=None,
-        hidden_units=None,
-        layers=None,
-        conv_last=None,
-        use_bn=True,
-        use_vae=False,
-        predict=False
-    ):
-        super(GCN, self).__init__()
-        #assert layers > 0
-        self.features_shape = features_shape
-        self.labels = labels
-        self.adj = adj
-        self.adj_size = adj.dense_shape.numpy()
-
-        adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
-
-        x = node_in
-        # first gcn layer
-        for l in range(layers):
-            x = Dense(hidden_units, use_bias=(l == 0))(x)
-            x = Lambda(lambda t: tf.sparse.sparse_dense_matmul(t[0], t[1]))([adj_in, x])
-            x = BiasLayer()(x)
-            if use_bn:
-                x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
-            x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
-
-        if use_vae:
-            mu = Dense(embsize, use_bias=True)(x)
-            log_std = Dense(embsize, use_bias=True)(x)
-            x = Concatenate(axis=1)([mu, log_std])
-        else:
-            x = Dense(embsize, use_bias=True)(x)
-            if predict:
-                x = Dense(n_labels, use_bias=False)(x)
-                x = Softmax()(x)
-                #x = Lambda(lambda t: tf.sparse.sparse_dense_matmul(t[0], t[1]))([adj_in, x])
-                #x = BiasLayer()(x)
-
-        self.model = Model([node_in, adj_in], x)
-        self.model.build([(features_shape[0], input_dim), tuple(self.adj_size)])
-
-    def call(self, features, idx, training=True):
-        output = self.model((features, self.adj), training=training)
-        if idx is None:
-            return output
-        else:
-            return tf.gather(output, idx)
-
-    def summary(self):
-        self.model.summary()
-
-
-class GCNLAF(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
-        super(GCNLAF, self).__init__()
-        #assert layers > 0
-        self.features = features
-        self.labels = labels
-        self.adj = adj
-        self.adj_size = adj.dense_shape.numpy()
-
-        adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
-
-        x = node_in
-        # first gcn layer
-        for l in range(layers):
-            x = Dense(hidden_units, use_bias=(l == 0))(x)
-            x = LAF(4)([adj_in, x])
-            x = BiasLayer()(x)
-            x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
-            x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
-
-        # third gcn layer
-        if conv_last:
-            x = Dense(n_labels, use_bias=False)(x)
-            x = LAF(4)([adj_in, x])
-            x = BiasLayer()(x)
-        else:
-            x = Dense(n_labels, use_bias=True)(x)
-
-        self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
-
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
-        if idx is None:
-            return output
-        else:
-            return tf.gather(output, idx)
-
-    def summary(self):
-        self.model.summary()
-
-
-class GAT(Model):
-    def __init__(
-        self, features_shape, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
-    ):
-        super(GAT, self).__init__()
-        self.features_shape = features_shape
-        #self.features = features
-        self.labels = labels
-        self.adj = adj
-        self.adj_size = adj.dense_shape.numpy()
-
-        adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
-
-        x = node_in
-        for l in range(layers):
-            x = GraphAttention(hidden_units, dropout_rate=0.1, attn_heads=1, activation="linear")([adj_in, x])
-            x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
-            x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
-
-        # second sage layer
-        if conv_last:
-            x = GraphAttention(
-                n_labels, dropout_rate=0.1, attn_heads=1, activation="linear", attn_heads_reduction="average"
-            )([adj_in, x])
-        else:
-            x = Dense(n_labels, use_bias=True)(x)
-
-        self.model = Model([node_in, adj_in], x)
-        self.model.build([(features_shape[0], input_dim), tuple(self.adj_size)])
-
-    def call(self, features, idx, training=True):
-        output = self.model((features, self.adj), training=training)
-        if idx is None:
-            return output
-        else:
-            return tf.gather(output, idx)
-
-    def summary(self):
-        self.model.summary()
-
-
-class GATLAF(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
-        super(GATLAF, self).__init__()
-        self.features = features
-        self.labels = labels
-        self.adj = adj
-        self.adj_size = adj.dense_shape.numpy()
-
-        adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
-
-        x = node_in
-        for l in range(layers):
-            x = GraphAttention(hidden_units, dropout_rate=0.1, attn_heads=1, activation="linear", laf_units=4)(
-                [adj_in, x]
-            )
-            x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
-            x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
-
-        # second sage layer
-        if conv_last:
-            x = GraphAttention(
-                n_labels,
-                dropout_rate=0.1,
-                attn_heads=1,
-                activation="linear",
-                attn_heads_reduction="average",
-                laf_units=4,
-            )([adj_in, x])
-        else:
-            x = Dense(n_labels, use_bias=True)(x)
-
-        self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
-
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
-        if idx is None:
-            return output
-        else:
-            return tf.gather(output, idx)
-
-    def summary(self):
-        self.model.summary()
-
-
-class SAGE(Model):
-    def __init__(
-        self, features, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
-    ):
-        super(SAGE, self).__init__()
-        self.features = features
-        self.labels = labels
-        self.adj = adj
-        self.adj_size = adj.dense_shape.numpy()
-
-        adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
-
-        x = node_in
-        # first sage layer
-        for l in range(layers):
-            x_node = Dense(hidden_units, use_bias=(l == 0))(x)
-            x_neigh = Dense(hidden_units, use_bias=(l == 0))(x)
-            x = Lambda(lambda t: tf.sparse.sparse_dense_matmul(t[0], t[1]))([adj_in, x_neigh])
-            x = BiasLayer()(x)
-            x = Add()([x_node, x])
-            x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
-            x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
-
-        # second sage layer
-        if conv_last:
-            x_node = Dense(n_labels, use_bias=False)(x)
-            x_neigh = Dense(n_labels, use_bias=False)(x)
-            x = Lambda(lambda t: tf.sparse.sparse_dense_matmul(t[0], t[1]))([adj_in, x_neigh])
-            x = BiasLayer()(x)
-            x = Add()([x_node, x])
-        else:
-            x = Dense(n_labels, use_bias=True)(x)
-
-        self.model = Model([node_in, adj_in], x)
-        self.model.build([(self.features.shape[0], input_dim), tuple(self.adj_size)])
-
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
-        if idx is None:
-            return output
-        else:
-            return tf.gather(output, idx)
-
-    def summary(self):
-        self.model.summary()
-
-
-class SAGELAF(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
-        super(SAGELAF, self).__init__()
-        self.features = features
-        self.labels = labels
-        self.adj = adj
-        self.adj_size = adj.dense_shape.numpy()
-
-        adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
-
-        x = node_in
-        # first sage layer
-        for l in range(layers):
-            x_node = Dense(hidden_units, use_bias=(l == 0))(x)
-            x_neigh = Dense(hidden_units, use_bias=(l == 0))(x)
-            x = LAF(4)([adj_in, x_neigh])
-            x = BiasLayer()(x)
-            x = Add()([x_node, x])
-            x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
-            x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
-
-        # second sage layer
-        if conv_last:
-            x_node = Dense(n_labels, use_bias=False)(x)
-            x_neigh = Dense(n_labels, use_bias=False)(x)
-            x = LAF(4)([adj_in, x_neigh])
-            x = BiasLayer()(x)
-            x = Add()([x_node, x])
-        else:
-            x = Dense(n_labels, use_bias=True)(x)
-
-        self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
-
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
-        if idx is None:
-            return output
-        else:
-            return tf.gather(output, idx)
-
-    def summary(self):
-        self.model.summary()
