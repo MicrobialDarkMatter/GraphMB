@@ -86,11 +86,12 @@ def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, l
     #print("### Precision = %0.4f  Recall = %0.4f  F1 = %0.4f ARI = %0.4f" % (my_precision, my_recall, my_f1, my_ari))
     return my_precision, my_recall, my_f1, 0
 
-def calculate_sim_between_same_labels(node_names, embeddings, edges, label_to_node):
+def calculate_sim_between_same_labels_small(node_names, embeddings, edges, label_to_node, node_to_label):
     # divide sim between node of same label by avg sim between all nodes
     avg_label_sims = {}
+    # use only embeddings of nodes with labels
+    edges = np.array(edges)
     all_cosine_sim = cosine_similarity(embeddings, embeddings)
-    #breakpoint()
     #https://stackoverflow.com/a/69865919
     i = np.ravel_multi_index(np.array(edges).T, all_cosine_sim.shape)
     edge_sim = all_cosine_sim.take(i)
@@ -106,7 +107,36 @@ def calculate_sim_between_same_labels(node_names, embeddings, edges, label_to_no
     avg = sum(avg_label_sims.values())/len(avg_label_sims.values())      
     #print(round(avg, 4), round(all_cosine_sim, 4))
           #[(x, round(avg_label_sims[x], 4), len(label_to_node[x])) for x in avg_label_sims][:10]])
-    return avg, edge_sim, all_cosine_sim, 
+    return avg, edge_sim, all_cosine_sim
+
+
+def calculate_sim_between_same_labels_big(node_names, embeddings, edges, label_to_node, node_to_label):
+    # divide sim between node of same label by avg sim between all nodes
+    avg_label_sims = {}
+    # use only embeddings of nodes with labels
+    edges = np.array(edges)
+    node_idx_with_edges = np.unique(edges)
+    #label_mask = np.array([node_to_label.get(n, "NA") != "NA" for n in node_names])
+    #all_cosine_sim = cosine_similarity(embeddings[node_idx_with_edges], embeddings[node_idx_with_edges])
+    all_cosine_sim = cosine_similarity(embeddings, embeddings)
+    edges_new = np.searchsorted(node_idx_with_edges, edges)
+    #https://stackoverflow.com/a/69865919
+    i = np.ravel_multi_index(np.array(edges_new).T, all_cosine_sim.shape)
+    edge_sim = all_cosine_sim.take(i)
+    edge_sim = edge_sim.mean()
+    all_cosine_sim = np.triu(all_cosine_sim)
+    all_cosine_sim = all_cosine_sim.mean()
+    for l in label_to_node:
+        label_node_idxs = [node_names.index(n) for n in label_to_node[l] if node_names.index(n) in node_idx_with_edges]
+        label_node_idxs = np.searchsorted(node_idx_with_edges, label_node_idxs)
+        label_embs = np.array(embeddings)[label_node_idxs]
+        if label_embs.shape[0] > 1: # at least two nodes
+            avg_label_sims[l] = (np.triu(cosine_similarity(label_embs, label_embs))).mean()
+        # pick a random 
+    avg = sum(avg_label_sims.values())/len(avg_label_sims.values())      
+    #print(round(avg, 4), round(all_cosine_sim, 4))
+          #[(x, round(avg_label_sims[x], 4), len(label_to_node[x])) for x in avg_label_sims][:10]])
+    return avg, edge_sim, all_cosine_sim
 
 
 def read_marker_gene_sets(lineage_file):

@@ -19,7 +19,7 @@ from scipy.sparse import coo_matrix, diags
 
 from graphmb.gnn_models import SAGE, SAGELAF, GCN, GCNLAF, GAT, GATLAF, VGAE
 from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim, get_cluster_mask, write_bins
-from graphmb.evaluate import calculate_overall_prf, calculate_sim_between_same_labels
+from graphmb.evaluate import calculate_overall_prf, calculate_sim_between_same_labels_small
 
 name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}
 
@@ -175,7 +175,6 @@ def compute_clusters_and_stats(
     contig_genes = dataset.contig_markers
     node_to_gt_idx_label = dataset.node_to_label
     gt_idx_label_to_node = dataset.label_to_node
-
     cluster_to_contig, contig_to_bin, labels, cluster_centroids = run_clustering(X, dataset.node_names, clustering, cuda)
    
     scores = {"precision": 0, "recall": 0, "f1": 0, "ari": 0, "hq": 0, "mq": 0,
@@ -213,12 +212,13 @@ def compute_clusters_and_stats(
     
     # TODO use p/r/ to get positive_clusters
     if node_to_gt_idx_label is not None and len(dataset.labels) > 1:
-        sims = calculate_sim_between_same_labels(dataset.node_names, X,
+        sims = calculate_sim_between_same_labels_small(dataset.node_names, X,
                                                 list(zip(dataset.edges_src, dataset.edges_dst)),
-                                                dataset.label_to_node)
+                                                dataset.label_to_node, dataset.node_to_label)
         scores["avg_label_sim"], scores["avg_edge_sim"], scores["avg_total_sim"] = sims
         scores["ratio_labelsim"] = scores["avg_label_sim"]/scores["avg_total_sim"]
         scores["ratio_edgesim"] = scores["avg_edge_sim"]/scores["avg_total_sim"]
+        scores["ratio_labeltoedgesim"] = scores["avg_label_sim"]/scores["avg_edge_sim"]
         """p, r, f1, ari = calculate_overall_prf(
             cluster_to_contig, contig_to_bin, node_to_gt_idx_label, gt_idx_label_to_node
         )
