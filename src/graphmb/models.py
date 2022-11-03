@@ -1,3 +1,4 @@
+from os import uname
 import tensorflow as tf
 
 from tensorflow.keras.optimizers import Adam, SGD
@@ -298,10 +299,19 @@ class TH:
         return pairwise
 
     @tf.function
-    def train_unsupervised(self, nodes_idx, edges_idx=None,
+    def train_unsupervised(self, nodes_idx=None, edges_idx=None,
                            scgs_idx=None,training=True, vae=True):
         if edges_idx is None:
             edges_idx = range(0,self.gnn_model.adj.indices.shape[0])
+        if nodes_idx is None:
+            # get nodes_idx from edges_idx
+            train_src_original = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,0])
+            train_dst_original = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,1])
+            unique_nodes = tf.unique(tf.concat((train_src_original, train_dst_original), axis=0))
+            nodes_idx = unique_nodes.y
+            train_src_new = unique_nodes.idx[:train_src_original.shape[0]]
+            train_dst_new = unique_nodes.idx[train_src_original.shape[0]:]
+            #print(f"using {nodes_idx.shape} nodes for this batch")
         if scgs_idx is None:
             scgs_idx = range(0, len(self.scg_pairs))
         with tf.GradientTape() as tape:
@@ -340,23 +350,21 @@ class TH:
                 node_hat = self.gnn_model(ae_embs, nodes_idx)
             else:
                 node_hat = ae_embs
-            
+
             gnn_loss = tf.constant(0, dtype=tf.float32)
             gnn_losses = {}
             #breakpoint()
             # TODO: take into account node_batches instead of edge_batches
             if self.gnn_weight > 0:
-                train_rows = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,0])
-                row_embs = tf.gather(indices=train_rows, params=node_hat)
-                train_cols = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,1])
-                col_embs = tf.gather(indices=train_cols, params=node_hat)
-                positive_pairwise = self.nodesim(row_embs, col_embs)
+                src_embs = tf.gather(indices=train_src_new, params=node_hat)
+                dst_embs = tf.gather(indices=train_dst_new, params=node_hat)
+                positive_pairwise = self.nodesim(src_embs, dst_embs)
                 # create random negatives for gnn_loss
-                neg_idx_row, neg_idx_col = self.sample_negatives(edges_idx)
+                neg_idx_src, neg_idx_src = self.sample_negatives(edges_idx)
                 try:
                     #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
-                    neg_row_embs = tf.gather(indices=neg_idx_row, params=node_hat)
-                    neg_col_embs = tf.gather(indices=neg_idx_col, params=node_hat)
+                    neg_row_embs = tf.gather(indices=neg_idx_src, params=node_hat)
+                    neg_col_embs = tf.gather(indices=neg_idx_src, params=node_hat)
                     negative_pairs = self.nodesim(neg_row_embs, neg_col_embs)
                 except:
                     breakpoint()

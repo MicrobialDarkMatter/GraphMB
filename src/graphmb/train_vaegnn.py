@@ -12,7 +12,7 @@ from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
-def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
+def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=False):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -157,21 +157,20 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
             train_idx = np.array(random.sample(list(range(len(features))), int(len(features)*(1-args.eval_split))))
             eval_idx = np.array([x for x in np.arange(len(features)) if x not in train_idx])
             logging.info(f"**** using {len(train_idx)} for training and {len(eval_idx)} for eval")
-        
+        edges_idx = np.arange(gnn_model.adj.indices.shape[0])
         features = np.array(features)
         pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
         scores = [stats]
         best_embs, best_vae_embs, best_model, best_hq, best_epoch = None, None, None, 0, 0
         
         # increasing batch size
-        batch_size = args.batchsize
-        if batch_size == 0:
-            batch_size = len(train_idx)
-        logger.info("**** initial batch size: {} ****".format(batch_size))
-        mlflow.log_metric("cur_batch_size", batch_size, 0)
+        graph_batch_size = args.batchsize
+        if graph_batch_size == 0:
+            graph_batch_size = len(train_idx)
+        logger.info("**** initial batch size: {} ****".format(graph_batch_size))
+        mlflow.log_metric("cur_batch_size", graph_batch_size, 0)
         batch_steps = [25, 75, 150, 300]
-        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
-        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
+        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*graph_batch_size < len(edges_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
         
         vae_losses = []
@@ -183,19 +182,19 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
 
             # train VAE in batches
             if e in batch_steps:
-                print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
-                batch_size = batch_size * 2
-                mlflow.log_metric("cur_batch_size", batch_size, e )
+                print(f'Increasing batch size from {graph_batch_size:d} to {graph_batch_size*2:d}')
+                graph_batch_size = graph_batch_size * 2
+                mlflow.log_metric("cur_batch_size", graph_batch_size, e )
 
 
             # train VAE ########
             #np.random.shuffle(train_idx)
-            n_batches = len(train_idx)//batch_size
-            if n_batches < len(train_idx)/batch_size:
-                n_batches += 1 # add final batch
-            pbar_vaebatch = tqdm(range(n_batches),
-                                 disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100),
-                                 position=1, ascii=' =')
+            #n_batches = len(train_idx)//batch_size
+            #if n_batches < len(train_idx)/batch_size:
+            #    n_batches += 1 # add final batch
+            #pbar_vaebatch = tqdm(range(n_batches),
+            #                     disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100),
+            #                     position=1, ascii=' =')
             """for b in pbar_vaebatch:
                 batch_idx = train_idx[b*batch_size:(b+1)*batch_size]
                 batch_vae_losses = vae_trainer.train_step(X[batch_idx], summary_writer, step, vae=True)
@@ -220,20 +219,20 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False):
 
             # train GNN ################################################
             #gnn_trainer.encoder = vae_trainer.encoder
-            edges_idx = np.arange(gnn_model.adj.indices.shape[0])
             #np.random.shuffle(edges_idx)
             #graph_batch_size = 256
-            graph_batch_size = len(edges_idx)
-            #n_batches = len(edges_idx)//graph_batch_size
-            #if n_batches < len(edges_idx)/graph_batch_size:
-            #    n_batches += 1 # add final batch
-            #pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or graph_batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
+            #graph_batch_size = len(edges_idx)
+            n_batches = len(edges_idx)//graph_batch_size
+            if use_last_batch and n_batches < len(edges_idx)/graph_batch_size:
+                n_batches += 1 # add final batch
+            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or graph_batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
             #for b in pbar_gnnbatch:
-            for nodeb in pbar_vaebatch:
-                #batch_idx = edges_idx[b*graph_batch_size:(b+1)*graph_batch_size]
-                batch_idx = train_idx[nodeb*batch_size:(nodeb+1)*batch_size]
-                losses = gnn_trainer.train_unsupervised(edges_idx=edges_idx,
-                                                        nodes_idx=batch_idx,
+            for b in pbar_gnnbatch:
+                edges_batch = edges_idx[b*graph_batch_size:(b+1)*graph_batch_size]
+                #nodes_idx = train_idx[nodeb*batch_size:(nodeb+1)*batch_size]
+                nodes_batch = None
+                losses = gnn_trainer.train_unsupervised(edges_idx=edges_batch,
+                                                        nodes_idx=nodes_batch,
                                                         vae=True)
                 total_loss, gnn_losses, ae_losses = losses
                 #pos_loss, neg_loss, diff_loss, gnn_loss = gnn_losses
