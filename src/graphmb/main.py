@@ -138,7 +138,8 @@ def main():
     if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
         print(f"Assembly Graph file {args.graph_file} not found")
         exit()
-    if not os.path.exists(os.path.join(args.assembly, args.features)):
+    if not os.path.exists(os.path.join(args.assembly, args.features)) and \
+        not os.path.exists(os.path.join(args.outdir, args.features)):
         # needs assembly files to calculate features
         if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
             print(f"Assembly {args.assembly_name} not found")
@@ -250,8 +251,12 @@ def main():
             features_dir = os.path.join(args.assembly, "features.tsv")
         else:
             features_dir = os.path.join(args.outdir, "features.tsv")
+    elif os.path.exists(os.path.join(args.assembly, args.features)):
+        features_dir = os.path.join(args.assembly, args.features)
+    elif os.path.exists(os.path.join(args.outdir, args.features)):
+        features_dir = os.path.join(args.outdir, args.features)
     else:
-        features_dir = args.features
+        features_dir = args.features # user wants features to be created to a specific dir
     vamb_emb_exists = os.path.exists(features_dir)
     if args.vamb or not vamb_emb_exists:
         print("running VAMB...")
