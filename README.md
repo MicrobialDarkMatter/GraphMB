@@ -72,8 +72,8 @@ Otherwise, it will assume that the files are inside the directory.
 You can get an example of these files [here](https://drive.google.com/drive/folders/1m6uTgTPUghk_q9GxfX1UNEOfn8jnIdt5?usp=sharing).
 Download from this link and extract to data/strong100.
 The datasets used in our experiments are available [here](https://zenodo.org/record/6122610)
-
-
+These datasets include the VAE embeddings obtained with Vamb, which are automatically used by GraphMB.
+If you want to re-run Vamb, use the `--vamb` option.
 ## How to run
 If you have your assembly in some directory, with the files mentioned above:
 
@@ -126,7 +126,6 @@ On this section we present an overview of how to get your data ready for GraphMB
 
 1. Assembly your reads with metaflye: ```flye -nano-raw <reads_file> -o <output> --meta```
 2. Filter and polish assembly if necessary (or extract edge sequences and polish edge sequences instead)
-3. Run CheckM on sequences with Bacteria markers: 
 ```bash
 mv assembly.fasta contigs.fasta
 awk '/^S/{print ">"$2"\n"$3}' assembly_graph.gfa | fold > assembly.fasta
@@ -141,15 +140,13 @@ find edges/ -name "* *" -type f | rename 's/ /_/g'
 checkm taxonomy_wf -x fa domain Bacteria edges/ checkm_edges/
 checkm qa checkm_edges/Bacteria.ms checkm_edges/ -f checkm_edges_polished_results.txt --tab_table -o 2
 ```
-4. Get abundances with `jgi_summarize_bam_contig_depths`:
+5. Get abundances with `jgi_summarize_bam_contig_depths`:
 ```bash
 minimap2 -I 64GB -d assembly.mmi assembly.fasta # make index
 minimap2 -I 64GB -ax map-ont assembly.mmi <reads_file> > assembly.sam
 samtools sort assembly.sam > assembly.bam
 jgi_summarize_bam_contig_depths --outputDepth assembly_depth.txt assembly.bam
 ```
-5. Now you should have all the files to run GraphMB
-
 6. Now you should have all the files to run GraphMB: assembly.fasta, assembly_graph.gfa and assembly_depth.txt. The marker_gene_stats.csv file will be saved to checkm_edges/storage/.
 
 We have only tested GraphMB on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
