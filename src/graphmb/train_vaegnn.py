@@ -12,7 +12,7 @@ from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
 from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
 
-def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=False):
+def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use_last_batch=True):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -76,6 +76,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
                         amber=(args.labels is not None and "amber" in args.labels),
                         #cuda=args.cuda,
                     )
+            #mlflow.log_metrics(stats, step=0)
             if args.noise and hasattr(dataset, "true_adj_matrix"):
                 # eval edge acc if true adj matrix exists
                 # full adj matrix may be too big to compute, use only indices from true_adj
@@ -90,7 +91,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
                 print(len(correct_edges), len(true_edges), len(predicted_edges))
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:
-            stats = {"hq": 0, "epoch":0 }
+            stats = {"epoch":0, target_metric: 0 }
             cluster_labels = []
         
         pname = ""
@@ -161,7 +162,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
         features = np.array(features)
         pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
         scores = [stats]
-        best_embs, best_vae_embs, best_model, best_hq, best_epoch = None, None, None, 0, 0
+        best_embs, best_vae_embs, best_model, best_score, best_epoch = None, None, None, 0, 0
         
         # increasing batch size
         graph_batch_size = args.batchsize
@@ -219,7 +220,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
 
             # train GNN ################################################
             #gnn_trainer.encoder = vae_trainer.encoder
-            #np.random.shuffle(edges_idx)
+            np.random.shuffle(edges_idx)
             #graph_batch_size = 256
             #graph_batch_size = len(edges_idx)
             n_batches = len(edges_idx)//graph_batch_size
@@ -300,12 +301,15 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
                     #breakpoint()
                     topk_indices = tf.math.top_k(tf.math.abs(gnn_trainer.positive_noises[:, 0]), k=10).indices
                     #breakpoint()
-                    logger.debug("            src dst observed predicted noise")
+                    logger.debug("            src (label) dst (label) observed predicted noise")
                     for i in topk_indices:
-                        logger.debug("{} {} {:.4f} {:.4f} {}".format(dataset.node_names[gnn_model.adj.indices[i][0]],
-                                     dataset.node_names[gnn_model.adj.indices[i][1]], gnn_model.adj.values[i].numpy(),
-                                     tf.nn.sigmoid(tf.reduce_sum(tf.math.multiply(node_new_features[gnn_model.adj.indices[i][0]],
-                                                                    node_new_features[gnn_model.adj.indices[i][1]]))).numpy(),
+                        logger.debug("{} ({}) {} ({}) {:.4f} {:.4f} {}".format(dataset.node_names[gnn_model.adj.indices[i][0]],
+                                     dataset.node_to_label[dataset.node_names[gnn_model.adj.indices[i][0]]],
+                                     dataset.node_names[gnn_model.adj.indices[i][1]], 
+                                     dataset.node_to_label[dataset.node_names[gnn_model.adj.indices[i][1]]],
+                                     gnn_model.adj.values[i].numpy(),
+                                     tf.reduce_sum(tf.math.multiply(tf.nn.l2_normalize(node_new_features[gnn_model.adj.indices[i][0]]),
+                                                                    tf.nn.l2_normalize(node_new_features[gnn_model.adj.indices[i][1]]))).numpy(),
                                      gnn_trainer.positive_noises[i].numpy()))
 
 
@@ -325,22 +329,22 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
                     #pass
                     
                 weights = (gnn_trainer.encoder.get_weights(), gnn_trainer.gnn_model.get_weights())
-                best_hq, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer,
+                best_score, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer,
                                                                     node_new_features, cluster_mask, weights,
                                                                     step, args, dataset, e, scores,
-                                                                    best_hq, best_embs, best_epoch, best_model)
+                                                                    best_score, best_embs, best_epoch, best_model)
                 stats = scores[-1]
                 all_cluster_labels.append(cluster_labels)
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
-                    scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+                    scores_string = f"HQ={stats['hq']}  BestHQ={stats.get('hq',0)} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
                     losses_string = " ".join([f"{k}={v:.3f}" for k, v in epoch_metrics.items()])
                     logger.info(f"[{args.outname} {nlayers_gnn}l {pname}]{losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
                 mlflow.log_metrics(stats, step=e)
                 #print("total eval time", datetime.datetime.now() - evalstarttime)
             losses_string = " ".join([f"{k}={v:.3f}" for k, v in epoch_metrics.items() if v != 0])
-            scores_string = f"HQ={stats['hq']} BestHQ={best_hq} BestEpoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+            scores_string = f"HQ={stats['hq']} BestHQ={stats.get('hq',0)} BestEpoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
             pbar_epoch.set_description(
                 f"[{args.outname} {pname}] {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )
@@ -373,9 +377,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
         scores.append(stats)
         # get best stats:
         # if concat_features:  # use HQ
-        hqs = [s["hq"] for s in scores]
+        target_scores = [s[target_metric] for s in scores]
         #epoch_hqs = [s["epoch"] for s in scores]
-        best_idx = np.argmax(hqs)
+        best_idx = np.argmax(target_scores)
         mlflow.log_metrics(scores[best_idx], step=e+1)
         # else:  # use F1
         #    f1s = [s["f1"] for s in scores]

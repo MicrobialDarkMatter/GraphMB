@@ -35,10 +35,10 @@ from graphmb.graph_functions import (
 
 from graphmb.version import __version__
 
-def run_model(dataset, args, logger, nrun):
+def run_model(dataset, args, logger, nrun, target_metric):
     import vaegbin, train_vaegnn, train_gnn, train_vae, train_auggnn
     if args.model_name.endswith("_ae"):
-        return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun)
+        return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun, target_metric)
     elif args.model_name == "vae":
         return train_vae.run_model_vae(dataset, args, logger, nrun)
     elif args.model_name in ("gcn", "sage", "gat"):
@@ -403,12 +403,12 @@ def main():
     parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=3)
     parser.add_argument("--hidden_gnn", type=int, help="Dimension of hidden layers of GNN", default=128)
     parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of GNN", default=512)
-    parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=64)
+    parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=32)
     parser.add_argument("--embsize_vae", "--zl", type=int, help="Output embedding dimension of VAE", default=64)
     parser.add_argument("--batchsize", type=int, help="batchsize to train the VAE", default=256)
     parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.0)
     parser.add_argument("--dropout_vae", type=float, help="dropout of the VAE", default=0.0)
-    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-4)
+    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=1)
     parser.add_argument("--kld_alpha", type=float, help="Coeficient for KLD loss", default=200)
@@ -545,15 +545,20 @@ def main():
         contignodes=args.contignodes
     )
     if args.read_cache or (dataset.check_cache(use_graph) and not args.reload):
+        logger.info("Reading cache from".format(args.outdir))
         dataset.read_cache(use_graph)
     else:
         check_dirs(args, use_features=False)
+        logger.info("Cache not found on {}".format(args.outdir))
         dataset.read_assembly()
+        logger.info("")
     
     if args.markers.startswith("gtdb"):
         dataset.read_gtdbtk_files()
     elif args.markers != "":
         dataset.read_scgs()
+    else:
+        args.markers = None
     
     if os.path.exists(os.path.join(args.assembly, "assembly_info.txt")):
         logger.info("Reading assembly info file")
@@ -563,6 +568,8 @@ def main():
     if args.kclusters is None:
         args.kclusters = len(dataset.labels)
     args.kclusters = int(args.kclusters)
+
+    
 
     # filter graph by components
     # dataset.connected = [c for c in dataset.connected if len(c) >= args.mincomp]
@@ -578,6 +585,8 @@ def main():
     # reload labels from file anyway
     if args.labels is not None:
         dataset.read_labels()
+    dataset.generate_edges_based_on_labels()
+    dataset.calculate_homophily()
     
     dataset.print_stats()
 
@@ -653,7 +662,7 @@ def main():
             elif args.markers is not None:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n)
+            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric="hq" if args.markers is None else "f1_avg_bp")
             tf.keras.backend.clear_session()
 
         run_post_processing(
@@ -692,7 +701,7 @@ def main():
     logger.info("{:.1f} {:.1f} {:.1f} {:.1f}".format(np.mean(hqs), np.std(hqs), np.mean(mqs), np.std(mqs)))
     if args.labels is not None:
         #amber_metrics_names = amber_metrics_per_run[0].keys()
-        amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "hq", "mq"]
+        amber_metrics_names = ["precision_avg_bp", "recall_avg_bp", "f1_avg_bp", "hq", "mq"]
         for mname in amber_metrics_names:
             values = [m[mname] for m in amber_metrics_per_run]
             logger.info("### amber eval {}: {:.4f} {:.4f} ###".format(mname, np.mean(values), np.std(values)))

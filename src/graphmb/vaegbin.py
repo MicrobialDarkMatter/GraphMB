@@ -235,9 +235,10 @@ def compute_clusters_and_stats(
         amber_metrics, bin_counts = amber_eval(os.path.join(dataset.data_dir, dataset.labelsfile), output_bins_filename, ["graphmb"])
         p_amber = amber_metrics["precision_avg_bp"]
         r_amber = amber_metrics["recall_avg_bp"]
+        f_amber = amber_metrics["recall_avg_bp"]
         scores["precision_avg_bp"] = p_amber
         scores["recall_avg_bp"] = r_amber
-        scores["f1_avg_bp"] = (2*p_amber*r_amber)/(p_amber+r_amber) if p_amber+r_amber > 0 else 0
+        scores["f1_avg_bp"] = f_amber
     #plot tSNE
     if tsne:
         cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(labels) if x == cluster] for cluster in set(labels)}
@@ -431,14 +432,13 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
 
     #log_to_tensorboard(summary_writer, {"hq": stats["hq"], "mq": stats["mq"]}, step)
     #all_cluster_labels.append(cluster_labels)
-
-    if dataset.contig_markers is not None and stats["hq"] > best_hq:
+    if dataset.contig_markers is not None and len(dataset.contig_markers) > 0 and stats["hq"] > best_hq:
         best_hq, best_embs, best_epoch, best_model = stats["hq"], node_new_features, epoch, weights
         #best_model = th.gnn_model
         #save_model(args, e, th, th_vae)
 
-    elif dataset.contig_markers is None and stats["f1"] > best_hq:
-        best_hq, best_embs, best_epoch, best_model = stats["f1"], node_new_features, epoch, weights
+    elif stats["f1_avg_bp"] > best_hq:
+        best_hq, best_embs, best_epoch, best_model = stats["f1_avg_bp"], node_new_features, epoch, weights
         #best_model = th.gnn_model
         #save_model(args, e, th, th_vae)
     # print('--- END ---')

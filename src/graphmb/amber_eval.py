@@ -16,9 +16,9 @@ def load_binnings(file_path_query, assemblytype, columns=["SEQUENCEID", "BINID"]
         # col_indices = [k for k, v in metadata[3].items() if v in columns]
         # amber files start with 4 header lines
     df = pd.read_csv(file_path_query, sep="\t", comment="#", skiprows=3, header=0)  # , usecols=col_indices)
-    df.rename(columns={i: c for i, c in enumerate(columns)}, inplace=True)
-    df = df.astype({'@@SEQUENCEID':'string'})
-    df["@@SEQUENCEID"]= df["@@SEQUENCEID"].apply(process_node_name, assembly_type=assemblytype)
+    df = df.rename(columns={df.columns[i]: c for i, c in enumerate(columns)}, inplace=False)
+    df = df.astype({'SEQUENCEID':'string'})
+    df["SEQUENCEID"]= df["SEQUENCEID"].apply(process_node_name, assembly_type=assemblytype)
     if "_LENGTH" in columns:
         df.rename(columns={"_LENGTH": "LENGTH"}, inplace=True)
         df["LENGTH"] = pd.to_numeric(df["LENGTH"])
@@ -29,10 +29,10 @@ def amber_eval(gs_path, bin_path, labels=["graphmb"], assemblytype="flye"):
     gs_df = load_binnings(gs_path, columns=["SEQUENCEID", "BINID", "_LENGTH"], assemblytype=assemblytype)
     bin_df = load_binnings(bin_path, assemblytype=assemblytype)
     # load_queries(gs_df, bin_df, labels=labels, options, options_gs)
-    gs_df = gs_df[["@@SEQUENCEID", "BINID", "LENGTH"]].rename(columns={"LENGTH": "seq_length",
+    gs_df = gs_df[["SEQUENCEID", "BINID", "LENGTH"]].rename(columns={"LENGTH": "seq_length",
                                                                        "BINID": "genome_id",
-                                                                       "@@SEQUENCEID": "SEQUENCEID"})
-    bin_df = bin_df[["@@SEQUENCEID", "BINID"]].rename(columns={"@@SEQUENCEID": "SEQUENCEID"})
+                                                                       "SEQUENCEID": "SEQUENCEID"})
+    bin_df = bin_df[["SEQUENCEID", "BINID"]].rename(columns={"SEQUENCEID": "SEQUENCEID"})
     gs_df["seq_length"] = pd.to_numeric(gs_df["seq_length"])
     query_df = bin_df[["SEQUENCEID", "BINID"]]
     query_w_length = pd.merge(query_df, gs_df.drop_duplicates("SEQUENCEID"), on="SEQUENCEID", sort=False)
@@ -191,6 +191,7 @@ def amber_eval(gs_path, bin_path, labels=["graphmb"], assemblytype="flye"):
         "recall_weighted_seq": recall_weighted_seq,
         "accuracy_bp": accuracy_bp,
         "accuracy_seq": accuracy_seq,
+        "f1_avg_bp": (2*precision_avg_bp*recall_avg_bp)/(precision_avg_bp+recall_avg_bp) if precision_avg_bp+recall_avg_bp > 0 else 0
     }
     bins_eval = calc_num_recovered_genomes(precision_df, [0.9, 0.5], [0.05, 0.1])
     return metrics, bins_eval
