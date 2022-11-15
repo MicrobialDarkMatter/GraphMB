@@ -22,7 +22,7 @@ from graphmb.evaluate import (
 BACTERIA_MARKERS = "data/Bacteria.ms"
 
 
-def process_node_name(name: str, assembly_type: str) -> str:
+def process_node_name(name: str, assembly_type: str="flye") -> str:
     contig_name = name.strip().split(" ")[0]
     #if assembly_type == "spades":
     contig_name = "_".join(contig_name.split("_")[:2])
@@ -109,7 +109,7 @@ class AssemblyDataset:
             self.logger.info(f"read {len(self.edges_src)}, edges")
             np.save(os.path.join(self.cache_dir, "edge_weights.npy"), self.edge_weights)
             scipy.sparse.save_npz(os.path.join(self.cache_dir, "adj_sparse.npz"), self.adj_matrix)
-            np.save(os.path.join(self.cache_dir, "graph_nodes.pkl"), self.graph_nodes)
+            np.save(os.path.join(self.cache_dir, "graph_nodes.npy"), self.graph_nodes)
             pickle.dump(self.graph_paths, open(os.path.join(self.cache_dir, "graph_paths.pkl"), 'wb'))
         # self.filter_contigs()
         # self.rename_nodes_to_index()
@@ -123,6 +123,7 @@ class AssemblyDataset:
         np.save(os.path.join(self.cache_dir, "node_to_label.npy"), self.node_to_label)
         np.save(os.path.join(self.cache_dir, "label_to_node.npy"), self.label_to_node)
         np.save(os.path.join(self.cache_dir, "labels.npy"), self.labels)
+        self.logger.info("Saved cache to {}".format(self.cache_dir))
         # print("reading SCGs")
         # self.read_scgs()
 
@@ -451,7 +452,9 @@ class AssemblyDataset:
                             node_depths[node_name] = np.array([float(values[i]) for i in depth_i])
                         else:
                             self.logger.info("node name not found: {}".format(node_name))
-                self.node_depths = np.array([node_depths[n] for n in self.node_names])
+                if len(node_depths) != len(self.node_names):
+                    self.logger.info("missing abundance for some nodes: {}".format(len(node_depths) - len(self.node_names)))
+                self.node_depths = np.array([node_depths.get(n, [0]*len(depth_i)) for n in self.node_names])
             if len(self.node_depths[0]) > 1:  # normalize depths
                 depthssum = self.node_depths.sum(axis=1) + 1e-10
                 self.node_depths /= depthssum.reshape((-1, 1))
@@ -476,10 +479,10 @@ class AssemblyDataset:
                         values = line.strip().split("\t")
                     if len(values) < 2:
                         breakpoint()
-                    node = values[0]
+                    node_name = process_node_name(values[0], self.assembly_type)
                     label = values[1]
-                    if node in node_to_label:
-                        node_to_label[node] = label
+                    if node_name in node_to_label:
+                        node_to_label[node_name] = label
                         labels.add(label)
                     else:
                         self.logger.info(("unused label: {}".format(line.strip())))
@@ -740,5 +743,31 @@ class AssemblyDataset:
                     edge_ids_with_same_scgs.append(x)
         print("edges with overlapping scgs (max=20):", scg_counter.most_common(20))
         return edge_ids_with_same_scgs
+
+    def generate_edges_based_on_labels(self):
+        # link nodes with same labels and create new adj_matrix/edges_src/edges_dst/edge_weights
+        #new_edges = []
+        new_srcs = []
+        new_dsts = []
+        for label in self.label_to_node:
+            # make circular graph
+            for i in range(len(self.label_to_node[label])):
+                new_src = self.node_names.index(self.label_to_node[label][i])
+                new_srcs.append(new_src)
+                if i+1 < len(self.label_to_node[label]):
+                    new_dst = self.node_names.index(self.label_to_node[label][i+1])
+                else: # connect to element 0
+                    new_dst = self.node_names.index(self.label_to_node[label][0])
+                #new_edges.append((new_src, new_dst))
+                new_dsts.append(new_dst)
+        new_weights = [1] * len(new_srcs)
+        print("creating new graph with {} edges".format(len(new_srcs)))
+        self.adj_matrix = scipy.sparse.coo_matrix(
+            (new_weights, (new_srcs, new_dsts)), shape=(len(self.node_names), len(self.node_names))
+        )
+        self.edges_src = new_srcs
+        self.edges_dst = new_dsts
+        self.edge_weights = np.array(new_weights)
+
 
 

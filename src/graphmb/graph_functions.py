@@ -887,6 +887,6 @@ def get_cluster_mask(quick, dataset):
 
 def write_bins(contig_to_bin, outputfile):
     with open(outputfile, "w") as f:
-        f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+        f.write("#\n@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for c in contig_to_bin:
             f.write(f"{str(c)}\t{str(contig_to_bin[c])}\n")

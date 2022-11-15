@@ -2,29 +2,38 @@ from collections import OrderedDict
 from collections import defaultdict
 import itertools
 import pandas as pd
+from contigsdataset import process_node_name
 
 # adapt eval scripts from amber but simplified
 
 
-def load_binnings(file_path_query, columns=["SEQUENCEID", "BINID"]):
+def load_binnings(file_path_query, assemblytype, columns=["SEQUENCEID", "BINID"]):
     # columns = ["SEQUENCEID", "BINID", "TAXID", "LENGTH", "_LENGTH"]
     # sample_id_to_query_df = OrderedDict()
-    for metadata in columns:
+    #for metadata in columns:
         # logging.getLogger('amber').info('Loading ' + metadata[2]['SAMPLEID'])
         # nrows = metadata[1] - metadata[0] + 1
         # col_indices = [k for k, v in metadata[3].items() if v in columns]
-        # amber files start with 3 header lines
-        df = pd.read_csv(file_path_query, sep="\t", comment="#", skiprows=3, header=None)  # , usecols=col_indices)
-        df.rename(columns={i: c for i, c in enumerate(columns)}, inplace=True)
+        # amber files start with 4 header lines
+    df = pd.read_csv(file_path_query, sep="\t", comment="#", skiprows=3, header=0)  # , usecols=col_indices)
+    df.rename(columns={i: c for i, c in enumerate(columns)}, inplace=True)
+    df = df.astype({'@@SEQUENCEID':'string'})
+    df["@@SEQUENCEID"]= df["@@SEQUENCEID"].apply(process_node_name, assembly_type=assemblytype)
+    if "_LENGTH" in columns:
         df.rename(columns={"_LENGTH": "LENGTH"}, inplace=True)
+        df["LENGTH"] = pd.to_numeric(df["LENGTH"])
     return df
 
 
-def amber_eval(gs_path, bin_path, labels=["graphmb"]):
-    gs_df = load_binnings(gs_path, columns=["SEQUENCEID", "BINID", "LENGTH"])
-    bin_df = load_binnings(bin_path)
+def amber_eval(gs_path, bin_path, labels=["graphmb"], assemblytype="flye"):
+    gs_df = load_binnings(gs_path, columns=["SEQUENCEID", "BINID", "_LENGTH"], assemblytype=assemblytype)
+    bin_df = load_binnings(bin_path, assemblytype=assemblytype)
     # load_queries(gs_df, bin_df, labels=labels, options, options_gs)
-    gs_df = gs_df[["SEQUENCEID", "BINID", "LENGTH"]].rename(columns={"LENGTH": "seq_length", "BINID": "genome_id"})
+    gs_df = gs_df[["@@SEQUENCEID", "BINID", "LENGTH"]].rename(columns={"LENGTH": "seq_length",
+                                                                       "BINID": "genome_id",
+                                                                       "@@SEQUENCEID": "SEQUENCEID"})
+    bin_df = bin_df[["@@SEQUENCEID", "BINID"]].rename(columns={"@@SEQUENCEID": "SEQUENCEID"})
+    gs_df["seq_length"] = pd.to_numeric(gs_df["seq_length"])
     query_df = bin_df[["SEQUENCEID", "BINID"]]
     query_w_length = pd.merge(query_df, gs_df.drop_duplicates("SEQUENCEID"), on="SEQUENCEID", sort=False)
     query_w_length_no_dups = query_w_length.drop_duplicates("SEQUENCEID")
