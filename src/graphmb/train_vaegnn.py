@@ -303,8 +303,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(edges_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
         
-        vae_losses = []
-        gnn_losses = []
+        vae_losses_epoch = {}
+        gnn_losses_epoch = {}
+        total_losses_epoch = []
         step = 0
         for e in pbar_epoch:
             #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
@@ -336,19 +337,24 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                                                         nodes_idx=nodes_batch,
                                                         vae=True)
                 total_loss, gnn_losses, ae_losses = losses
-                #pos_loss, neg_loss, diff_loss, gnn_loss = gnn_losses
-            epoch_metrics = {"Total": float(total_loss.numpy()), "gnn": gnn_losses["gnn_loss"].numpy(),
-                                                "SCG": gnn_losses["scg_loss"].numpy(),
-                                                #'GNN  LR': float(trainer.opt._decayed_lr(float)),
-                                                "pos": gnn_losses["pos_loss"].numpy(),
-                                                "neg": gnn_losses["neg_loss"].numpy(),
-                                                "kld": ae_losses["kld"].numpy(),
-                                                "vae": ae_losses["vae_loss"].numpy(),
-                                                "kmer": ae_losses["kmer_loss"].numpy(),
-                                                "ab": ae_losses["ab_loss"].numpy()}
-                                                #"logvar": ae_losses["mean_logvar"],
-                                                #"grad_norm": ae_losses["grad_norm"],
-                                                #"grad_norm_clip": ae_losses["grad_norm_clip"]}
+                total_losses_epoch.append(total_loss.numpy())
+                for l in gnn_losses: gnn_losses_epoch.setdefault(l,[]).append(gnn_losses[l])
+                for l in ae_losses: gnn_losses_epoch.setdefault(l,[]).append(ae_losses[l])
+
+                #add losses to get epoch avg
+            epoch_metrics = {"Total": np.average(total_losses_epoch),
+                             "gnn": np.average(gnn_losses["gnn_loss"]),
+                             "SCG": np.average(gnn_losses["scg_loss"]),
+                            #'GNN  LR': float(trainer.opt._decayed_lr(float)),
+                            "pos": np.average(gnn_losses["pos_loss"]),
+                            "neg": np.average(gnn_losses["neg_loss"]),
+                            "kld": np.average(ae_losses["kld"]),
+                            "vae": np.average(ae_losses["vae_loss"]),
+                            "kmer": np.average(ae_losses["kmer_loss"]),
+                            "ab": np.average( ae_losses["ab_loss"])}
+                            #"logvar": ae_losses["mean_logvar"],
+                            #"grad_norm": ae_losses["grad_norm"],
+                            #"grad_norm_clip": ae_losses["grad_norm_clip"]}
             #print(float(gnn_trainer.opt._decayed_lr(float)))
             log_to_tensorboard(summary_writer, epoch_metrics, step)
             mlflow.log_metrics(epoch_metrics, step=e)
