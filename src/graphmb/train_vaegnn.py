@@ -6,11 +6,137 @@ import random
 import logging
 from tqdm import tqdm
 import mlflow
+from scipy.sparse import coo_matrix, diags
 
 from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder, LabelClassifier
-from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
-from graphmb.evaluate import calculate_overall_prf
-from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
+from graphmb.utils import set_seed
+from graphmb.visualize import plot_edges_sim
+from graphmb.evaluate import compute_clusters_and_stats, eval_epoch
+from graphmb.utils import get_cluster_mask
+from graphmb.gnn_models import name_to_model
+    
+class TensorboardLogger(logging.StreamHandler):
+    def __init__(self, file_writer, runname=""):
+        logging.StreamHandler.__init__(self)
+        self.file_writer = file_writer
+        self.runname = runname
+        self.step = 0
+
+    def emit(self, msg):
+        with self.file_writer.as_default():
+            tf.summary.text(self.runname, msg.msg, step=self.step)
+        self.step += 1
+
+
+def log_to_tensorboard(writer, values, step):
+    """Write key-values to writer
+    """
+    for k, v in values.items():
+        with writer.as_default():
+            tf.summary.scalar(k, v, step=step)
+
+
+def normalize_adj_sparse(A):
+    #breakpoint()
+    # https://github.com/tkipf/gcn/blob/master/gcn/utils.py
+    A.setdiag(1)
+    rowsum = np.array(A.sum(1))
+    d_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
+    d_mat_inv_sqrt = diags(d_inv_sqrt)
+    return A.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()
+
+
+def prepare_data_for_gnn(
+    dataset, use_edge_weights=True, cluster_markers_only=False, use_raw=False,
+    binarize=False, remove_edges=False, remove_same_scg=True
+):
+
+    if use_raw: # use raw features instead of precomputed embeddings
+        node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
+        # features are already normalized
+        #node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
+        X = node_raw
+    else:
+        node_features = (dataset.node_embs - dataset.node_embs.mean(axis=0, keepdims=True)) / dataset.node_embs.std(
+            axis=0, keepdims=True
+        )
+        X = node_features
+
+    depth = 2
+    # adjacency_matrix_sparse, edge_features = filter_graph_with_markers(adjacency_matrix_sparse, node_names, contig_genes, edge_features, depth=depth) 
+    cluster_mask = get_cluster_mask(cluster_markers_only, dataset)
+    #connected_marker_nodes = set(range(len(dataset.node_names)))
+    
+    adj_matrix = dataset.adj_matrix.copy()
+    edge_weights = dataset.edge_weights.copy()
+    if binarize:
+        # both dataset.adj_matrix and dataset.edge_weights
+        #breakpoint()
+        percentile = 90
+        threshold = np.percentile(dataset.edge_weights, percentile)
+        print(f"using this threshold ({percentile} percentile) {threshold} on adj matrix with {len(dataset.adj_matrix.row)} edges")
+        #dataset.adj_matrix = dataset.adj_matrix
+        adj_matrix.data[adj_matrix.data < threshold] = 0
+        adj_matrix.data[adj_matrix.data >= threshold] = 1
+        adj_matrix.eliminate_zeros()
+        edge_weights = adj_matrix.data 
+        #dataset.edge_weights = np.ones(len(dataset.adj_matrix.row))
+        print(f"reduce matrix to {len(edge_weights)} edges")
+    
+    if remove_same_scg:
+        edges_with_same_scgs = dataset.get_edges_with_same_scgs()
+        for x in edges_with_same_scgs:
+                adj_matrix.data[x] = 0
+                edge_weights[x] = 0
+        adj_matrix.eliminate_zeros()
+        print(f"deleted {len(edges_with_same_scgs)} edges with same SCGs")
+    
+    if remove_edges:
+        # create self loops only sparse adj matrix
+        n = len(dataset.node_names)
+        adj_matrix = coo_matrix((np.ones(n), (np.array(range(n)), np.array(range(n)))), shape=(n,n))
+        edge_weights = np.ones(len(adj_matrix.row))
+        print(f"reduce matrix to {len(edge_weights)} edges")
+    
+    # gcn transform
+    adj_norm = normalize_adj_sparse(adj_matrix)
+    
+    if use_edge_weights:
+        #edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
+        #    dataset.edge_weights.max() - dataset.edge_weights.min()
+        #)
+        edge_features = edge_weights / edge_weights.max()
+        # multiply normalized values by edge weights
+        old_rows, old_cols = adj_matrix.row, adj_matrix.col
+        old_idx_to_edge_idx = {(r, c): i for i, (r, c) in enumerate(zip(old_rows, old_cols))}
+        old_values = adj_norm.data.astype(np.float32)
+        new_values = []
+        for i, j, ov in zip(adj_norm.row, adj_norm.col, old_values):
+            if i == j:
+                new_values.append(1.0)
+            else:
+                try:
+                    eidx = old_idx_to_edge_idx[(i, j)]
+                    new_values.append(ov * edge_features[eidx])
+                except:
+                    new_values.append(ov)
+        new_values = np.array(new_values).astype(np.float32)
+    
+    else:
+        adj_norm.data = np.ones(len(adj_norm.row))
+        new_values = adj_norm.data.astype(np.float32)
+    
+    # convert to tf.SparseTensor
+    adj = tf.SparseTensor(
+        indices=np.array([adj_norm.row, adj_norm.col]).T, values=new_values, dense_shape=adj_norm.shape
+    )
+    adj = tf.sparse.reorder(adj)
+
+    # neg_pair_idx = None
+    pos_pair_idx = None
+    print("**** Num of edges:", adj.indices.shape[0])
+    return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
 
 def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use_last_batch=True):
     set_seed(args.seed)
@@ -168,13 +294,13 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         best_embs, best_vae_embs, best_model, best_score, best_epoch = None, None, None, 0, 0
         
         # increasing batch size
-        graph_batch_size = args.batchsize
-        if graph_batch_size == 0:
-            graph_batch_size = len(train_idx)
-        logger.info("**** initial batch size: {} ****".format(graph_batch_size))
-        mlflow.log_metric("cur_batch_size", graph_batch_size, 0)
+        batch_size = args.batchsize
+        if batch_size == 0:
+            batch_size = len(train_idx)
+        logger.info("**** initial batch size: {} ****".format(batch_size))
+        mlflow.log_metric("cur_batch_size", batch_size, 0)
         batch_steps = [25, 75, 150, 300]
-        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*graph_batch_size < len(edges_idx)]
+        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(edges_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
         
         vae_losses = []
@@ -186,24 +312,25 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
 
             # train VAE in batches
             if e in batch_steps:
-                print(f'Increasing batch size from {graph_batch_size:d} to {graph_batch_size*2:d}')
-                graph_batch_size = graph_batch_size * 2
-                mlflow.log_metric("cur_batch_size", graph_batch_size, e )
+                print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
+                batch_size = batch_size * 2
+                mlflow.log_metric("cur_batch_size", batch_size, e )
 
             ############################################################
 
             # train model ################################################
-            np.random.shuffle(edges_idx)
+            #np.random.shuffle(edges_idx)
+
             #graph_batch_size = 256
             #graph_batch_size = len(edges_idx)
-            n_batches = len(edges_idx)//graph_batch_size
-            if use_last_batch and n_batches < len(edges_idx)/graph_batch_size:
+            n_batches = len(edges_idx)//batch_size
+            if use_last_batch and n_batches < len(edges_idx)/batch_size:
                 n_batches += 1 # add final batch
-            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or graph_batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
+            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
             #for b in pbar_gnnbatch:
             for b in pbar_gnnbatch:
-                edges_batch = edges_idx[b*graph_batch_size:(b+1)*graph_batch_size]
-                #nodes_idx = train_idx[nodeb*batch_size:(nodeb+1)*batch_size]
+                #edges_batch = edges_idx[b*batch_size:(b+1)*batch_size]
+                nodes_idx, edges_batch = train_idx[b*batch_size:(b+1)*batch_size], None
                 nodes_batch = None
                 losses = trainer.train_unsupervised(edges_idx=edges_batch,
                                                         nodes_idx=nodes_batch,
@@ -291,14 +418,14 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 all_cluster_labels.append(cluster_labels)
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
-                    scores_string = f"HQ={stats['hq']}  Best{target_metric}={round(best_score, 3)} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+                    scores_string = f"HQ={stats['hq']}  Best{target_metric}={round(best_score, 3)} Best Epoch={best_epoch} Cur={round(stats.get(target_metric,0), 3)}"
                     losses_string = " ".join([f"{k}={v:.3f}" for k, v in epoch_metrics.items()])
                     logger.info(f"[{args.outname} {nlayers_gnn}l {pname}]{losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
                 mlflow.log_metrics(stats, step=e)
                 #print("total eval time", datetime.datetime.now() - evalstarttime)
             losses_string = " ".join([f"{k}={v:.3f}" for k, v in epoch_metrics.items() if v != 0])
-            scores_string = f"HQ={stats['hq']} Best{target_metric}={round(best_score, 3)} BestEpoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+            scores_string = f"HQ={stats['hq']} Best{target_metric}={round(best_score, 3)} BestEpoch={best_epoch} F1={round(stats.get(target_metric,0), 3)}"
             pbar_epoch.set_description(
                 f"[{args.outname} {pname}] {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )

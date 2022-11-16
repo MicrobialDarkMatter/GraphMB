@@ -14,7 +14,6 @@ from tensorflow.keras.regularizers import l2
 from spektral.layers import GCNConv
 from tqdm import tqdm
 
-from graphmb.layers import BiasLayer, LAF, GraphAttention
 #import tensorflow_probability as tfp
 
 class VAEEncoder(Model):
@@ -467,6 +466,8 @@ class TH:
             train_dst_new = unique_nodes.idx[train_src_original.shape[0]:]
             train_idx_new = (train_src_new, train_dst_new)
             #print(f"using {nodes_idx.shape} nodes for this batch")
+        else:
+            train_idx_new = (self.gnn_model.adj.indices[:,0], self.gnn_model.adj.indices[:,1])
         if scgs_idx is None:
             scgs_idx = range(0, len(self.scg_pairs))
         #####
@@ -485,6 +486,7 @@ class TH:
             else:
                 node_hat = ae_embs
 
+            # TODO how to do this with node batches? train_idx_new is missing
             gnn_losses = self.train_edges(node_hat, nodes_idx, edges_idx, train_idx_new)
             
             # SCG loss

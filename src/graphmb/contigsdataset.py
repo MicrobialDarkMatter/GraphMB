@@ -11,7 +11,6 @@ import numpy as np
 import networkx as nx
 import scipy.stats as stats
 import scipy.sparse
-from graphmb.graph_functions import read_reads_mapping_sam, count_kmers, get_kmer_to_id
 from graphmb.evaluate import (
     read_marker_gene_sets,
     read_contig_genes,
@@ -21,6 +20,36 @@ from graphmb.evaluate import (
 
 BACTERIA_MARKERS = "data/Bacteria.ms"
 
+
+kernel = np.load("kernel.npz")['arr_0']
+def count_kmers(seq, k, kmer_to_id, canonical_k):
+    # Used in case kmers are used as input features
+    # https://stackoverflow.com/q/22428020
+    #breakpoint()
+    kmer_letters = set(["A", "T", "C", "G"])
+    kmers = [seq[i : i + k] for i in range(len(seq) - k + 1) if set(seq[i : i + k]).issubset(kmer_letters)]
+    kmers = [kmer_to_id[k] for k in kmers]
+    kmer_counts = Counter(kmers)
+    counts = np.array([kmer_counts[k] for k in range(canonical_k)])
+    counts = counts / counts.sum()
+    counts += -(1/(4**k))
+    counts = np.dot(counts, kernel)
+    return counts
+
+def get_kmer_to_id(kmer, combine_revcomp=False):
+    kmer_to_ids = {}
+    BASE_COMPLEMENT = {"A": "T", "T": "A", "G": "C", "C": "G"}
+    all_kmers = itertools.product("ACGT", repeat=kmer)
+    all_kmers = ["".join(k) for k in all_kmers]
+    new_id = 0
+    for kmer in all_kmers:
+        if kmer not in kmer_to_ids:
+            kmer_to_ids[kmer] = new_id
+            if combine_revcomp:
+                rev_compl = "".join(tuple([BASE_COMPLEMENT[x] for x in reversed(kmer)]))
+                kmer_to_ids[rev_compl] = new_id
+            new_id += 1
+    return kmer_to_ids, new_id
 
 def process_node_name(name: str, assembly_type: str="flye") -> str:
     contig_name = name.strip().split(" ")[0]
@@ -222,7 +251,7 @@ class AssemblyDataset:
                 os.path.exists(prefix.format("node_names.npy"))
                 and os.path.exists(prefix.format("node_lengths.npy"))
                 and os.path.exists(prefix.format("node_attributes_kmer.npy"))
-                and os.path.exists(prefix.format("node_attributes_depth.npy"))
+                #and os.path.exists(prefix.format("node_attributes_depth.npy"))
                 and os.path.exists(prefix.format("edge_weights.npy"))
                 and os.path.exists(prefix.format("adj_sparse.npz"))
                 and os.path.exists(prefix.format("graph_nodes.npy"))
@@ -236,7 +265,7 @@ class AssemblyDataset:
                 os.path.exists(prefix.format("node_names.npy"))
                 and os.path.exists(prefix.format("node_lengths.npy"))
                 and os.path.exists(prefix.format("node_attributes_kmer.npy"))
-                and os.path.exists(prefix.format("node_attributes_depth.npy"))
+                #and os.path.exists(prefix.format("node_attributes_depth.npy"))
                 and os.path.exists(prefix.format("node_to_label.npy"))
                 and os.path.exists(prefix.format("label_to_node.npy"))
                 and os.path.exists(prefix.format("labels.npy"))
@@ -434,7 +463,7 @@ class AssemblyDataset:
 
     def read_depths(self) -> None:
         node_depths: Dict[str, np.array] = {}
-        if self.depthfile is not None:
+        if self.depthfile is not None and os.path.exists(os.path.join(self.data_dir, self.depthfile)):
             if self.depthfile.endswith(".npz"):
                 self.node_depths = np.load(open(os.path.join(self.data_dir, self.depthfile), "rb"))["arr_0"]
                 if self.node_depths.shape[0] != len(self.node_names):
@@ -461,7 +490,7 @@ class AssemblyDataset:
             else:
                 self.node_depths = stats.zscore(self.node_depths, axis=0)
         else:
-            self.node_depths = np.ones(len(self.node_names), 1)
+            self.node_depths = np.ones(len(self.node_names), dtype=np.float)
 
     def read_labels(self):
         # logging.info("loading labels from {}".format(args.labels))
@@ -485,6 +514,7 @@ class AssemblyDataset:
                         node_to_label[node_name] = label
                         labels.add(label)
                     else:
+                        breakpoint()
                         self.logger.info(("unused label: {}".format(line.strip())))
             labels = list(labels)
             label_to_node = {s: [] for s in labels}

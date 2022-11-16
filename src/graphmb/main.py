@@ -22,21 +22,17 @@ from graphmb.evaluate import (
     calculate_overall_prf,
 )
 from graphmb.contigsdataset import AssemblyDataset
-from graphmb.graph_functions import (
-    plot_embs,
-    cluster_embs,
+from graphmb.visualize import draw_nx_graph, run_tsne, plot_embs
+from graphmb.utils import set_seed, get_cluster_mask
+from graphmb.graphmb1 import (cluster_embs,
     evaluate_binning,
     calculate_bin_metrics,
-    draw_nx_graph,
-    set_seed,
-    run_tsne,
-    get_cluster_mask
-)
+    )
 
 from graphmb.version import __version__
 
 def run_model(dataset, args, logger, nrun, target_metric):
-    import vaegbin, train_vaegnn, train_gnn, train_vae, train_auggnn
+    from graphmb import vaegbin, train_vaegnn #, train_gnn, train_vae, train_auggnn
     if args.model_name.endswith("_ae"):
         return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun, target_metric)
     elif args.model_name == "vae":
@@ -121,8 +117,8 @@ def check_dirs(args, use_features=True):
             print(f"Assembly {args.assembly_name} not found, check --assembly_name option")
             exit()
         if not os.path.exists(os.path.join(args.assembly, args.depth)):
-            print(f"Depth file {args.depth} not found, check --depth option")
-            exit()
+            print(f"Depth file {args.depth} not found, check --depth option, not using depths")
+            #exit()
 
 
 def get_activation(args):
@@ -585,8 +581,9 @@ def main():
     # reload labels from file anyway
     if args.labels is not None:
         dataset.read_labels()
-    dataset.generate_edges_based_on_labels()
-    dataset.calculate_homophily()
+    
+    #dataset.generate_edges_based_on_labels()
+    #dataset.calculate_homophily()
     
     dataset.print_stats()
 
@@ -662,7 +659,12 @@ def main():
             elif args.markers is not None:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric="hq" if args.markers is not None else "f1_avg_bp")
+            target_metric = "f1"
+            if args.markers is not None:
+                target_metric = "hq"
+            elif "amber" in args.labels:
+                target_metric = "f1_avg_bp"
+            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric=target_metric)
             tf.keras.backend.clear_session()
 
         run_post_processing(

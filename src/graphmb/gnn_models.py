@@ -483,3 +483,5 @@ class SAGELAF(Model):
 
     def summary(self):
         self.model.summary()
+
+name_to_model = {"SAGE": SAGE, "SAGELAF": SAGELAF, "GCN": GCN, "GCNLAF": GCNLAF, "GAT": GAT, "GATLAF": GATLAF}

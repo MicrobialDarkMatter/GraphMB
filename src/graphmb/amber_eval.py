@@ -2,7 +2,14 @@ from collections import OrderedDict
 from collections import defaultdict
 import itertools
 import pandas as pd
-from contigsdataset import process_node_name
+from graphmb.contigsdataset import process_node_name
+
+
+def write_amber_bins(contig_to_bin, outputfile):
+    with open(outputfile, "w") as f:
+        f.write("#\n@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
+        for c in contig_to_bin:
+            f.write(f"{str(c)}\t{str(contig_to_bin[c])}\n")
 
 # adapt eval scripts from amber but simplified
 
@@ -191,7 +198,7 @@ def amber_eval(gs_path, bin_path, labels=["graphmb"], assemblytype="flye"):
         "recall_weighted_seq": recall_weighted_seq,
         "accuracy_bp": accuracy_bp,
         "accuracy_seq": accuracy_seq,
-        "f1_avg_bp": (2*precision_avg_bp*recall_avg_bp)/(precision_avg_bp+recall_avg_bp) if precision_avg_bp+recall_avg_bp > 0 else 0
+        "f1_avg_bp": (2*precision_avg_bp*recall_avg_bp)/(precision_avg_bp+recall_avg_bp) if (precision_avg_bp+recall_avg_bp) > 0 else 0
     }
     bins_eval = calc_num_recovered_genomes(precision_df, [0.9, 0.5], [0.05, 0.1])
     return metrics, bins_eval
