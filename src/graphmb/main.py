@@ -662,7 +662,7 @@ def main():
             elif args.markers is not None:
                 dataset.get_all_different_idx()
                 np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric="hq" if args.markers is None else "f1_avg_bp")
+            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric="hq" if args.markers is not None else "f1_avg_bp")
             tf.keras.backend.clear_session()
 
         run_post_processing(

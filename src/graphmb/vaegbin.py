@@ -101,7 +101,7 @@ def run_kmedoids(X):
     D = 0.5 - tf.math.multiply(X, X)
 
 
-def run_clustering(X, node_names, clustering_algo, cuda, tsne=False):
+def run_clustering(X, node_names, clustering_algo, cuda, k=0, tsne=False):
     
     if clustering_algo == "vamb":
         from vamb.cluster import cluster as vamb_cluster
@@ -154,6 +154,7 @@ def run_clustering(X, node_names, clustering_algo, cuda, tsne=False):
         cluster_to_contig = {i: [] for i in range(k)}
         for i in range(len(node_names)):
             cluster_to_contig[labels[i]].append(node_names[i])
+        cluster_centroids = None
     return cluster_to_contig, contig_to_bin, labels, cluster_centroids
 
 def compute_clusters_and_stats(
@@ -175,7 +176,8 @@ def compute_clusters_and_stats(
     contig_genes = dataset.contig_markers
     node_to_gt_idx_label = dataset.node_to_label
     gt_idx_label_to_node = dataset.label_to_node
-    cluster_to_contig, contig_to_bin, labels, cluster_centroids = run_clustering(X, dataset.node_names, clustering, cuda)
+    cluster_to_contig, contig_to_bin, labels, cluster_centroids = run_clustering(X, dataset.node_names,
+                                                                                 clustering, cuda, k=k)
    
     scores = {"precision": 0, "recall": 0, "f1": 0, "ari": 0, "hq": 0, "mq": 0,
         "n_clusters": len(np.unique(labels)), "unresolved_mags": 0}
@@ -233,12 +235,9 @@ def compute_clusters_and_stats(
         output_bins_filename = dataset.cache_dir + f"/{dataset.name}_temp_contig2bin.tsv"
         write_bins(contig_to_bin, output_bins_filename)
         amber_metrics, bin_counts = amber_eval(os.path.join(dataset.data_dir, dataset.labelsfile), output_bins_filename, ["graphmb"])
-        p_amber = amber_metrics["precision_avg_bp"]
-        r_amber = amber_metrics["recall_avg_bp"]
-        f_amber = amber_metrics["recall_avg_bp"]
-        scores["precision_avg_bp"] = p_amber
-        scores["recall_avg_bp"] = r_amber
-        scores["f1_avg_bp"] = f_amber
+        scores["precision_avg_bp"] = amber_metrics["precision_avg_bp"]
+        scores["recall_avg_bp"] = amber_metrics["recall_avg_bp"]
+        scores["f1_avg_bp"] = amber_metrics["f1_avg_bp"]
     #plot tSNE
     if tsne:
         cluster_to_contig = {cluster: [dataset.node_names[i] for i,x in enumerate(labels) if x == cluster] for cluster in set(labels)}
@@ -416,7 +415,7 @@ def log_to_tensorboard(writer, values, step):
 
 
 def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
-               step, args, dataset, epoch, scores, best_hq, best_embs, best_epoch, best_model):
+               step, args, dataset, epoch, scores, best_metric, best_embs, best_epoch, best_model, target_metric="hq"):
     log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
 
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
@@ -432,28 +431,14 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
 
     #log_to_tensorboard(summary_writer, {"hq": stats["hq"], "mq": stats["mq"]}, step)
     #all_cluster_labels.append(cluster_labels)
-    if dataset.contig_markers is not None and len(dataset.contig_markers) > 0 and stats["hq"] > best_hq:
-        best_hq, best_embs, best_epoch, best_model = stats["hq"], node_new_features, epoch, weights
+    #if dataset.contig_markers is not None and len(dataset.contig_markers) > 0 and stats["hq"] > best_metric:
+    #    best_metric, best_embs, best_epoch, best_model = stats["hq"], node_new_features, epoch, weights
         #best_model = th.gnn_model
         #save_model(args, e, th, th_vae)
+    if stats[target_metric] > best_metric:
+        best_metric, best_embs, best_epoch, best_model = stats[target_metric], node_new_features, epoch, weights
 
-    elif stats["f1_avg_bp"] > best_hq:
-        best_hq, best_embs, best_epoch, best_model = stats["f1_avg_bp"], node_new_features, epoch, weights
-        #best_model = th.gnn_model
-        #save_model(args, e, th, th_vae)
-    # print('--- END ---')
-    #if args.quiet:
-    #    logger.info(f"--- EPOCH {e:d} ---")
-    #    logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} HQ={stats['hq']} BestHQ={best_hq} Best Epoch={best_epoch} Max GPU MB={gpu_mem_alloc:.1f}")
-    #    logger.info(str(stats))
-
-    #cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
-    #    node_new_features, np.array(dataset.node_names),
-    #    dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne, #cuda=args.cuda,
-    #)
-    #log_to_tensorboard(summary_writer, {"hq_bins_all": stats["hq"], "mq_bins_all": stats["mq"]}, step)
-
-    return best_hq, best_embs, best_epoch, scores, best_model, cluster_labels
+    return best_metric, best_embs, best_epoch, scores, best_model, cluster_labels
 
 
 def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, best_hq,
