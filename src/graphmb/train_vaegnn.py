@@ -138,7 +138,7 @@ def prepare_data_for_gnn(
     print("**** Num of edges:", adj.indices.shape[0])
     return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
 
-def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use_last_batch=True):
+def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use_last_batch=False):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -281,13 +281,20 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
 
         # create eval split
         if args.eval_split == 0:
-            train_idx = np.arange(len(features))
+            if "node" in args.batchtype:
+                train_idx = np.arange(len(features))
+            elif "edge" in args.batchtype:
+                train_idx = np.arange(gnn_model.adj.indices.shape[0])
             eval_idx = []
         else:
-            train_idx = np.array(random.sample(list(range(len(features))), int(len(features)*(1-args.eval_split))))
-            eval_idx = np.array([x for x in np.arange(len(features)) if x not in train_idx])
-            logging.info(f"**** using {len(train_idx)} for training and {len(eval_idx)} for eval")
-        edges_idx = np.arange(gnn_model.adj.indices.shape[0])
+            if "node" in args.batchtype:
+                train_idx = np.array(random.sample(list(range(gnn_model.adj.indices.shape[0])), int(gnn_model.adj.indices.shape[0]*(1-args.eval_split))))
+                eval_idx = np.array([x for x in np.arange(gnn_model.adj.indices.shape[0]) if x not in train_idx])
+            elif "edge" in args.batchtype:
+                train_idx = np.array(random.sample(list(range(gnn_model.adj.indices.shape[0])), int(gnn_model.adj.indices.shape[0]*(1-args.eval_split))))
+                eval_idx = np.array([x for x in np.arange(gnn_model.adj.indices.shape[0]) if x not in train_idx])
+            logging.info(f"**** using {gnn_model.adj.indices.shape[0]} for training and {gnn_model.adj.indices.shape[0]} for eval")
+        #edges_idx = np.arange(gnn_model.adj.indices.shape[0])
         features = np.array(features)
         pbar_epoch = tqdm(range(epochs), disable=args.quiet, position=0)
         scores = [stats]
@@ -300,12 +307,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         logger.info("**** initial batch size: {} ****".format(batch_size))
         mlflow.log_metric("cur_batch_size", batch_size, 0)
         batch_steps = [25, 75, 150, 300]
-        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(edges_idx)]
+        batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
         
-        vae_losses_epoch = {}
-        gnn_losses_epoch = {}
-        total_losses_epoch = []
         step = 0
         for e in pbar_epoch:
             #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
@@ -318,21 +322,24 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 mlflow.log_metric("cur_batch_size", batch_size, e )
 
             ############################################################
+            vae_losses_epoch = {}
+            gnn_losses_epoch = {}
+            total_losses_epoch = []
 
             # train model ################################################
-            #np.random.shuffle(edges_idx)
+            np.random.shuffle(train_idx)
 
             #graph_batch_size = 256
             #graph_batch_size = len(edges_idx)
-            n_batches = len(edges_idx)//batch_size
-            if use_last_batch and n_batches < len(edges_idx)/batch_size:
+            n_batches = len(train_idx)//batch_size
+            if use_last_batch and n_batches < len(train_idx)/batch_size:
                 n_batches += 1 # add final batch
-            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(edges_idx) or n_batches < 100), position=1, ascii=' =')
-            #for b in pbar_gnnbatch:
+            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
             for b in pbar_gnnbatch:
-                #edges_batch = edges_idx[b*batch_size:(b+1)*batch_size]
-                nodes_idx, edges_batch = train_idx[b*batch_size:(b+1)*batch_size], None
-                nodes_batch = None
+                if "edge" in args.batchtype:
+                    nodes_batch, edges_batch = None, train_idx[b*batch_size:(b+1)*batch_size]
+                elif "node" in args.batchtype:
+                    nodes_batch, edges_batch = train_idx[b*batch_size:(b+1)*batch_size], None
                 losses = trainer.train_unsupervised(edges_idx=edges_batch,
                                                         nodes_idx=nodes_batch,
                                                         vae=True)
@@ -358,8 +365,6 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             #print(float(gnn_trainer.opt._decayed_lr(float)))
             log_to_tensorboard(summary_writer, epoch_metrics, step)
             mlflow.log_metrics(epoch_metrics, step=e)
-            #gnn_loss = gnn_loss.numpy()
-            #diff_loss = diff_loss.numpy()
             ##############################################################
 
 
