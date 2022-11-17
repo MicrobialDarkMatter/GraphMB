@@ -334,12 +334,14 @@ class TH:
         return neg_idx_row, neg_idx_col
 
     def sample_negatives(self, edge_idx, node_idx):
+        # for 5 negatives and batchsize 256, this should give 1% or less false negatives
         neg_idx = tf.random.uniform(shape=(2, len(edge_idx)*self.num_negatives),
                                     maxval=node_idx.shape[0], dtype=tf.int32)
-        #neg_idx_row = tf.gather(params=node_idx, indices=neg_idx[0,:])
-        #neg_idx_col = tf.gather(params=node_idx, indices=neg_idx[1,:])
-        #return neg_idx_row, neg_idx_col
-        return neg_idx[0,:], neg_idx[1,:]
+        # get neg idx relative to node_idx (of this batch)
+        neg_idx_row = tf.gather(params=node_idx, indices=neg_idx[0,:])
+        neg_idx_col = tf.gather(params=node_idx, indices=neg_idx[1,:])
+        return neg_idx_row, neg_idx_col
+        #return neg_idx[0,:], neg_idx[1,:]
 
     @tf.function
     def nodesim(self, u, v):
@@ -357,7 +359,7 @@ class TH:
             layer_names = [layer.name for layer in self.encoder.layers[0].layers]
             logvar_idx = layer_names.index("logvar")
             self.encoder.layers[0].layers[logvar_idx].trainable = False
-            ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
+            #ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
 
         ae_mu, ae_logvar = self.encoder(tf.gather(self.features, nodes_idx), training=True)
         ae_recon = self.decoder(ae_mu, training=True)
@@ -374,8 +376,8 @@ class TH:
         #logvar_idx = layer_names.index("logvar")
         #self.encoder.layers[0].layers[logvar_idx].trainable = False
         #ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
-        ae_embs = self.encoder(self.features)[0]
-        return ae_embs, ae_losses
+        #ae_embs = self.encoder(self.features)[0]
+        return ae_mu, ae_losses
     
     def train_edges(self, node_hat, nodes_idx, edges_idx, train_idx_new):
         gnn_losses = {"gnn_loss": tf.constant(0, dtype=tf.float32),
@@ -389,12 +391,16 @@ class TH:
             dst_embs = tf.gather(indices=train_idx_new[1], params=node_hat)
             positive_pairwise = self.nodesim(src_embs, dst_embs)
             # create random negatives for gnn_loss
-            neg_idx_src, neg_idx_dst = self.sample_negatives(edge_idx=edges_idx,
+            batch_neg_idx_src, batch_neg_idx_dst = self.sample_negatives(edge_idx=edges_idx,
                                                                 node_idx=nodes_idx)
+            #pset = set(zip(train_idx_new[0].numpy(), train_idx_new[1].numpy()))
+            #nset = set(zip(batch_neg_idx_src.numpy(), batch_neg_idx_dst.numpy()))
+            #print("false random negatives", round(len(pset & nset)/len(edges_idx), 4))
+            
             try:
                 #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
-                neg_row_embs = tf.gather(indices=neg_idx_src, params=node_hat)
-                neg_col_embs = tf.gather(indices=neg_idx_dst, params=node_hat)
+                neg_row_embs = tf.gather(indices=batch_neg_idx_src, params=node_hat)
+                neg_col_embs = tf.gather(indices=batch_neg_idx_dst, params=node_hat)
                 negative_pairs = self.nodesim(neg_row_embs, neg_col_embs)
             except:
                 breakpoint()
@@ -462,6 +468,7 @@ class TH:
             train_dst_original = tf.gather(indices=edges_idx, params=self.gnn_model.adj.indices[:,1])
             unique_nodes = tf.unique(tf.concat((train_src_original, train_dst_original), axis=0))
             nodes_idx = unique_nodes.y
+            # get new indices for edges in relation to current node list
             train_src_new = unique_nodes.idx[:train_src_original.shape[0]]
             train_dst_new = unique_nodes.idx[train_src_original.shape[0]:]
             train_idx_new = (train_src_new, train_dst_new)
@@ -473,11 +480,16 @@ class TH:
         #####
         
         with tf.GradientTape() as tape:
-            #####   run encoder first
+            #####   run encoder first on nodes of this batch
             if self.use_ae:
                 ae_embs, ae_losses = self.train_vae(nodes_idx)
+                # ae_embs is only nodes in node_idx
+                #reverse gather, expand so that ae_embs has the same dim as self.features
+                ae_embs = tf.scatter_nd(indices=nodes_idx[:,None],
+                                     updates=ae_embs,
+                                     shape=(self.features.shape[0], ae_embs.shape[1]))
             else:
-                ae_embs = self.features
+                ae_embs = self.features # ae_embs is all nodes
                 ae_losses = {}
             ######
             ###### run gnn model
@@ -485,8 +497,6 @@ class TH:
                 node_hat = self.gnn_model(ae_embs, nodes_idx)
             else:
                 node_hat = ae_embs
-
-            # TODO how to do this with node batches? train_idx_new is missing
             gnn_losses = self.train_edges(node_hat, nodes_idx, edges_idx, train_idx_new)
             
             # SCG loss
