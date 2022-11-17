@@ -15,6 +15,7 @@ import scipy
 import logging
 # import dgl
 import random
+from sklearn.cluster import KMeans
 #import tensorflow as tf
 
 SEED = 0

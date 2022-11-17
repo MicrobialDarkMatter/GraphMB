@@ -469,8 +469,9 @@ def main():
     if args.labels is not None:
         dataset.read_labels()
     
-    dataset.generate_edges_based_on_labels()
-    dataset.calculate_homophily()
+    if args.labelgraph:
+        dataset.generate_edges_based_on_labels()
+        dataset.calculate_homophily()
     
     dataset.print_stats()
 
@@ -566,7 +567,7 @@ def main():
         )
 
         if args.labels is not None: # or "contig2bin" in args.post:
-            from amber_eval import amber_eval
+            from graphmb.amber_eval import amber_eval
 
             amber_metrics, bin_counts = amber_eval(
                 os.path.join(args.assembly, args.labels), args.outdir + f"/{args.outname}_best_contig2bin.tsv", ["graphmb"]

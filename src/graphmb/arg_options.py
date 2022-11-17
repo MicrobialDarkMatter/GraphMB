@@ -63,7 +63,7 @@ def create_parser():
     # other training params
     parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
-    parser.add_argument("--evalepochs", type=int, help="Epoch interval to run eval", default=10)
+    parser.add_argument("--evalepochs", type=int, help="Epoch interval to run eval", default=20)
     parser.add_argument("--evalskip", type=int, help="Skip eval of these epochs", default=50)
     parser.add_argument("--eval_split", type=float, help="Percentage of dataset to use for eval", default=0.0)
     parser.add_argument("--kmer", default=4)
@@ -86,6 +86,7 @@ def create_parser():
     parser.add_argument("--minbin", type=int, help="Minimum size of clusters in bp", default=200000)
     parser.add_argument("--mincomp", type=int, help="Minimum size of connected components", default=1)
     parser.add_argument("--randomize", help="Randomize graph", action="store_true")
+    parser.add_argument("--labelgraph", help="Create graph based on labels (ignore assembly graph)", action="store_true")
     parser.add_argument("--binarize", help="Binarize adj matrix", action="store_true")
     parser.add_argument("--noedges", help="Remove all but self edges from adj matrix", action="store_true")
     parser.add_argument("--read_embs", help="Read embeddings from file", action="store_true")

@@ -512,7 +512,7 @@ class TH:
 
             # classification loss
             if self.classifier is not None:
-                if mask_labels > 0:
+                if mask_labels is not None and mask_labels > 0:
                     use_labels = np.random.choice(node_hat.shape[0], int(node_hat.shape[0]*(1-self.mask_labels)))
                 else:
                     use_labels = np.arange(node_hat.shape[0])
@@ -520,6 +520,7 @@ class TH:
                 pred_loss = self.classifier.loss(gold_labels[use_labels], predictions)
             else:
                 pred_loss = tf.convert_to_tensor(0.0)
+            gnn_losses["pred_loss"] = pred_loss
             
 
             # combine losses and update model
@@ -537,8 +538,10 @@ class TH:
                 if self.use_noise:
                     #breakpoint()
                     tw += [self.positive_noises, self.scg_noises]
+                    loss += noise_loss
                 if self.classifier is not None:
                     tw += self.classifier.trainable_weights
+                    loss += pred_loss
                 #################
                 grads = tape.gradient([ae_losses["vae_loss"], gnn_losses["gnn_loss"], scg_loss, noise_loss, pred_loss], tw)
                 grad_norm = tf.linalg.global_norm(grads)

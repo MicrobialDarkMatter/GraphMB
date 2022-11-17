@@ -309,7 +309,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         batch_steps = [25, 75, 150, 300]
         batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
-        
+        gold_labels = np.array([dataset.labels.index(dataset.node_to_label[n]) for n in dataset.node_names])
         step = 0
         for e in pbar_epoch:
             #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
@@ -342,7 +342,8 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                     nodes_batch, edges_batch = train_idx[b*batch_size:(b+1)*batch_size], None
                 losses = trainer.train_unsupervised(edges_idx=edges_batch,
                                                         nodes_idx=nodes_batch,
-                                                        vae=True)
+                                                        vae=True,
+                                                        gold_labels=gold_labels)
                 total_loss, gnn_losses, ae_losses = losses
                 total_losses_epoch.append(total_loss.numpy())
                 for l in gnn_losses: gnn_losses_epoch.setdefault(l,[]).append(gnn_losses[l])
@@ -352,6 +353,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             epoch_metrics = {"Total": np.average(total_losses_epoch),
                              "gnn": np.average(gnn_losses["gnn_loss"]),
                              "SCG": np.average(gnn_losses["scg_loss"]),
+                             "pred": np.average(gnn_losses["pred_loss"]),
                             #'GNN  LR': float(trainer.opt._decayed_lr(float)),
                             "pos": np.average(gnn_losses["pos_loss"]),
                             "neg": np.average(gnn_losses["neg_loss"]),

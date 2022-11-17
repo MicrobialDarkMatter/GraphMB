@@ -360,10 +360,10 @@ def compute_clusters_and_stats(
             sims = calculate_sim_between_same_labels_small(dataset.node_names, X,
                                                     list(zip(dataset.edges_src, dataset.edges_dst)),
                                                     dataset.label_to_node, dataset.node_to_label)
-        elif len([n for n in dataset.node_names if dataset.node_to_label.get(n, "NA") != "NA"]) < 10_000:
-            sims = calculate_sim_between_same_labels_big(dataset.node_names, X,
-                                                list(zip(dataset.edges_src, dataset.edges_dst)),
-                                                dataset.label_to_node, dataset.node_to_label)
+        #elif len([n for n in dataset.node_names if dataset.node_to_label.get(n, "NA") != "NA"]) < 10_000:
+        #    sims = calculate_sim_between_same_labels_big(dataset.node_names, X,
+        #                                        list(zip(dataset.edges_src, dataset.edges_dst)),
+        #                                        dataset.label_to_node, dataset.node_to_label)
         else:
             sims = 1,1,1
         scores["avg_label_sim"], scores["avg_edge_sim"], scores["avg_total_sim"] = sims
