@@ -1,5 +1,6 @@
 import sys
 import ast
+import os
 import numpy as np
 import scipy
 import itertools
@@ -372,11 +373,11 @@ def compute_clusters_and_stats(
 
     if amber == True:
         # TODO use p/r/ to get positive_clusters
-        from amber_eval import amber_eval
+        import graphmb.amber_eval as amber
         # save to file
         output_bins_filename = dataset.cache_dir + f"/{dataset.name}_temp_contig2bin.tsv"
-        amber_eval.write_amber_bins(contig_to_bin, output_bins_filename)
-        amber_metrics, bin_counts = amber_eval(os.path.join(dataset.data_dir, dataset.labelsfile), output_bins_filename, ["graphmb"])
+        amber.write_amber_bins(contig_to_bin, output_bins_filename)
+        amber_metrics, bin_counts = amber.amber_eval(os.path.join(dataset.data_dir, dataset.labelsfile), output_bins_filename, ["graphmb"])
         scores["precision_avg_bp"] = amber_metrics["precision_avg_bp"]
         scores["recall_avg_bp"] = amber_metrics["recall_avg_bp"]
         scores["f1_avg_bp"] = amber_metrics["f1_avg_bp"]
