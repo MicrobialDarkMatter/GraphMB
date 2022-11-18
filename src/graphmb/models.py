@@ -379,6 +379,17 @@ class TH:
         #ae_embs = self.encoder(self.features)[0]
         return ae_mu, ae_losses
     
+    def edge_loss(self, pos_sims, neg_sims):
+        y_true = tf.concat((tf.ones_like(pos_sims), -tf.ones_like(neg_sims)), axis=0)
+        y_pred = tf.concat((pos_sims, neg_sims), axis=0)
+        #gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
+        gnn_loss =  tf.reduce_mean(tf.where(
+                                    tf.equal(y_true, 1),
+                                        1. - y_pred,
+                                    tf.maximum(tf.zeros_like(y_pred), y_pred)))
+        #print(tf.reduce_mean(pos_sims).numpy(), tf.reduce_mean(neg_sims).numpy())
+        return gnn_loss
+
     def train_edges(self, node_hat, nodes_idx, edges_idx, train_idx_new):
         gnn_losses = {"gnn_loss": tf.constant(0, dtype=tf.float32),
                       "pos_loss": tf.constant(0, dtype=tf.float32),
@@ -405,7 +416,7 @@ class TH:
             except:
                 breakpoint()
             positive_y = tf.ones_like(positive_pairwise)
-            negative_y = tf.zeros_like(negative_pairs)
+            negative_y = -tf.ones_like(negative_pairs)
             #positive_pairwise = tf.nn.sigmoid(positive_pairwise)
             #negative_pairs = tf.nn.sigmoid(negative_pairs)
             if self.use_noise:
@@ -415,22 +426,22 @@ class TH:
                 positive_pairwise = positive_pairwise + noises[:,0]
                 #positive_pairwise = tf.clip_by_value(positive_pairwise, 0, 1)
             #breakpoint()
-            pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
-                                                            positive_pairwise, from_logits=True)
+            #pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
+            #                                                positive_pairwise, from_logits=True)
             #pos_loss = -tf.reduce_mean(positive_pairwise)
+            pos_loss = tf.reduce_mean(1 - positive_pairwise)
             if self.num_negatives > 0:
-                neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
-                                                            negative_pairs, from_logits=True)
+                #neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
+                #                                            negative_pairs, from_logits=True)
                 #neg_loss = tf.reduce_mean(negative_pairs)
+                neg_loss = tf.reduce_mean(tf.maximum(tf.zeros_like(negative_pairs), negative_pairs))
             else:
                 neg_loss = tf.constant(0)
             #gnn_loss = (pos_loss + neg_loss) * self.gnn_weight
             #neg_loss = 0
             gnn_losses["pos_loss"] = pos_loss
             gnn_losses["neg_loss"] = neg_loss
-            y_true = tf.concat((tf.ones_like(positive_pairwise), tf.zeros_like(negative_pairs)), axis=0)
-            y_pred = tf.concat((positive_pairwise, negative_pairs), axis=0)
-            gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
+            gnn_loss = self.edge_loss(positive_pairwise, negative_pairs)
             gnn_loss = gnn_loss * self.gnn_weight
             gnn_losses["gnn_loss"] = gnn_loss
         #loss = gnn_loss

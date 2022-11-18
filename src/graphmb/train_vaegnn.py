@@ -466,7 +466,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
 
         logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
         logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
-        with open(f"{dataset.cache_dir}/{dataset.name}_best_contig2bin.tsv", "w") as f:
+        with open(f"{args.outdir}/{args.outname}_{nrun}_best_contig2bin.tsv", "w") as f:
             f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
             for i in range(len(all_cluster_labels[best_idx])):
                 f.write(f"{node_names[i]}\t{all_cluster_labels[best_idx][i]}\n")

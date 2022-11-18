@@ -570,7 +570,7 @@ def main():
             from graphmb.amber_eval import amber_eval
 
             amber_metrics, bin_counts = amber_eval(
-                os.path.join(args.assembly, args.labels), args.outdir + f"/{args.outname}_best_contig2bin.tsv", ["graphmb"]
+                os.path.join(args.assembly, args.labels), args.outdir + f"/{args.outname}_{n}_best_contig2bin.tsv", ["graphmb"]
             )
         #if args.labels is not None:
             hq = bin_counts["> 90% completeness"][1]
@@ -585,7 +585,7 @@ def main():
     metrics_names = metrics_per_run[0].keys()
     for mname in metrics_names:
         values = [m.get(mname, 0) for m in metrics_per_run]
-        logger.info("### {}: {:.1f} {:.1f}".format(mname, np.mean(values), np.std(values)))
+        logger.info("### {}: {:.3f} {:.3f}".format(mname, np.mean(values), np.std(values)))
     hqs = [m["hq"] for m in metrics_per_run]
     mqs = [m["mq"] for m in metrics_per_run]
     logger.info("{:.1f} {:.1f} {:.1f} {:.1f}".format(np.mean(hqs), np.std(hqs), np.mean(mqs), np.std(mqs)))
