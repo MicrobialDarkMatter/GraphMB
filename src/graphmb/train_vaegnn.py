@@ -279,6 +279,12 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             use_noise=args.noise
         )
 
+        if args.batchtype == "auto":
+            if args.ae_alpha > 0 and args.gnn_alpha == 0 and args.scg_alpha == 0:
+                args.batchtype = "nodes"
+            else:
+                args.batchtype = "edges"
+
         # create eval split
         if args.eval_split == 0:
             if "node" in args.batchtype:
@@ -304,7 +310,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         batch_size = args.batchsize
         if batch_size == 0:
             batch_size = len(train_idx)
-        logger.info("**** initial batch size: {} ****".format(batch_size))
+        logger.info("**** initial {} batch size: {} ****".format(args.batchtype, batch_size))
         mlflow.log_metric("cur_batch_size", batch_size, 0)
         batch_steps = [25, 75, 150, 300]
         batch_steps = [x for i, x in enumerate(batch_steps) if (2 ** (i+1))*batch_size < len(train_idx)]
@@ -317,7 +323,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
 
             # train VAE in batches
             if e in batch_steps:
-                print(f'Increasing batch size from {batch_size:d} to {batch_size*2:d}')
+                print(f'Increasing {args.batchtype} batch size from {batch_size:d} to {batch_size*2:d}')
                 batch_size = batch_size * 2
                 mlflow.log_metric("cur_batch_size", batch_size, e )
 
@@ -347,7 +353,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 total_loss, gnn_losses, ae_losses = losses
                 total_losses_epoch.append(total_loss.numpy())
                 for l in gnn_losses: gnn_losses_epoch.setdefault(l,[]).append(gnn_losses[l])
-                for l in ae_losses: gnn_losses_epoch.setdefault(l,[]).append(ae_losses[l])
+                for l in ae_losses: vae_losses_epoch.setdefault(l,[]).append(ae_losses[l])
 
                 #add losses to get epoch avg
             epoch_metrics = {"Total": np.average(total_losses_epoch),
@@ -464,7 +470,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         best_idx = np.argmax(target_scores)
         mlflow.log_metrics(scores[best_idx], step=e+1)
 
-        logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
+        logger.info(f">>> Last epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
         logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
         with open(f"{args.outdir}/{args.outname}_{nrun}_best_contig2bin.tsv", "w") as f:
             f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")

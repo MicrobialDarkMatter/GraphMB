@@ -315,6 +315,7 @@ class TH:
             self.positive_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.gnn_model.adj.values.shape + noise_units), dtype=tf.float32), trainable=True)
             self.scg_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.scg_pairs.shape[0], noise_units), dtype=tf.float32), trainable=True)
             self.noise_weights = tf.Variable(tf.random_normal_initializer()(shape=(noise_units,), dtype=tf.float32), trainable=True)
+            # alt: Dense layer with concat of embs (or feats) as input and single value output
 
     def sample_negatives_old(self, edge_idx):
         # get numbers between 0 and n*(n-1)
@@ -344,7 +345,7 @@ class TH:
         #return neg_idx[0,:], neg_idx[1,:]
 
     @tf.function
-    def nodesim(self, u, v):
+    def nodedist(self, u, v):
         #breakpoint()
         #return tf.reduce_sum((tf.expand_dims(x, 0) - tf.expand_dims(y, 1)**2), axis=-1)
         u = tf.nn.l2_normalize(u, axis=1)
@@ -352,6 +353,19 @@ class TH:
         pairwise = tf.reduce_sum(tf.math.multiply(u, v), axis=1)
         #pairwise = -tf.norm(tf.math.subtract(u, v) + + 1.0e-12, ord='euclidean', axis=1,)
         return pairwise
+
+    def edge_loss(self, pos_dists, neg_dists):
+        #breakpoint()
+        y_true = tf.concat((tf.ones_like(pos_dists), tf.zeros_like(neg_dists)), axis=0)
+        y_pred = tf.concat((pos_dists, neg_dists), axis=0)
+        gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
+        #gnn_loss =  tf.reduce_mean(tf.where(
+        #                            tf.equal(y_true, 1),
+        #                                1-y_pred,
+        #                            tf.maximum(tf.zeros_like(y_pred), y_pred)))
+        #print(tf.reduce_mean(pos_dists).numpy(), tf.reduce_mean(neg_dists).numpy())
+        #gnn_loss = tf.reduce_mean(pos_dists) + tf.reduce_mean(tf.maximum(tf.zeros_like(neg_dists), 1-neg_dists))
+        return gnn_loss
     
     def train_vae(self, nodes_idx, vae=True):
         if not vae: # not variational, no kld loss
@@ -378,17 +392,6 @@ class TH:
         #ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
         #ae_embs = self.encoder(self.features)[0]
         return ae_mu, ae_losses
-    
-    def edge_loss(self, pos_sims, neg_sims):
-        y_true = tf.concat((tf.ones_like(pos_sims), -tf.ones_like(neg_sims)), axis=0)
-        y_pred = tf.concat((pos_sims, neg_sims), axis=0)
-        #gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=False)
-        gnn_loss =  tf.reduce_mean(tf.where(
-                                    tf.equal(y_true, 1),
-                                        1. - y_pred,
-                                    tf.maximum(tf.zeros_like(y_pred), y_pred)))
-        #print(tf.reduce_mean(pos_sims).numpy(), tf.reduce_mean(neg_sims).numpy())
-        return gnn_loss
 
     def train_edges(self, node_hat, nodes_idx, edges_idx, train_idx_new):
         gnn_losses = {"gnn_loss": tf.constant(0, dtype=tf.float32),
@@ -400,7 +403,7 @@ class TH:
             #breakpoint()
             src_embs = tf.gather(indices=train_idx_new[0], params=node_hat)
             dst_embs = tf.gather(indices=train_idx_new[1], params=node_hat)
-            positive_pairwise = self.nodesim(src_embs, dst_embs)
+            positive_pairwise_dist = self.nodedist(src_embs, dst_embs)
             # create random negatives for gnn_loss
             batch_neg_idx_src, batch_neg_idx_dst = self.sample_negatives(edge_idx=edges_idx,
                                                                 node_idx=nodes_idx)
@@ -412,36 +415,37 @@ class TH:
                 #negative_pairs = tf.gather_nd(pairwise_similarity, neg_idx)
                 neg_row_embs = tf.gather(indices=batch_neg_idx_src, params=node_hat)
                 neg_col_embs = tf.gather(indices=batch_neg_idx_dst, params=node_hat)
-                negative_pairs = self.nodesim(neg_row_embs, neg_col_embs)
+                negative_pairwise_dist = self.nodedist(neg_row_embs, neg_col_embs)
             except:
                 breakpoint()
-            positive_y = tf.ones_like(positive_pairwise)
-            negative_y = -tf.ones_like(negative_pairs)
+            #positive_y = tf.ones_like(positive_pairwise_dist)
+            #negative_y = -tf.ones_like(negative_pairwise_dist)
             #positive_pairwise = tf.nn.sigmoid(positive_pairwise)
             #negative_pairs = tf.nn.sigmoid(negative_pairs)
             if self.use_noise:
                 # reduce noises to one dim
                 noises_weights = Softmax()(self.noise_weights)[:, None]
                 noises = tf.matmul(tf.gather(indices=edges_idx, params=self.positive_noises), noises_weights)
-                positive_pairwise = positive_pairwise + noises[:,0]
+                positive_pairwise_dist = positive_pairwise_dist + noises[:,0]
                 #positive_pairwise = tf.clip_by_value(positive_pairwise, 0, 1)
             #breakpoint()
             #pos_loss = tf.keras.losses.binary_crossentropy(positive_y,
             #                                                positive_pairwise, from_logits=True)
             #pos_loss = -tf.reduce_mean(positive_pairwise)
-            pos_loss = tf.reduce_mean(1 - positive_pairwise)
+            pos_loss = tf.reduce_mean(positive_pairwise_dist)
             if self.num_negatives > 0:
                 #neg_loss = tf.keras.losses.binary_crossentropy(negative_y,
                 #                                            negative_pairs, from_logits=True)
                 #neg_loss = tf.reduce_mean(negative_pairs)
-                neg_loss = tf.reduce_mean(tf.maximum(tf.zeros_like(negative_pairs), negative_pairs))
+                #neg_loss = tf.reduce_mean(tf.maximum(tf.zeros_like(negative_pairwise_dist), 1-negative_pairwise_dist))
+                neg_loss = tf.reduce_mean(negative_pairwise_dist)
             else:
                 neg_loss = tf.constant(0)
             #gnn_loss = (pos_loss + neg_loss) * self.gnn_weight
             #neg_loss = 0
             gnn_losses["pos_loss"] = pos_loss
             gnn_losses["neg_loss"] = neg_loss
-            gnn_loss = self.edge_loss(positive_pairwise, negative_pairs)
+            gnn_loss = self.edge_loss(positive_pairwise_dist, negative_pairwise_dist)
             gnn_loss = gnn_loss * self.gnn_weight
             gnn_losses["gnn_loss"] = gnn_loss
         #loss = gnn_loss
@@ -452,15 +456,16 @@ class TH:
         if self.scg_pairs is not None and self.scg_weight > 0:
             scg_row_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 0])
             scg_col_embs = tf.gather(node_hat, self.scg_pairs[scgs_idx, 1])
-            scg_pairwise = self.nodesim(scg_row_embs, scg_col_embs)
+            scg_pairwise = self.nodedist(scg_row_embs, scg_col_embs)
             #scg_pairwise = tf.nn.sigmoid(scg_pairwise)
             #if self.use_noise:
             #    scg_noises = tf.matmul(tf.gather(indices=scgs_idx, params=self.scg_noises), noises_weights)
             #    scg_pairwise = scg_pairwise + scg_noises[:,0]
                 #scg_pairwise = tf.clip_by_value(scg_pairwise, 0, 1)
-            scg_loss = tf.keras.losses.binary_crossentropy(
-                    tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=True
-            )
+            #scg_loss = tf.keras.losses.binary_crossentropy(
+            #        tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=True
+            #)
+            scg_loss = self.edge_loss(tf.ones_like([0.0]), scg_pairwise)
             #scg_loss = tf.reduce_mean(scg_pairwise)
             scg_loss *= self.scg_weight
         return scg_loss
