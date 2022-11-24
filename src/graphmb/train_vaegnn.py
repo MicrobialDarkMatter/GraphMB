@@ -161,7 +161,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         clustering = args.clusteringalgo
         k = args.kclusters
         
-        use_edge_weights = False
+        use_edge_weights = True
         cluster_markers_only = args.quick
         decay = 0.5 ** (2.0 / epochs)
         use_ae = True
@@ -246,6 +246,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             hidden_units=hidden_gnn,
             layers=nlayers_gnn,
             conv_last=False,
+            dropout=args.dropout_gnn
         )  # , use_bn=True, use_vae=False)
 
         encoder = VAEEncoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
@@ -283,7 +284,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 args.batchtype = "nodes"
             else:
                 args.batchtype = "edges"
-
+        scg_idx = np.arange(len(neg_pair_idx))
         # create eval split
         if args.eval_split == 0:
             if "node" in args.batchtype:
@@ -339,16 +340,23 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             n_batches = len(train_idx)//batch_size
             if use_last_batch and n_batches < len(train_idx)/batch_size:
                 n_batches += 1 # add final batch
+            if args.scg_alpha > 0:
+                scg_batch_size = len(neg_pair_idx)//n_batches
+                logging.info("*** scg batch size: {}".format(scg_batch_size))
             pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 1000), position=1, ascii=' =')
             for b in pbar_gnnbatch:
                 if "edge" in args.batchtype:
                     nodes_batch, edges_batch = None, train_idx[b*batch_size:(b+1)*batch_size]
                 elif "node" in args.batchtype:
                     nodes_batch, edges_batch = train_idx[b*batch_size:(b+1)*batch_size], None
+                if args.scg_alpha > 0:
+                    scg_batch = scg_idx[b*scg_batch_size:(b+1)*scg_batch_size]
+                else:
+                    scg_batch = None
                 losses = trainer.train_unsupervised(edges_idx=edges_batch,
-                                                        nodes_idx=nodes_batch,
-                                                        vae=True,
-                                                        gold_labels=gold_labels)
+                                                    nodes_idx=nodes_batch,
+                                                    scgs_idx=scg_batch, vae=True,
+                                                    gold_labels=gold_labels)
                 total_loss, gnn_losses, ae_losses = losses
                 total_losses_epoch.append(total_loss.numpy())
                 for l in gnn_losses: gnn_losses_epoch.setdefault(l,[]).append(gnn_losses[l])
