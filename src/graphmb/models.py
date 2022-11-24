@@ -379,7 +379,7 @@ class TH:
         y_pred = tf.concat((pos_dists, neg_dists), axis=0)
         #gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
         gnn_loss = tf.keras.metrics.binary_crossentropy(tf.ones_like(pos_dists), pos_dists, from_logits=True)
-        gnn_loss = tf.keras.metrics.binary_crossentropy(tf.zeros_like(neg_dists), neg_dists, from_logits=True)
+        gnn_loss += tf.keras.metrics.binary_crossentropy(tf.zeros_like(neg_dists), neg_dists, from_logits=True)
         gnn_loss /= 2 
         #gnn_loss =  tf.reduce_mean(tf.where(
         #                            tf.equal(y_true, 1),
