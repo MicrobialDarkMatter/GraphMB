@@ -206,7 +206,8 @@ class GCN(Model):
         conv_last=None,
         use_bn=True,
         use_vae=False,
-        predict=False
+        predict=False,
+        dropout=0.5
     ):
         super(GCN, self).__init__()
         #assert layers > 0
@@ -227,7 +228,7 @@ class GCN(Model):
             if use_bn:
                 x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
             x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
+            x = Dropout(dropout)(x)
 
         if use_vae:
             mu = Dense(embsize, use_bias=True)(x)
@@ -256,16 +257,18 @@ class GCN(Model):
 
 
 class GCNLAF(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
+    def __init__(self, features_shape, input_dim, labels, adj,
+                 n_labels=None, hidden_units=None, embsize=None,
+                 layers=None, conv_last=None, dropout=0.5):
         super(GCNLAF, self).__init__()
         #assert layers > 0
-        self.features = features
+        self.features_shape = features_shape
         self.labels = labels
         self.adj = adj
         self.adj_size = adj.dense_shape.numpy()
 
         adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
+        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
 
         x = node_in
         # first gcn layer
@@ -275,21 +278,21 @@ class GCNLAF(Model):
             x = BiasLayer()(x)
             x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
             x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
+            x = Dropout(dropout)(x)
 
         # third gcn layer
         if conv_last:
-            x = Dense(n_labels, use_bias=False)(x)
+            x = Dense(embsize, use_bias=False)(x)
             x = LAF(4)([adj_in, x])
             x = BiasLayer()(x)
         else:
-            x = Dense(n_labels, use_bias=True)(x)
+            x = Dense(embsize, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
+        self.model.build([(self.features_shape[0], input_dim), tuple(self.adj_size)])
 
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
+    def call(self, features, idx, training=True):
+        output = self.model((features, self.adj), training=training)
         if idx is None:
             return output
         else:
@@ -301,11 +304,11 @@ class GCNLAF(Model):
 
 class GAT(Model):
     def __init__(
-        self, features_shape, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
+        self, features_shape, input_dim, labels, adj, embsize=None,
+        hidden_units=None, layers=None, conv_last=None, dropout=0.5
     ):
         super(GAT, self).__init__()
         self.features_shape = features_shape
-        #self.features = features
         self.labels = labels
         self.adj = adj
         self.adj_size = adj.dense_shape.numpy()
@@ -318,15 +321,15 @@ class GAT(Model):
             x = GraphAttention(hidden_units, dropout_rate=0.1, attn_heads=1, activation="linear")([adj_in, x])
             x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
             x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
+            x = Dropout(dropout)(x)
 
         # second sage layer
         if conv_last:
             x = GraphAttention(
-                n_labels, dropout_rate=0.1, attn_heads=1, activation="linear", attn_heads_reduction="average"
+                embsize, dropout_rate=0.1, attn_heads=1, activation="linear", attn_heads_reduction="average"
             )([adj_in, x])
         else:
-            x = Dense(n_labels, use_bias=True)(x)
+            x = Dense(embsize, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
         self.model.build([(features_shape[0], input_dim), tuple(self.adj_size)])
@@ -343,7 +346,8 @@ class GAT(Model):
 
 
 class GATLAF(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
+    def __init__(self, features, labels, adj, n_labels=None, embsize=None,
+                hidden_units=None, layers=None, conv_last=None):
         super(GATLAF, self).__init__()
         self.features = features
         self.labels = labels
@@ -365,7 +369,7 @@ class GATLAF(Model):
         # second sage layer
         if conv_last:
             x = GraphAttention(
-                n_labels,
+                embsize,
                 dropout_rate=0.1,
                 attn_heads=1,
                 activation="linear",
@@ -373,7 +377,7 @@ class GATLAF(Model):
                 laf_units=4,
             )([adj_in, x])
         else:
-            x = Dense(n_labels, use_bias=True)(x)
+            x = Dense(embsize, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
         self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
@@ -391,10 +395,12 @@ class GATLAF(Model):
 
 class SAGE(Model):
     def __init__(
-        self, features, input_dim, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None
+        self, features_shape, input_dim, labels, adj, embsize=None,
+        n_labels=None, hidden_units=None, layers=None, conv_last=None,
+        dropout=0.5
     ):
         super(SAGE, self).__init__()
-        self.features = features
+        self.features_shape = features_shape
         self.labels = labels
         self.adj = adj
         self.adj_size = adj.dense_shape.numpy()
@@ -412,23 +418,23 @@ class SAGE(Model):
             x = Add()([x_node, x])
             x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
             x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
+            x = Dropout(dropout)(x)
 
         # second sage layer
         if conv_last:
-            x_node = Dense(n_labels, use_bias=False)(x)
-            x_neigh = Dense(n_labels, use_bias=False)(x)
+            x_node = Dense(embsize, use_bias=False)(x)
+            x_neigh = Dense(embsize, use_bias=False)(x)
             x = Lambda(lambda t: tf.sparse.sparse_dense_matmul(t[0], t[1]))([adj_in, x_neigh])
             x = BiasLayer()(x)
             x = Add()([x_node, x])
         else:
-            x = Dense(n_labels, use_bias=True)(x)
+            x = Dense(embsize, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([(self.features.shape[0], input_dim), tuple(self.adj_size)])
+        self.model.build([(self.features_shape[0], input_dim), tuple(self.adj_size)])
 
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
+    def call(self, features, idx, training=True):
+        output = self.model((features, self.adj), training=training)
         if idx is None:
             return output
         else:
@@ -439,15 +445,17 @@ class SAGE(Model):
 
 
 class SAGELAF(Model):
-    def __init__(self, features, labels, adj, n_labels=None, hidden_units=None, layers=None, conv_last=None):
+    def __init__(self, features_shape, labels, input_dim, adj,
+                n_labels=None, embsize=None, hidden_units=None,
+                layers=None, conv_last=None, dropout=0.5):
         super(SAGELAF, self).__init__()
-        self.features = features
+        self.features_shape = features_shape
         self.labels = labels
         self.adj = adj
         self.adj_size = adj.dense_shape.numpy()
 
         adj_in = Input(shape=self.adj_size[1:], batch_size=self.adj_size[0], dtype=tf.float32, sparse=True)
-        node_in = Input(shape=features.shape[1:], batch_size=self.adj_size[0], dtype=tf.float32)
+        node_in = Input(shape=input_dim, batch_size=self.adj_size[0], dtype=tf.float32)
 
         x = node_in
         # first sage layer
@@ -459,23 +467,24 @@ class SAGELAF(Model):
             x = Add()([x_node, x])
             x = BatchNormalization(momentum=0.9, epsilon=1e-5)(x)
             x = Activation("relu")(x)
-            x = Dropout(0.5)(x)
+            x = Dropout(dropout)(x)
 
         # second sage layer
         if conv_last:
-            x_node = Dense(n_labels, use_bias=False)(x)
-            x_neigh = Dense(n_labels, use_bias=False)(x)
+            x_node = Dense(embsize, use_bias=False)(x)
+            x_neigh = Dense(embsize, use_bias=False)(x)
             x = LAF(4)([adj_in, x_neigh])
             x = BiasLayer()(x)
             x = Add()([x_node, x])
         else:
-            x = Dense(n_labels, use_bias=True)(x)
+            x = Dense(embsize, use_bias=True)(x)
 
         self.model = Model([node_in, adj_in], x)
-        self.model.build([tuple(self.features.shape), tuple(self.adj_size)])
+        self.model.build([(self.features_shape[0], input_dim),
+                           tuple(self.adj_size)])
 
-    def call(self, idx, training=True):
-        output = self.model((self.features, self.adj), training=training)
+    def call(self, features, idx, training=True):
+        output = self.model((features, self.adj), training=training)
         if idx is None:
             return output
         else:
