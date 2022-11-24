@@ -164,7 +164,6 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         use_edge_weights = False
         cluster_markers_only = args.quick
         decay = 0.5 ** (2.0 / epochs)
-        concat_features = args.concat_features
         use_ae = True
         args.rawfeatures = True
 
@@ -184,7 +183,6 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             #tf.summary.trace_on(graph=True)
             logger.info("******* Running model: {} **********".format(gname))
             logger.info("***** using edge weights: {} ******".format(use_edge_weights))
-            logger.info("***** concat features: {} *****".format(concat_features))
             logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
             logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
             logger.info("***** self edges only: {} *****".format(args.noedges))
@@ -276,7 +274,8 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             kmers_dim=dataset.node_kmers.shape[1],
             abundance_dim=dataset.node_depths.shape[1],
             use_gnn=use_gnn,
-            use_noise=args.noise
+            use_noise=args.noise,
+            loglevel=args.loglevel
         )
 
         if args.batchtype == "auto":
@@ -340,7 +339,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             n_batches = len(train_idx)//batch_size
             if use_last_batch and n_batches < len(train_idx)/batch_size:
                 n_batches += 1 # add final batch
-            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 100), position=1, ascii=' =')
+            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 1000), position=1, ascii=' =')
             for b in pbar_gnnbatch:
                 if "edge" in args.batchtype:
                     nodes_batch, edges_batch = None, train_idx[b*batch_size:(b+1)*batch_size]
@@ -361,8 +360,8 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                              "SCG": np.average(gnn_losses["scg_loss"]),
                              "pred": np.average(gnn_losses["pred_loss"]),
                             #'GNN  LR': float(trainer.opt._decayed_lr(float)),
-                            "pos": np.average(gnn_losses["pos_loss"]),
-                            "neg": np.average(gnn_losses["neg_loss"]),
+                            "pos": np.average(gnn_losses["pos"]),
+                            "neg": np.average(gnn_losses["neg"]),
                             "kld": np.average(ae_losses["kld"]),
                             "vae": np.average(ae_losses["vae_loss"]),
                             "kmer": np.average(ae_losses["kmer_loss"]),
@@ -390,18 +389,16 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 if use_gnn:
                     node_new_features = trainer.gnn_model(gnn_input_features, None, training=False)
                     node_new_features = node_new_features.numpy()
-                    if concat_features:
-                        node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
                 else:
                     node_new_features = gnn_input_features.numpy()
                 if args.noise:
-                    mlflow.log_metrics({"avg positive noise": trainer.positive_noises.numpy().mean(),
-                                                   "avg scg noise": trainer.scg_noises.numpy().mean()}, step=e)
+                    #mlflow.log_metrics({"avg positive noise": trainer.positive_noises.numpy().mean(),
+                    #                               "avg scg noise": trainer.scg_noises.numpy().mean()}, step=e)
                     # get topk edge noises
                     #breakpoint()
-                    topk_indices = tf.math.top_k(tf.math.abs(trainer.positive_noises[:, 0]), k=10).indices
+                    #topk_indices = tf.math.top_k(tf.math.abs(trainer.positive_noises[:, 0]), k=10).indices
                     #breakpoint()
-                    logger.debug("            src (label) dst (label) observed predicted noise")
+                    """logger.debug("            src (label) dst (label) observed predicted noise")
                     for i in topk_indices:
                         logger.debug("{} ({}) {} ({}) {:.4f} {:.4f} {}".format(dataset.node_names[gnn_model.adj.indices[i][0]],
                                      dataset.node_to_label[dataset.node_names[gnn_model.adj.indices[i][0]]],
@@ -410,7 +407,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                                      gnn_model.adj.values[i].numpy(),
                                      tf.reduce_sum(tf.math.multiply(tf.nn.l2_normalize(node_new_features[gnn_model.adj.indices[i][0]]),
                                                                     tf.nn.l2_normalize(node_new_features[gnn_model.adj.indices[i][1]]))).numpy(),
-                                     trainer.positive_noises[i].numpy()))
+                                     trainer.positive_noises[i].numpy()))"""
 
 
                 if args.noise and hasattr(dataset, "true_adj_matrix"):
@@ -444,16 +441,12 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 mlflow.log_metrics(stats, step=e)
                 #print("total eval time", datetime.datetime.now() - evalstarttime)
             losses_string = " ".join([f"{k}={v:.3f}" for k, v in epoch_metrics.items() if v != 0])
-            scores_string = f"HQ={stats['hq']} Best{target_metric}={round(best_score, 3)} BestEpoch={best_epoch} F1={round(stats.get(target_metric,0), 3)}"
+            scores_string = f"Best{target_metric}={round(best_score, 3)} BestEpoch={best_epoch} Cur{target_metric}={round(stats.get(target_metric,0), 3)}"
             pbar_epoch.set_description(
                 f"[{args.outname} {pname}] {losses_string} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )
 
         #################################################################
-
-        # concat with original features
-        if concat_features:
-            node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
         if best_embs is None:
             best_embs = node_new_features
         

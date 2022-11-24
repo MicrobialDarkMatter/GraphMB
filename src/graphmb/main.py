@@ -32,7 +32,7 @@ from graphmb.graphmb1 import (cluster_embs,
 from graphmb.version import __version__
 
 def run_model(dataset, args, logger, nrun, target_metric):
-    from graphmb import vaegbin, train_vaegnn #, train_gnn, train_vae, train_auggnn
+    from graphmb import train_vaegnn #, train_gnn, train_vae, train_auggnn
     if args.model_name.endswith("_ae"):
         return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun, target_metric)
     elif args.model_name == "vae":
