@@ -377,7 +377,10 @@ class TH:
         #breakpoint()
         y_true = tf.concat((tf.ones_like(pos_dists), tf.zeros_like(neg_dists)), axis=0)
         y_pred = tf.concat((pos_dists, neg_dists), axis=0)
-        gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
+        #gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
+        gnn_loss = tf.keras.metrics.binary_crossentropy(tf.ones_like(pos_dists), pos_dists, from_logits=True)
+        gnn_loss = tf.keras.metrics.binary_crossentropy(tf.zeros_like(neg_dists), neg_dists, from_logits=True)
+        gnn_loss /= 2 
         #gnn_loss =  tf.reduce_mean(tf.where(
         #                            tf.equal(y_true, 1),
         #                                1-y_pred,
@@ -517,7 +520,6 @@ class TH:
             train_src_original = self.gnn_model.adj.indices[:,0]
             train_dst_original = self.gnn_model.adj.indices[:,1]
         if scgs_idx is None:
-
             scgs_idx = range(0, len(self.scg_pairs))
         #####
         
