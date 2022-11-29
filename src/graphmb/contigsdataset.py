@@ -537,9 +537,10 @@ class AssemblyDataset:
         edges_without_label = 0
         for u, v in zip(self.edges_src, self.edges_dst):
             # breakpoint()
-            if self.node_names[u] not in self.node_to_label or self.node_names[v] not in self.node_to_label:
+            if self.node_to_label.get(self.node_names[u], "NA") == "NA" or \
+               self.node_to_label.get(self.node_names[v], "NA") == "NA":
                 edges_without_label += 1
-            if self.node_to_label[self.node_names[u]] == self.node_to_label[self.node_names[v]]:
+            if self.node_to_label[self.node_names[u]] == self.node_to_label[self.node_names[v]] and self.node_to_label[self.node_names[u]] != "NA":
                 positive_edges += 1
         self.logger.info(
             f"""homophily: {round(positive_edges / (len(self.edge_weights) - edges_without_label),4)} on
@@ -774,7 +775,7 @@ class AssemblyDataset:
         print("edges with overlapping scgs (max=20):", scg_counter.most_common(20))
         return edge_ids_with_same_scgs
 
-    def generate_edges_based_on_labels(self):
+    def generate_edges_based_on_labels(self, noise=0):
         # link nodes with same labels and create new adj_matrix/edges_src/edges_dst/edge_weights
         #new_edges = []
         new_srcs = []

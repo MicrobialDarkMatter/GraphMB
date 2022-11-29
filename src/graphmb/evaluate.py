@@ -318,7 +318,7 @@ def compute_clusters_and_stats(
     contig_genes = dataset.contig_markers
     node_to_gt_idx_label = dataset.node_to_label
     gt_idx_label_to_node = dataset.label_to_node
-    cluster_to_contig, contig_to_bin, labels, cluster_centroids = run_clustering(X, dataset.node_names,
+    cluster_to_contig, contig_to_bin, labels, cluster_centroids = run_clustering(X, node_names,
                                                                                  clustering, cuda, k=k)
    
     scores = {"precision": 0, "recall": 0, "f1": 0, "ari": 0, "hq": 0, "mq": 0,
@@ -434,7 +434,7 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
         node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
         dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne,
-        amber=(args.labels is not None and "amber" in args.labels), #cuda=args.cuda,
+        amber=(args.labels is not None and "amber" in args.labels), cuda=args.cuda,
         compute_pospairs=False, unresolved=True
     )
     
@@ -463,7 +463,7 @@ def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, 
         cluster_labels, stats, positive_pairs, hq_bins = compute_clusters_and_stats(
             node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
             dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=tsne, tsne_path=tsne_path, max_pos_pairs=None,
-            amber=(args.labels is not None and "amber" in args.labels), #cuda=args.cuda,
+            amber=(args.labels is not None and "amber" in args.labels), cuda=args.cuda,
         )
     else:
         breakpoint()
