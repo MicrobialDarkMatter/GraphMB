@@ -335,6 +335,7 @@ class TH:
             #self.noise_weights = tf.Variable(tf.random_normal_initializer()(shape=(noise_units,), dtype=tf.float32), trainable=True)
             # alt: Dense layer with concat of embs (or feats) as input and single value output
             self.noise_model = NoiseModel(abundance_dim=abundance_dim, emb_dim=0)
+            self.noise_dict = {}
 
     def sample_negatives_old(self, edge_idx):
         # get numbers between 0 and n*(n-1)
@@ -377,10 +378,10 @@ class TH:
         #breakpoint()
         y_true = tf.concat((tf.ones_like(pos_dists), tf.zeros_like(neg_dists)), axis=0)
         y_pred = tf.concat((pos_dists, neg_dists), axis=0)
-        #gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
-        gnn_loss = tf.keras.metrics.binary_crossentropy(tf.ones_like(pos_dists), pos_dists, from_logits=True)
-        gnn_loss += tf.keras.metrics.binary_crossentropy(tf.zeros_like(neg_dists), neg_dists, from_logits=True)
-        gnn_loss /= 2 
+        gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
+        #gnn_loss = tf.keras.metrics.binary_crossentropy(tf.ones_like(pos_dists), pos_dists, from_logits=True)
+        #gnn_loss = tf.keras.metrics.binary_crossentropy(tf.zeros_like(neg_dists), neg_dists, from_logits=True)
+        #gnn_loss /= 2 
         #gnn_loss =  tf.reduce_mean(tf.where(
         #                            tf.equal(y_true, 1),
         #                                1-y_pred,
@@ -457,8 +458,18 @@ class TH:
                 src_ab = tf.gather(indices=train_pairs[0], params=self.features )[:, :self.ab_dim]
                 dst_ab = tf.gather(indices=train_pairs[1], params=self.features )[:, :self.ab_dim]
                 noise_input = tf.concat((src_ab, dst_ab), axis=1)
-                noises = self.noise_model(noise_input)
-                positive_pairwise_dist = positive_pairwise_dist + noises[:,0]
+                pos_noises = self.noise_model(noise_input)[:,0]
+                positive_pairwise_dist = positive_pairwise_dist + pos_noises
+
+                src_ab = tf.gather(indices=batch_neg_idx_src, params=self.features )[:, :self.ab_dim]
+                dst_ab = tf.gather(indices=batch_neg_idx_dst, params=self.features )[:, :self.ab_dim]
+                noise_input = tf.concat((src_ab, dst_ab), axis=1)
+                neg_noises = self.noise_model(noise_input)[:,0]
+                negative_pairwise_dist = negative_pairwise_dist + neg_noises
+                self.noise_dict.update({(train_pairs[0][i].numpy(), train_pairs[1][i].numpy()): pos_noises[i].numpy() for i in range(len(edges_idx))})
+                self.noise_dict.update({(batch_neg_idx_src[i].numpy(), batch_neg_idx_dst[i].numpy()): neg_noises[i].numpy() for i in range(len(batch_neg_idx_src))})
+
+
 
             pos_dist = tf.reduce_mean(positive_pairwise_dist)
             if self.num_negatives > 0:

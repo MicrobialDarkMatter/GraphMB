@@ -198,7 +198,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                         X[cluster_mask], node_names[cluster_mask],
                         dataset, clustering=clustering, k=k, tsne=args.tsne,
                         amber=(args.labels is not None and "amber" in args.labels),
-                        #cuda=args.cuda,
+                        cuda=args.cuda,
                     )
             #mlflow.log_metrics(stats, step=0)
             if args.noise and hasattr(dataset, "true_adj_matrix"):
@@ -405,17 +405,20 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                     # get topk edge noises
                     #breakpoint()
                     #topk_indices = tf.math.top_k(tf.math.abs(trainer.positive_noises[:, 0]), k=10).indices
+                    sorted_noises = sorted(trainer.noise_dict.items(), key=lambda item: item[1])
+                    topk_indices = sorted_noises[-5:]
+                    bottomk_indices = sorted_noises[:5]
                     #breakpoint()
-                    """logger.debug("            src (label) dst (label) observed predicted noise")
-                    for i in topk_indices:
-                        logger.debug("{} ({}) {} ({}) {:.4f} {:.4f} {}".format(dataset.node_names[gnn_model.adj.indices[i][0]],
-                                     dataset.node_to_label[dataset.node_names[gnn_model.adj.indices[i][0]]],
-                                     dataset.node_names[gnn_model.adj.indices[i][1]], 
-                                     dataset.node_to_label[dataset.node_names[gnn_model.adj.indices[i][1]]],
-                                     gnn_model.adj.values[i].numpy(),
-                                     tf.reduce_sum(tf.math.multiply(tf.nn.l2_normalize(node_new_features[gnn_model.adj.indices[i][0]]),
-                                                                    tf.nn.l2_normalize(node_new_features[gnn_model.adj.indices[i][1]]))).numpy(),
-                                     trainer.positive_noises[i].numpy()))"""
+                    logger.debug("            src (label) dst (label) observed predicted noise")
+                    for pair, noise in topk_indices + bottomk_indices:
+                        logger.debug("{} ({}) {} ({}) 0 {:.4f} {}".format(dataset.node_names[pair[0]],
+                                     dataset.node_to_label[dataset.node_names[pair[0]]],
+                                     dataset.node_names[pair[1]], 
+                                     dataset.node_to_label[dataset.node_names[pair[1]]],
+                                     #gnn_model.adj.values[i].numpy(),
+                                     tf.reduce_sum(tf.math.multiply(tf.nn.l2_normalize(node_new_features[pair[0]]),
+                                                                    tf.nn.l2_normalize(node_new_features[pair[1]]))).numpy(),
+                                    noise))
 
 
                 if args.noise and hasattr(dataset, "true_adj_matrix"):
