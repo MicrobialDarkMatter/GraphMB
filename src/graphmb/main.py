@@ -460,10 +460,10 @@ def main():
     # zscore Kmer features (kmer are already loaded from reading the dataset)
     # dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
 
-    vamb_emb_exists = os.path.exists(features_path)
-    if not args.rawfeatures and (args.vamb or not vamb_emb_exists) and args.model_name != "vae":
-        vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
-        dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
+    #vamb_emb_exists = os.path.exists(features_path)
+    #if not args.rawfeatures and (args.vamb or not vamb_emb_exists) and args.model_name != "vae":
+    #    vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
+    #    dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
 
     # reload labels from file anyway
     if args.labels is not None:
@@ -477,8 +477,8 @@ def main():
 
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
-    if not args.rawfeatures and args.model_name != "vae":
-        dataset.read_features()
+    #if not args.rawfeatures and args.model_name != "vae":
+    #    dataset.read_features()
     metrics_per_run = []
     amber_metrics_per_run = []
     for n in range(args.nruns):

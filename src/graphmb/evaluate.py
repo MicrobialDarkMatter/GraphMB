@@ -430,7 +430,6 @@ def eval_epoch(logger, summary_writer, node_new_features, cluster_mask, weights,
                step, args, dataset, epoch, scores, best_metric, best_embs, best_epoch, best_model, target_metric="hq"):
     # used only by vgae model
     #log_to_tensorboard(summary_writer, {"Embs average": np.mean(node_new_features), 'Embs std': np.std(node_new_features) }, step)
-
     cluster_labels, stats, _, hq_bins = compute_clusters_and_stats(
         node_new_features[cluster_mask], np.array(dataset.node_names)[cluster_mask],
         dataset, clustering=args.clusteringalgo, k=args.kclusters, tsne=args.tsne,

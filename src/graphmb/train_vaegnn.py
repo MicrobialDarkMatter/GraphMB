@@ -233,9 +233,14 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         X = X.astype(np.float32)
         features = tf.constant(X)
         input_dim_gnn = output_dim_vae #+ dataset.node_depths.shape[1]
-
+        if args.gnn_alpha > 0:
+            clustering_dim = output_dim_gnn
+        elif not args.concatfeatures:
+            clustering_dim = output_dim_vae
+        else:
+            clustering_dim = output_dim_vae + output_dim_gnn
         logger.info(f"*** Model input dim {X.shape[1]}, GNN input dim {input_dim_gnn}")
-        logger.info(f"use_ae: {use_ae}, run AE only: {args.ae_only} output clustering dim {output_dim_gnn}")
+        logger.info(f"use_ae: {use_ae}, run AE only: {args.ae_only} output clustering dim {clustering_dim}")
 
         gnn_model = gmodel_type(
             features_shape=features.shape,
@@ -250,9 +255,11 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         )  # , use_bn=True, use_vae=False)
 
         encoder = VAEEncoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
-                             hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+                             hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae,
+                             layers=args.layers_vae)
         decoder = VAEDecoder(dataset.node_depths.shape[1], dataset.node_kmers.shape[1],
-                             hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae)
+                             hidden_vae, zdim=output_dim_vae, dropout=args.dropout_vae,
+                             layers=args.layers_vae)
 
         if args.classify:
             classifier = LabelClassifier(len(dataset.labels), zdim=encoder.zdim)
@@ -266,6 +273,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             all_same_idx=pos_pair_idx,
             ae_encoder=encoder,
             ae_decoder=decoder,
+            decoder_input=args.decoder_input,
             classifier=classifier,
             latentdim=output_dim_gnn,
             gnn_weight=float(args.gnn_alpha),
@@ -276,7 +284,8 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             abundance_dim=dataset.node_depths.shape[1],
             use_gnn=use_gnn,
             use_noise=args.noise,
-            loglevel=args.loglevel
+            loglevel=args.loglevel,
+            pretrainvae=args.vaepretrain
         )
 
         if args.batchtype == "auto":
@@ -320,7 +329,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
         for e in pbar_epoch:
             #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
             recon_loss = 0
-
+            trainer.epoch = e
             # train VAE in batches
             if e in batch_steps:
                 print(f'Increasing {args.batchtype} batch size from {batch_size:d} to {batch_size*2:d}')
@@ -390,13 +399,18 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             # eval checkpoint ##############################################################
             if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
                 evalstarttime = datetime.datetime.now()
-                #gnn_input_features = tf.concat((features[:,:dataset.node_depths.shape[1]],
-                #                                gnn_trainer.encoder(features)[0]), axis=1)
+               
                 gnn_input_features = trainer.encoder(features)[0]
                 logger.debug("encoder output " + str(gnn_input_features[0][:5].numpy()))
                 if use_gnn:
                     node_new_features = trainer.gnn_model(gnn_input_features, None, training=False)
-                    node_new_features = node_new_features.numpy()
+                    
+                    if args.concatfeatures:
+                        node_new_features = tf.concat((gnn_input_features,
+                                                        node_new_features), axis=1).numpy()
+                    else:
+                        node_new_features = node_new_features.numpy()
+                        #node_new_features = gnn_input_features.numpy()
                 else:
                     node_new_features = gnn_input_features.numpy()
                 if args.noise:

@@ -277,6 +277,7 @@ class TH:
         all_same_idx=None,
         ae_encoder=None,
         ae_decoder=None,
+        decoder_input="gnn",
         classifier=None,
         latentdim=32,
         gnn_weight=1.0,
@@ -293,7 +294,8 @@ class TH:
         labels=None,
         use_gnn=True,
         use_noise=False,
-        loglevel="warning"
+        loglevel="warning",
+        pretrainvae=0
     ):
         self.opt = Adam(learning_rate=lr, epsilon=1e-8)
         # self.opt = SGD(learning_rate=lr)
@@ -312,6 +314,7 @@ class TH:
         self.classifier = classifier
         self.encoder = ae_encoder
         self.decoder = ae_decoder
+        self.decoder_input = decoder_input
         self.use_ae = ae_encoder is not None
         self.mse_loss = tf.keras.losses.MeanSquaredError()
         self.gnn_weight = gnn_weight
@@ -328,6 +331,8 @@ class TH:
         self.use_gnn = use_gnn
         self.use_noise = use_noise
         self.loglevel = loglevel
+        self.pretrainvae = pretrainvae
+        self.epoch = 0
         if self.use_noise:
             #noise_units = 1
             #self.positive_noises = tf.Variable(tf.random_normal_initializer()(shape=(self.gnn_model.adj.values.shape + noise_units), dtype=tf.float32), trainable=True)
@@ -399,9 +404,17 @@ class TH:
             #ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
 
         ae_mu, ae_logvar = self.encoder(tf.gather(self.features, nodes_idx), training=True)
+        if self.decoder_input == "gnn" and self.use_gnn and self.epoch > self.pretrainvae:
+            ae_mu = tf.scatter_nd(indices=nodes_idx[:,None],
+                                     updates=ae_mu,
+                                     shape=(self.features.shape[0], ae_mu.shape[1]))
+            ae_mu = self.gnn_model(ae_mu, nodes_idx, training=True)
         ae_recon = self.decoder(ae_mu, training=True)
         ae_logvar = tf.clip_by_value(ae_logvar, -2, 2)
-        losses = self.ae_loss(tf.gather(self.features, nodes_idx), ae_recon, ae_mu, ae_logvar, vae=vae)
+        try:
+            losses = self.ae_loss(tf.gather(self.features, nodes_idx), ae_recon, ae_mu, ae_logvar, vae=vae)
+        except:
+            breakpoint()
         ae_loss = tf.reduce_sum(losses) * self.ae_weight
         ae_losses = {"kmer_loss": losses[0],
                         "ab_loss": losses[1],
@@ -549,8 +562,8 @@ class TH:
                 ae_losses = {}
             ######
             ###### run gnn model
-            if self.use_gnn:
-                gnn_embs = self.gnn_model(ae_embs, nodes_idx)
+            if self.use_gnn and self.decoder_input == "vae" and self.epoch > self.pretrainvae:
+                gnn_embs = self.gnn_model(ae_embs, nodes_idx, training=True)
                 node_hat = tf.scatter_nd(indices=nodes_idx[:,None],
                                      updates=gnn_embs,
                                      shape=(self.features.shape[0], gnn_embs.shape[1]))
