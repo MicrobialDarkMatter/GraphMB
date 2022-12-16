@@ -359,6 +359,7 @@ class TH:
                               (neg_idx % self.adj_shape[1])), tf.int64)
         return neg_idx_row, neg_idx_col
 
+    @tf.function
     def sample_negatives(self, edge_idx, node_idx):
         # for 5 negatives and batchsize 256, this should give 1% or less false negatives
         neg_idx = tf.random.uniform(shape=(2, len(edge_idx)*self.num_negatives),
@@ -378,7 +379,8 @@ class TH:
         pairwise = tf.reduce_sum(tf.math.multiply(u, v), axis=1)
         #pairwise = -tf.norm(tf.math.subtract(u, v) + + 1.0e-12, ord='euclidean', axis=1,)
         return pairwise
-
+    
+    @tf.function
     def edge_loss(self, pos_dists, neg_dists):
         #breakpoint()
         y_true = tf.concat((tf.ones_like(pos_dists), tf.zeros_like(neg_dists)), axis=0)
@@ -403,13 +405,15 @@ class TH:
             self.encoder.layers[0].layers[logvar_idx].trainable = False
             #ae_embs = tf.concat((self.features[:,:self.abundance_dim], self.encoder(self.features)[0]), axis=1)
 
-        ae_mu, ae_logvar = self.encoder(tf.gather(self.features, nodes_idx), training=True)
-        if self.decoder_input == "gnn" and self.use_gnn and self.epoch > self.pretrainvae:
+        ae_mu, ae_logvar = self.encoder(tf.gather(self.features, nodes_idx), training=(self.epoch < self.pretrainvae or self.pretrainvae == 0))
+        #ae_mu, ae_logvar = self.encoder(tf.gather(self.features, nodes_idx), training=True)
+        if self.decoder_input == "gnn" and self.use_gnn and (self.epoch > self.pretrainvae or self.pretrainvae == 0):
             ae_mu = tf.scatter_nd(indices=nodes_idx[:,None],
                                      updates=ae_mu,
                                      shape=(self.features.shape[0], ae_mu.shape[1]))
             ae_mu = self.gnn_model(ae_mu, nodes_idx, training=True)
-        ae_recon = self.decoder(ae_mu, training=True)
+        ae_recon = self.decoder(ae_mu, training=(self.epoch < self.pretrainvae or self.pretrainvae == 0))
+        #ae_recon = self.decoder(ae_mu, training=True)
         ae_logvar = tf.clip_by_value(ae_logvar, -2, 2)
         try:
             losses = self.ae_loss(tf.gather(self.features, nodes_idx), ae_recon, ae_mu, ae_logvar, vae=vae)
@@ -514,15 +518,39 @@ class TH:
             #        tf.zeros_like(scg_pairwise), scg_pairwise, from_logits=True
             #)
             scg_loss = self.edge_loss(tf.ones_like([0.0]), scg_pairwise)
-            #scg_loss = tf.reduce_mean(scg_pairwise)
             scg_loss *= self.scg_weight
+        return scg_loss
+
+    @tf.function
+    def train_scg_only(self):
+        scgs_idx = range(0, len(self.scg_pairs))
+        layer_names = [layer.name for layer in self.encoder.layers[0].layers]
+        logvar_idx = layer_names.index("logvar")
+        self.encoder.layers[0].layers[logvar_idx].trainable = False
+        with tf.GradientTape() as tape:
+
+            node_hat, _ = self.encoder(self.features, training=True)
+            scg_loss = self.train_scg(node_hat, scgs_idx)
+            # aggregate model weights
+            if self.use_gnn and (self.epoch > self.pretrainvae or self.pretrainvae ==  0) :
+                tw = self.gnn_model.trainable_weights
+            else:
+                tw = []
+            if self.use_ae:
+                if self.pretrainvae == 0 or self.epoch < self.pretrainvae:
+                    tw += self.encoder.trainable_weights
+                #self.encoder.layers[0].layers[logvar_idx].trainable = True
+            grads = tape.gradient(scg_loss, tw)
+
+            self.opt.apply_gradients(zip(grads, tw))
+        self.encoder.layers[0].layers[logvar_idx].trainable = True
         return scg_loss
 
 
     @tf.function
     def train_unsupervised(self, nodes_idx=None, edges_idx=None,
                             scgs_idx=None,training=True, vae=True,
-                            mask_labels=None, gold_labels=None):
+                            mask_labels=None, gold_labels=None, last_batch=False):
         #### get node indices to be used for this batch
         if edges_idx is None:
             edges_idx = range(0,self.gnn_model.adj.indices.shape[0])
@@ -562,7 +590,7 @@ class TH:
                 ae_losses = {}
             ######
             ###### run gnn model
-            if self.use_gnn and self.decoder_input == "vae" and self.epoch > self.pretrainvae:
+            if self.use_gnn and self.decoder_input == "vae" and (self.epoch > self.pretrainvae or self.pretrainvae ==  0):
                 gnn_embs = self.gnn_model(ae_embs, nodes_idx, training=True)
                 node_hat = tf.scatter_nd(indices=nodes_idx[:,None],
                                      updates=gnn_embs,
@@ -573,8 +601,13 @@ class TH:
                                           (train_src_original, train_dst_original))
             # 
             # SCG loss
-            scg_loss = self.train_scg(node_hat, scgs_idx)
-            gnn_losses["scg_loss"] = scg_loss
+            #if last_batch:
+            #    #breakpoint()
+            #    scg_loss = self.train_scg(node_hat, scgs_idx)
+            #    gnn_losses["scg_loss"] = scg_loss
+            #else:
+            scg_loss = tf.convert_to_tensor(0.0)
+            
             #
             
             # noise
@@ -595,18 +628,18 @@ class TH:
                 pred_loss = tf.convert_to_tensor(0.0)
             gnn_losses["pred_loss"] = pred_loss
             
-
             # combine losses and update model
-            loss = gnn_losses["gnn_loss"]
+            loss = gnn_losses["gnn_loss"] + scg_loss
             if training:
                 # aggregate model weights
-                if self.use_gnn:
+                if self.use_gnn and (self.epoch > self.pretrainvae or self.pretrainvae ==  0) :
                     tw = self.gnn_model.trainable_weights
                 else:
                     tw = []
                 if self.use_ae:
                     loss += ae_losses["vae_loss"]
-                    tw += self.encoder.trainable_weights + self.decoder.trainable_weights # skip logvar 
+                    if self.pretrainvae == 0 or self.epoch < self.pretrainvae:
+                        tw += self.encoder.trainable_weights + self.decoder.trainable_weights # skip logvar 
                     #self.encoder.layers[0].layers[logvar_idx].trainable = True
                 if self.use_noise:
                     #breakpoint()
@@ -617,14 +650,15 @@ class TH:
                     tw += self.classifier.trainable_weights
                     loss += pred_loss
                 #################
-                grads = tape.gradient([ae_losses["vae_loss"], gnn_losses["gnn_loss"], scg_loss, pred_loss], tw)
+                #grads = tape.gradient([ae_losses.get("vae_loss", tf.convert_to_tensor(0.0)), gnn_losses["gnn_loss"], scg_loss, pred_loss], tw)
+                grads = tape.gradient([ae_losses.get("vae_loss", tf.convert_to_tensor(0.0)), gnn_losses["gnn_loss"], pred_loss], tw)
                 grad_norm = tf.linalg.global_norm(grads)
                 #clip_grads, _ = tf.clip_by_global_norm(grads, 2,  use_norm=grad_norm)
                 #new_grad_norm = tf.linalg.global_norm(clip_grads)
                 self.opt.apply_gradients(zip(grads, tw))
                 ae_losses["grad_norm"] = grad_norm.numpy()
                 #ae_losses["grad_norm_clip"] = new_grad_norm.numpy()
-            return loss, gnn_losses, ae_losses
+        return loss, gnn_losses, ae_losses
         
         
     #@tf.function

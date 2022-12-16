@@ -8,6 +8,8 @@ from tqdm import tqdm
 import mlflow
 from scipy.sparse import coo_matrix, diags
 
+from tensorflow.keras.optimizers import Adam, SGD
+
 from graphmb.models import  TH, TrainHelperVAE, VAEDecoder, VAEEncoder, LabelClassifier
 from graphmb.utils import set_seed
 from graphmb.visualize import plot_edges_sim
@@ -330,6 +332,8 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
             #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
             recon_loss = 0
             trainer.epoch = e
+            #if args.vaepretrain - 1 == e:
+            #    trainer.opt = Adam(learning_rate=lr_gnn/10, epsilon=1e-8)
             # train VAE in batches
             if e in batch_steps:
                 print(f'Increasing {args.batchtype} batch size from {batch_size:d} to {batch_size*2:d}')
@@ -359,7 +363,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 elif "node" in args.batchtype:
                     nodes_batch, edges_batch = train_idx[b*batch_size:(b+1)*batch_size], None
                 if args.scg_alpha > 0:
-                    scg_batch = scg_idx[b*scg_batch_size:(b+1)*scg_batch_size]
+                    scg_batch = scg_idx #[b*scg_batch_size:(b+1)*scg_batch_size]
                 else:
                     scg_batch = None
                 losses = trainer.train_unsupervised(edges_idx=edges_batch,
@@ -372,17 +376,23 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 for l in ae_losses: vae_losses_epoch.setdefault(l,[]).append(ae_losses[l])
 
                 #add losses to get epoch avg
+            if args.scg_alpha > 0:
+                scg_loss = trainer.train_scg_only()
+                scg_loss = scg_loss.numpy()
+            else:
+                scg_loss = 0
             epoch_metrics = {"Total": np.average(total_losses_epoch),
-                             "gnn": np.average(gnn_losses["gnn_loss"]),
-                             "SCG": np.average(gnn_losses["scg_loss"]),
-                             "pred": np.average(gnn_losses["pred_loss"]),
+                             "gnn": np.average(gnn_losses_epoch["gnn_loss"]),
+                             #"SCG": np.average(gnn_losses_epoch["scg_loss"]),
+                             "SCG": scg_loss,
+                             "pred": np.average(gnn_losses_epoch["pred_loss"]),
                             #'GNN  LR': float(trainer.opt._decayed_lr(float)),
-                            "pos": np.average(gnn_losses["pos"]),
-                            "neg": np.average(gnn_losses["neg"]),
-                            "kld": np.average(ae_losses["kld"]),
-                            "vae": np.average(ae_losses["vae_loss"]),
-                            "kmer": np.average(ae_losses["kmer_loss"]),
-                            "ab": np.average( ae_losses["ab_loss"])}
+                            "pos": np.average(gnn_losses_epoch["pos"]),
+                            "neg": np.average(gnn_losses_epoch["neg"]),
+                            "kld": np.average(vae_losses_epoch["kld"]),
+                            "vae": np.average(vae_losses_epoch["vae_loss"]),
+                            "kmer": np.average(vae_losses_epoch["kmer_loss"]),
+                            "ab": np.average( vae_losses_epoch["ab_loss"])}
                             #"logvar": ae_losses["mean_logvar"],
                             #"grad_norm": ae_losses["grad_norm"],
                             #"grad_norm_clip": ae_losses["grad_norm_clip"]}
@@ -401,8 +411,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
                 evalstarttime = datetime.datetime.now()
                
                 gnn_input_features = trainer.encoder(features)[0]
+                #trainer.features = gnn_input_features
                 logger.debug("encoder output " + str(gnn_input_features[0][:5].numpy()))
-                if use_gnn:
+                if use_gnn: # and e > args.vaepretrain:
                     node_new_features = trainer.gnn_model(gnn_input_features, None, training=False)
                     
                     if args.concatfeatures:
