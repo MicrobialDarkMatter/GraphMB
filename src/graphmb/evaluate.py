@@ -234,7 +234,6 @@ def evaluate_contig_sets(marker_sets, contig_marker_counts, bin_to_contigs):
                 if gene not in bin_genes:
                     bin_genes[gene] = 0
                 bin_genes[gene] += contig_marker_counts[contig][gene]
-
         comp = completeness(marker_sets, set(bin_genes.keys()))
         cont = contamination(marker_sets, bin_genes)
         results[bin] = {"comp": comp, "cont": cont, "genes": bin_genes}
@@ -356,16 +355,16 @@ def compute_clusters_and_stats(
     
     # calculate edge similarity metrics
     if node_to_gt_idx_label is not None and len(dataset.labels) > 1:
-        if len(dataset.node_names) < 10_000:
-            sims = calculate_sim_between_same_labels_small(dataset.node_names, X,
-                                                    list(zip(dataset.edges_src, dataset.edges_dst)),
-                                                    dataset.label_to_node, dataset.node_to_label)
+        #if len(dataset.node_names) < 10_000:
+        #    sims = calculate_sim_between_same_labels_small(dataset.node_names, X,
+        #                                            list(zip(dataset.edges_src, dataset.edges_dst)),
+        #                                            dataset.label_to_node, dataset.node_to_label)
         #elif len([n for n in dataset.node_names if dataset.node_to_label.get(n, "NA") != "NA"]) < 10_000:
         #    sims = calculate_sim_between_same_labels_big(dataset.node_names, X,
         #                                        list(zip(dataset.edges_src, dataset.edges_dst)),
         #                                        dataset.label_to_node, dataset.node_to_label)
-        else:
-            sims = 1,1,1
+        #else:
+        sims = 1,1,1
         scores["avg_label_sim"], scores["avg_edge_sim"], scores["avg_total_sim"] = sims
         scores["ratio_labelsim"] = scores["avg_label_sim"]/scores["avg_total_sim"]
         scores["ratio_edgesim"] = scores["avg_edge_sim"]/scores["avg_total_sim"]
@@ -509,28 +508,33 @@ def eval_epoch_cluster(logger, summary_writer, node_new_features, cluster_mask, 
 def main():
     sets = read_marker_gene_sets(sys.argv[1])
     markers = read_contig_genes(sys.argv[2])
-    print("Single contig bin eval")
-    single_contig_bins = {c: [c] for c in markers}
-    results = evaluate_contig_sets(sets, markers, single_contig_bins)
-    total_hq = 0
-    for bin in results:
-        if results[bin]["comp"] > 90 and results[bin]["cont"] < 5:
-            print(bin, results[bin]["comp"], results[bin]["cont"])
-            total_hq += 1
-    print("Total HQ", total_hq)
-    # for bin in markers:
-    #    print(bin)
-    #    print(completeness(sets, set(markers[bin].keys())))
-    #    print(contamination(sets, markers[bin]))
-    if len(sys.argv) > 3:
+    #print("Single contig bin eval")
+    if len(sys.argv) < 4:
+        print("Single contig bin eval")
+        single_contig_bins = {c: [c] for c in markers}
+        results = evaluate_contig_sets(sets, markers, single_contig_bins)
+        total_hq = 0
+        for bin in results:
+            if results[bin]["comp"] > 90 and results[bin]["cont"] < 5:
+                print(bin, results[bin]["comp"], results[bin]["cont"])
+                total_hq += 1
+        print("Total HQ", total_hq)
+        # for bin in markers:
+        #    print(bin)
+        #    print(completeness(sets, set(markers[bin].keys())))
+        #    print(contamination(sets, markers[bin]))
+    else:
         cluster_to_contigs = {}
         clusters_file = sys.argv[3]
         with open(clusters_file, "r") as f:
             for line in f:
-                values = line.strip().split("\t")
-                if values[0] not in cluster_to_contigs:
-                    cluster_to_contigs[values[0]] = []
-                cluster_to_contigs[values[0]].append(values[1])
+                if line.startswith("@") or line.startswith("#"):
+                    continue
+                values = line.strip().split()
+                contig, binname = values[0], values[1]
+                if binname not in cluster_to_contigs:
+                    cluster_to_contigs[binname] = []
+                cluster_to_contigs[binname].append(contig)
         results = evaluate_contig_sets(sets, markers, cluster_to_contigs)
         # print(results)
 
@@ -540,7 +544,15 @@ def main():
                 print(bin, results[bin]["comp"], results[bin]["cont"])
                 total_hq += 1
         print("Total HQ", total_hq)
-    # count how many contigs per marker gene
+        if len(sys.argv) > 4:
+            import graphmb.amber_eval as amber
+            scores = {}
+            amber_metrics, bin_counts = amber.amber_eval(sys.argv[4], clusters_file, ["graphmb"])
+            scores["precision_avg_bp"] = amber_metrics["precision_avg_bp"]
+            scores["recall_avg_bp"] = amber_metrics["recall_avg_bp"]
+            scores["f1_avg_bp"] = amber_metrics["f1_avg_bp"]
+            print(scores)
+        # count how many contigs per marker gene
     scg_counts = {}
     for marker_set in sets:
         for gene in marker_set:
@@ -549,7 +561,7 @@ def main():
                 if gene in markers[contig]:
                     scg_counts[gene] += markers[contig][gene]
 
-    print(scg_counts)
+    #print(scg_counts)
     quartiles = np.percentile(list(scg_counts.values()), [25, 50, 75])
     print("candidate k0s", sorted(set([k for k in scg_counts.values() if k >= quartiles[2]])))
 

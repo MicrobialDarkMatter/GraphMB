@@ -80,7 +80,7 @@ def save_model(args, epoch, th, th_vae):
 def run_clustering(X, node_names, clustering_algo, cuda, k=0, tsne=False):
     
     if clustering_algo == "vamb":
-        from vamb.cluster import cluster as vamb_cluster
+        from graphmb.vamb_clustering import cluster as vamb_cluster
         starttime = datetime.datetime.now()
         X = X.astype(np.float32)
         cluster_to_contig = {

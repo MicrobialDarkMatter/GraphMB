@@ -386,15 +386,6 @@ class TH:
         y_true = tf.concat((tf.ones_like(pos_dists), tf.zeros_like(neg_dists)), axis=0)
         y_pred = tf.concat((pos_dists, neg_dists), axis=0)
         gnn_loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=True)
-        #gnn_loss = tf.keras.metrics.binary_crossentropy(tf.ones_like(pos_dists), pos_dists, from_logits=True)
-        #gnn_loss = tf.keras.metrics.binary_crossentropy(tf.zeros_like(neg_dists), neg_dists, from_logits=True)
-        #gnn_loss /= 2 
-        #gnn_loss =  tf.reduce_mean(tf.where(
-        #                            tf.equal(y_true, 1),
-        #                                1-y_pred,
-        #                            tf.maximum(tf.zeros_like(y_pred), y_pred)))
-        #print(tf.reduce_mean(pos_dists).numpy(), tf.reduce_mean(neg_dists).numpy())
-        #gnn_loss = tf.reduce_mean(pos_dists) + tf.reduce_mean(tf.maximum(tf.zeros_like(neg_dists), 1-neg_dists))
         return gnn_loss
     
     def train_vae(self, nodes_idx, vae=True):

@@ -7,9 +7,13 @@ import logging
 from tqdm import tqdm
 import mlflow
 from graphmb.models import  TH
-from graph_functions import set_seed, run_tsne, plot_embs, plot_edges_sim
+from graphmb.utils import set_seed # , run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
-from vaegbin import name_to_model, TensorboardLogger, prepare_data_for_gnn, compute_clusters_and_stats, log_to_tensorboard, eval_epoch
+from train_vaegnn import prepare_data_for_gnn, TensorboardLogger, log_to_tensorboard
+from graphmb.visualize import plot_edges_sim
+from graphmb.evaluate import compute_clusters_and_stats, eval_epoch
+from graphmb.utils import get_cluster_mask
+from graphmb.gnn_models import name_to_model
 
 
 def run_model_gnn(dataset, args, logger, nrun):
@@ -29,7 +33,7 @@ def run_model_gnn(dataset, args, logger, nrun):
     cluster_markers_only = args.quick
     use_edge_weights = True
     decay = 0.5 ** (2.0 / epochs)
-    concat_features = args.concat_features
+    concat_features = args.concatfeatures
     
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
@@ -134,14 +138,23 @@ def run_model_gnn(dataset, args, logger, nrun):
         for e in pbar_epoch:
             np.random.shuffle(train_idx)
             step += 1
-            total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
-            epoch_losses = {"gnn loss": float(gnn_loss), "SCG loss": float(diff_loss), "GNN loss": float(total_loss),
-                                                "GNN LR": float(th.opt.learning_rate), "pos loss": float(pos_loss),
-                                                "neg_loss": float(neg_loss)}
+            #total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
+            loss, gnn_losses, ae_losses = th.train_unsupervised(train_idx)
+            #epoch_losses = {"gnn loss": float(gnn_loss), "SCG loss": float(diff_loss), "GNN loss": float(total_loss),
+            #                                    "GNN LR": float(th.opt.learning_rate), "pos loss": float(pos_loss),
+            #                                    "neg_loss": float(neg_loss)}
+            
+            epoch_losses = {"Total": loss.numpy(),
+                            "gnn": gnn_losses["gnn_loss"].numpy(),
+                             "SCG": gnn_losses["scg_loss"].numpy(),
+                             #"pred": gnn_losses["pred_loss"],
+                            #'GNN  LR': float(trainer.opt._decayed_lr(float)),
+                            "pos": gnn_losses["pos"].numpy(),
+                            "neg": gnn_losses["neg"].numpy()}
             log_to_tensorboard(summary_writer, epoch_losses, step)
             mlflow.log_metrics(epoch_losses, step=step)
-            gnn_loss = gnn_loss.numpy()
-            diff_loss = diff_loss.numpy()
+            gnn_loss = epoch_losses["gnn"]
+            diff_loss = epoch_losses["SCG"]
 
             if args.eval_split > 0:
                 eval_total_loss, eval_gnn_loss, eval_diff_loss, eval_pos_loss, \

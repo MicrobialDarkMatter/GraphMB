@@ -477,8 +477,8 @@ def main():
 
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
-    #if not args.rawfeatures and args.model_name != "vae":
-    #    dataset.read_features()
+    if not args.rawfeatures and args.model_name != "vae":
+        dataset.read_features()
     metrics_per_run = []
     amber_metrics_per_run = []
     for n in range(args.nruns):
