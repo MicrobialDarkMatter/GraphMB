@@ -18,7 +18,6 @@ setup(
     install_requires=[
         "wheel",
         "requests",
-        "setuptools>57.5.0" 'importlib; python_version == "3.7"',
         "networkx==2.6.2",
         "torch==1.12.1",
         "scikit-learn==0.24.2",

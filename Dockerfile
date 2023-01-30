@@ -10,5 +10,5 @@ RUN pip install --upgrade pip
 COPY ./ /graphmb/
 #COPY ./data/strong100/ /graphmb/data/strong100/
 WORKDIR /graphmb
-RUN pip install .
+RUN python -m pip install -e .
 #CMD python /app/app.py

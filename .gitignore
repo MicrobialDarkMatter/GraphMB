@@ -23,3 +23,5 @@ results/
 *.sbatch
 *.pyc
 PKG-INFO
+mlruns/
+src/graphmb/unused/*
