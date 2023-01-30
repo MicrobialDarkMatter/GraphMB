@@ -32,7 +32,26 @@ def getRecall(mat, k, s, total, unclassified):
             if mat[j][i] > max_k:
                 max_k = mat[j][i]
         sum_s += max_k
-    return sum_s / total  # / (total + unclassified)
+    return sum_s / (total + unclassified)
+
+
+def getAveragePrecision(cluster_to_labels, cluster_sizes):
+    avg_precision = []
+    for c in cluster_to_labels:
+        #TP = cluster_to_labels[c][1]; TP+FP + cluster_sizes[c]
+        cluster_p = cluster_to_labels[c][1] / cluster_sizes[c]
+        avg_precision.append(cluster_p)
+    return round(sum(avg_precision) / len(avg_precision), 4)
+
+def getAverageRecall(label_to_cluster, cluster_to_contig, contig_sizes, label_to_node):
+    avg_recall = []
+    for label in label_to_cluster:
+        if label_to_cluster[label][0] == "NA":
+            avg_recall.append(0)
+        else:
+            cluster_r = label_to_cluster[label][1] / sum([contig_sizes.get(n, 1) for n in cluster_to_contig[label_to_cluster[label][0]]])
+            avg_recall.append(cluster_r)
+    return round(sum(avg_recall) / len(avg_recall), 4)
 
 
 # Get ARI
@@ -66,7 +85,7 @@ def getF1(prec, recall):
         return 2 * prec * recall / (prec + recall)
 
 
-def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, label_to_node):
+def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, label_to_node, contig_sizes):
     # calculate how many contigs are in the majority class of each cluster
     total_binned = 0
     # convert everything to ids

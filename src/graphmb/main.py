@@ -86,7 +86,6 @@ def write_embs(embs, node_names, outname):
     with open(outname, "wb") as f:
         pickle.dump(embs_dict, f)
 
-
 def write_edges(graph, outname):
     with open(outname, "w") as graphf:
         for e in zip(graph.edges()[0], graph.edges()[1]):
@@ -108,6 +107,7 @@ def check_dirs(args, use_features=True):
     if not os.path.exists(os.path.join(args.assembly, args.graph_file)):
         print(f"Assembly Graph file {args.graph_file} not found, check --graph_file option")
     if not os.path.exists(os.path.join(args.assembly, args.features)) or not use_features:
+
         # needs assembly files to calculate features
         if not os.path.exists(os.path.join(args.assembly, args.assembly_name)):
             print(f"Assembly {args.assembly_name} not found, check --assembly_name option")
@@ -296,7 +296,7 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
         if len(dataset.labels) > 1:
             evaluate_binning(best_cluster_to_contig, node_to_label, label_to_node, contig_sizes=contig_lens)
             # calculate overall P/R/F
-            calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node)
+            calculate_overall_prf(best_cluster_to_contig, best_contig_to_bin, node_to_label, label_to_node, contig_lens)
             calculate_overall_prf(
                 {
                     cluster: best_cluster_to_contig[cluster]
@@ -310,6 +310,7 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
                 },
                 node_to_label,
                 label_to_node,
+                contig_lens
             )
         if "writebins" in args.post:
             logger.info(f"### writing bins to {args.outdir}/{args.outname}_bins/")

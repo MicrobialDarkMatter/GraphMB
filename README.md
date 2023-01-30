@@ -4,8 +4,10 @@
 
 GraphMB is a Metagenomic Binner developed for long-read assemblies, that takes advantage of graph machine learning 
 algorithms and the assembly graph generated during assembly. It has been tested on (meta)flye assemblies.
-Our preprint: 
-> Lamurias, A., Sereika, M., Albertsen, M., Hose, K., & Nielsen, T. D. (2022). Metagenomic binning with assembly graph embeddings. BioRxiv, 2022.02.25.481923. https://doi.org/10.1101/2022.02.25.481923
+
+*** NEW September 2022 *** 
+Our peer-reviewed paper: 
+> Andre Lamurias, Mantas Sereika, Mads Albertsen, Katja Hose, Thomas Dyhre Nielsen, Metagenomic binning with assembly graph embeddings, Bioinformatics, 2022;, btac557, https://doi.org/10.1093/bioinformatics/btac557
 
 ## Dependencies
 
@@ -26,7 +28,7 @@ pip install graphmb
 
 ### Option 2 - From wheel
 ```bash
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.5/graphmb-0.1.5-py3-none-any.whl
 ```
 
 ### Option 3 - From source
@@ -59,8 +61,8 @@ though, you can just run the model for a number of epochs and pick the last mode
 By default, it runs with with early stopping.
 
 In summary, you need to have a directory with these files (names can be changed with arguments):
-- assembly.fasta: contig sequences
-- assembly_graph.fasta: assembly graph. it should have the sequences of assembly.fasta as nodes.
+- assembly.fasta: assembly graph edge sequences or contigs
+- assembly_graph.gfa: assembly graph. it should have the sequences of assembly.fasta as nodes.
 - assembly_depth.txt: output of `jgi_summarize_bam_contig_depths`
 - marker_gene_stats.csv (optional): output of CheckM for each contig
 
@@ -70,8 +72,8 @@ Otherwise, it will assume that the files are inside the directory.
 You can get an example of these files [here](https://drive.google.com/drive/folders/1m6uTgTPUghk_q9GxfX1UNEOfn8jnIdt5?usp=sharing).
 Download from this link and extract to data/strong100.
 The datasets used in our experiments are available [here](https://zenodo.org/record/6122610)
-
-
+These datasets include the VAE embeddings obtained with Vamb, which are automatically used by GraphMB.
+If you want to re-run Vamb, use the `--vamb` option.
 ## How to run
 If you have your assembly in some directory, with the files mentioned above:
 
@@ -108,6 +110,14 @@ You can also run on CPU and limit the number of threads to use:
 graphmb --assembly data/strong100/ --outdir results/strong100/ --numcores 4
 ```
 
+GraphMB was tested on graphs where the nodes are contig paths and not full contigs.
+This gives more granularity to the algorithm and the edges are directly obtained from the assembly graph.
+However in some cases this might be inconvenient, for example if 
+We implemented an option to use a graph where the nodes are contigs.
+```bash
+graphmb --assembly data/strong100/ --outdir results/strong100/ --assembly_name contigs.fasta --depth contig_depth.txt --contignodes
+```
+
 ## Typical workflow
 Our workflows are available [here](https://github.com/AndreLamurias/binning_workflows).
 On this section we present an overview of how to get your data ready for GraphMB.
@@ -116,6 +126,10 @@ On this section we present an overview of how to get your data ready for GraphMB
 
 1. Assembly your reads with metaflye: ```flye -nano-raw <reads_file> -o <output> --meta```
 2. Filter and polish assembly if necessary (or extract edge sequences and polish edge sequences instead)
+```bash
+mv assembly.fasta contigs.fasta
+awk '/^S/{print ">"$2"\n"$3}' assembly_graph.gfa | fold > assembly.fasta
+```
 3. Convert assembly graph to contig-based graph if you want to use full contig instead of edges
 4. Run CheckM on sequences with Bacteria markers: 
 ```bash
@@ -131,9 +145,9 @@ checkm qa checkm_edges/Bacteria.ms checkm_edges/ -f checkm_edges_polished_result
 minimap2 -I 64GB -d assembly.mmi assembly.fasta # make index
 minimap2 -I 64GB -ax map-ont assembly.mmi <reads_file> > assembly.sam
 samtools sort assembly.sam > assembly.bam
-jgi_summarize_bam_contig_depths --outputDepth asseembly_depth.txt assembly.bam
+jgi_summarize_bam_contig_depths --outputDepth assembly_depth.txt assembly.bam
 ```
-6. Now you should have all the files to run GraphMB
+6. Now you should have all the files to run GraphMB: assembly.fasta, assembly_graph.gfa and assembly_depth.txt. The marker_gene_stats.csv file will be saved to checkm_edges/storage/.
 
 We have only tested GraphMB on flye assemblies. Flye generates a repeat graph where the nodes do not correspond to full contigs. 
 Depending on your setup, you need to either use the edges as contigs.
