@@ -140,7 +140,7 @@ def prepare_data_for_gnn(
     print("**** Num of edges:", adj.indices.shape[0])
     return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
 
-def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use_last_batch=False):
+def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=False):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -154,6 +154,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, target_metric, plot=False, use
     nlayers_gnn = args.layers_gnn
     gname = args.model_name
     use_gnn = args.layers_gnn > 0
+    target_metric = args.targetmetric
 
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))

@@ -9,9 +9,9 @@ Our preprint:
 
 ## Dependencies
 
-GraphMB was developed with Python 3.7, Pytorch and DGL.
-It depends on VAMB to generate initial embeddings and  clustering, and CheckM to guide the training process and evaluate the output.
-VAMB, Pytorch and DGL are installed automatically. 
+GraphMB was developed with Python 3.7.
+All of its dependencies are automatically installed.
+For pre-processing and post-processing, check this README.
 
 ## Documentation
 
@@ -19,24 +19,22 @@ Can be found here: https://graphmb.readthedocs.io/en/latest/
 
 ## Installation
 
-### Option 1 - From wheel
+### NEW - Option 1 - From pypi
+```bash
+pip install graphmb
+```
+
+### Option 2 - From wheel
 ```bash
 pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
 ```
 
-### Option 2 - From source
+### Option 3 - From source
 Clone this repository, and then:
 ```bash
 cd GraphMB
 python -m venv venv; source venv/bin/activate # optional
 pip install .
-```
-
-### Option 3 - From conda
-```bash
-conda create -n graphmb -c conda-forge make cmake libgcc python=3.7 pip
-conda activate graphmb
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.3/graphmb-0.1.3-py3-none-any.whl
 ```
 
 ### Option 4 - Docker

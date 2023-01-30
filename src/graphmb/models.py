@@ -10,8 +10,6 @@ from tensorflow.keras.layers import Dropout, Add, Concatenate
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 import numpy as np
 from tensorflow.keras.regularizers import l2    
-
-from spektral.layers import GCNConv
 from tqdm import tqdm
 
 #import tensorflow_probability as tfp
@@ -541,7 +539,7 @@ class TH:
     @tf.function
     def train_unsupervised(self, nodes_idx=None, edges_idx=None,
                             scgs_idx=None,training=True, vae=True,
-                            mask_labels=None, gold_labels=None, last_batch=False):
+                            mask_labels=None, gold_labels=None, last_batch=False, scg=False):
         #### get node indices to be used for this batch
         if edges_idx is None:
             edges_idx = range(0,self.gnn_model.adj.indices.shape[0])
@@ -590,22 +588,10 @@ class TH:
                 node_hat = ae_embs
             gnn_losses = self.train_edges(node_hat, nodes_idx, edges_idx,
                                           (train_src_original, train_dst_original))
-            # 
-            # SCG loss
-            #if last_batch:
-            #    #breakpoint()
-            #    scg_loss = self.train_scg(node_hat, scgs_idx)
-            #    gnn_losses["scg_loss"] = scg_loss
-            #else:
             scg_loss = tf.convert_to_tensor(0.0)
-            
-            #
-            
-            # noise
-            #if self.use_noise:
-            #    noise_loss = self.noise_reg*(tf.reduce_sum(self.positive_noises ** 2) + tf.reduce_sum(self.scg_noises ** 2))
-            #else:
-            #    noise_loss = tf.constant(0, dtype=tf.float32)
+            if scg:
+                scg_loss = self.train_scg(node_hat, scgs_idx)
+            gnn_losses["scg_loss"] = scg_loss
 
             # classification loss
             if self.classifier is not None:

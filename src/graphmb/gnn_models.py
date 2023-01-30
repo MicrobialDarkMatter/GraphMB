@@ -10,71 +10,8 @@ from tensorflow.keras.losses import SparseCategoricalCrossentropy
 import numpy as np
 from tensorflow.keras.regularizers import l2    
 
-from spektral.layers import GCNConv
-
 from graphmb.layers import BiasLayer, LAF, GraphAttention
-#import tensorflow_probability as tfp
 
-class GVAE(Model):
-    def __init__(self, abundance_dim, kmers_dim, nnodes, hiddendim, zdim=64, dropout=0, layers=2):
-        super(GVAE, self).__init__()
-        self.abundance_dim = abundance_dim
-        self.kmers_dim = kmers_dim
-        N = nnodes
-        F = self.abundance_dim + self.kmers_dim
-        x_in = Input(shape=(abundance_dim+kmers_dim,))
-        a_in = Input((N,), dtype=tf.float32)
-        #x = Embedding(N, F, trainable=False)(x_in)
-        x_orig = x_in
-        x = x_in
-        for _ in range(layers):
-            GCNConv( hiddendim,
-                     activation=None)([x, a_in])
-            x = LeakyReLU(0.01)(x)
-            if dropout > 0:
-                x = Dropout(dropout)(x)
-            x = BatchNormalization()(x)
-
-        z_mean = GCNConv(
-            zdim,
-            activation=None,
-        )([x, a_in])
-        
-        z_log_std = GCNConv(
-            zdim,
-            activation=None,
-        )([x, a_in])
-        
-        self.encoder = Model([x_in, a_in], [z_mean, z_log_std, x_orig])
-        self.encoder.build([ (None,F), (None,N) ])
-        self.decoder = VAEDecoder(self.abundance_dim, self.kmers_dim, hiddendim, zdim=zdim, dropout=dropout, layers=layers)
-        self.decoder.build([ (None,zdim)])
-    
-    def call(self, x, a, indices=None, training=True):
-        mu, logvar, x_orig = self.encoder((x,a), training=training)
-        #z_log_std = tf.nn.softplus(z_log_std)
-        logvar = tf.clip_by_value(logvar, -2, 2)
-        z_sample = tf.random.normal(tf.shape(mu)) * tf.exp(logvar)
-        if training:
-            z = mu + z_sample
-        else:
-            z = mu
-        if indices is not None:
-            z = tf.gather(z, indices)
-            mu = tf.gather(mu, indices)
-            logvar = tf.gather(logvar, indices)
-        
-        x_hat = self.decoder(z, training=training)
-        return z, mu, logvar, x_orig, x_hat
-    
-    def encode(self, x, a):
-        mu, _, _ = self.encoder((x,a))
-        return mu
-
-    def summary(self):
-        self.encoder.summary()
-        self.decoder.summary()
-    
 class VGAE(Model):
     def __init__(self, emb_dim, embeddings=None, 
                  hidden_dim1=None, hidden_dim2=None,

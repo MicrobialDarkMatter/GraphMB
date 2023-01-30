@@ -9,7 +9,7 @@ import mlflow
 from graphmb.models import  TH
 from graphmb.utils import set_seed # , run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
-from train_vaegnn import prepare_data_for_gnn, TensorboardLogger, log_to_tensorboard
+from graphmb.train_vaegnn import prepare_data_for_gnn, TensorboardLogger, log_to_tensorboard
 from graphmb.visualize import plot_edges_sim
 from graphmb.evaluate import compute_clusters_and_stats, eval_epoch
 from graphmb.utils import get_cluster_mask
@@ -32,8 +32,8 @@ def run_model_gnn(dataset, args, logger, nrun):
     use_disconnected = not args.quick
     cluster_markers_only = args.quick
     use_edge_weights = True
-    decay = 0.5 ** (2.0 / epochs)
-    concat_features = args.concatfeatures
+    concat_features = True # bypass args, otherwise results are bad
+    target_metric = args.targetmetric
     
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
@@ -77,7 +77,7 @@ def run_model_gnn(dataset, args, logger, nrun):
                     )
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:
-            stats = {"hq": 0, "epoch":0 }
+            stats = {"hq": 0, "epoch":0, target_metric: 0}
         
         scores = [stats]
         losses = {"total": [], "ae": [], "gnn": [], "scg": []}
@@ -128,7 +128,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         scores = []
         best_embs = None
         best_model = th.gnn_model.get_weights()
-        best_hq = 0
+        best_score = 0
         best_epoch = 0
         batch_size = args.batchsize
         if batch_size == 0:
@@ -138,12 +138,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         for e in pbar_epoch:
             np.random.shuffle(train_idx)
             step += 1
-            #total_loss, gnn_loss, diff_loss, pos_loss, neg_loss = th.train_unsupervised(train_idx)
-            loss, gnn_losses, ae_losses = th.train_unsupervised(train_idx)
-            #epoch_losses = {"gnn loss": float(gnn_loss), "SCG loss": float(diff_loss), "GNN loss": float(total_loss),
-            #                                    "GNN LR": float(th.opt.learning_rate), "pos loss": float(pos_loss),
-            #                                    "neg_loss": float(neg_loss)}
-            
+            loss, gnn_losses, ae_losses = th.train_unsupervised(train_idx, scg=True)
             epoch_losses = {"Total": loss.numpy(),
                             "gnn": gnn_losses["gnn_loss"].numpy(),
                              "SCG": gnn_losses["scg_loss"].numpy(),
@@ -176,19 +171,19 @@ def run_model_gnn(dataset, args, logger, nrun):
                 node_new_features = node_new_features.numpy()
                 if concat_features:
                     node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
-                best_hq, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer, node_new_features,
+                best_score, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer, node_new_features,
                                                                     cluster_mask, th.gnn_model.get_weights(), step, args, dataset, e, scores,
-                                                                    best_hq, best_embs, best_epoch, best_model)
+                                                                    best_score, best_embs, best_epoch, best_model, target_metric=target_metric)
                 
                 stats = scores[-1]
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
-                    scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+                    scores_string = f"HQ={stats['hq']}   Best{target_metric}={round(best_score, 3)} Best Epoch={best_epoch}"
                     logger.info(f"[{gname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} {scores_string} GPU={gpu_mem_alloc:.1f}MB")
                     logger.info(str(stats))
                 mlflow.log_metrics(stats, step=step)
                 all_cluster_labels.append(cluster_labels)
-            scores_string = f"HQ={stats['hq']}  BestHQ={best_hq} Best Epoch={best_epoch} F1={round(stats.get('f1_avg_bp',0), 3)}"
+            scores_string = f"HQ={stats['hq']}  Best{target_metric}={round(best_score, 3)}  Best Epoch={best_epoch}"
             pbar_epoch.set_description(
                 f"[{args.outname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )
@@ -196,11 +191,6 @@ def run_model_gnn(dataset, args, logger, nrun):
             losses["gnn"].append(gnn_loss)
             losses["scg"].append(diff_loss)
             losses["total"].append(total_loss)
-            #if e == 1:
-                #breakpoint()
-            #    with summary_writer.as_default():
-            #        tf.summary.trace_export(args.outname, step=0, profiler_outdir=train_log_dir) 
-            #        summary_writer.flush()
 
         if best_embs is None:
             best_embs = node_new_features
@@ -214,16 +204,16 @@ def run_model_gnn(dataset, args, logger, nrun):
             clustering=clustering, k=k, amber=(args.labels is not None and "amber" in args.labels),
             #cuda=args.cuda,
         )
+        all_cluster_labels.append(cluster_labels)
         stats["epoch"] = e
         scores.append(stats)
         # get best stats:
-        hqs = [s["hq"] for s in scores]
-        epoch_hqs = [s["epoch"] for s in scores]
-        best_idx = np.argmax(hqs)
+        target_scores = [s[target_metric] for s in scores]
+        best_idx = np.argmax(target_scores)
         mlflow.log_metrics(scores[best_idx], step=step+1)
     logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
-    with open(f"{dataset.cache_dir}/{dataset.name}_best_contig2bin.tsv", "w") as f:
+    with open(f"{args.outdir}/{args.outname}_{nrun}_best_contig2bin.tsv", "w") as f:
         f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
         for i in range(len(all_cluster_labels[best_idx])):
             f.write(f"{node_names[i]}\t{all_cluster_labels[best_idx][i]}\n")

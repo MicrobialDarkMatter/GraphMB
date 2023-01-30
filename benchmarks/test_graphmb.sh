@@ -1,5 +1,5 @@
 #!/bin/bash
-DATADIR=../data/
+DATADIR=data/
 
 #check data
 if [ -d $DATADIR/strong100 ] 

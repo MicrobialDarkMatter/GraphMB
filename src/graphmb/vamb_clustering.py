@@ -12,7 +12,6 @@ import numpy as _np
 import torch as _torch
 from collections import defaultdict as _defaultdict, deque as _deque
 from math import ceil as _ceil
-import vamb.vambtools as _vambtools
 
 _DEFAULT_RADIUS = 0.06
 # Distance within which to search for medoid point

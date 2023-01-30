@@ -32,19 +32,15 @@ from graphmb.graphmb1 import (cluster_embs,
 from graphmb.version import __version__
 
 def run_model(dataset, args, logger, nrun, target_metric):
-    from graphmb import train_vaegnn #, train_gnn, train_vae, train_auggnn
     if args.model_name.endswith("_ae"):
+        from graphmb import train_vaegnn
         return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun, target_metric)
     elif args.model_name == "vae":
+        from graphmb import train_vae
         return train_vae.run_model_vae(dataset, args, logger, nrun)
     elif args.model_name in ("gcn", "sage", "gat"):
+        from graphmb import train_gnn
         return train_gnn.run_model_gnn(dataset, args, logger, nrun)
-    elif args.model_name == "vgae":
-        return vaegbin.run_model_vgae(dataset, args, logger, nrun)
-    #elif args.model_name.endswith("decode"):
-    #    return train_gnn_decode.run_model_gnn_recon(dataset, args, logger, nrun)
-    elif args.model_name.endswith("aug"):
-        return train_auggnn.run_model_vaegnn(dataset, args, logger, nrun)
 
 def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
     # properties of all nodes
@@ -190,7 +186,7 @@ def run_graphmb(dataset, args, device, logger):
         lr=args.lr_gnn,
         k=args.kclusters,
         clusteringalgo=args.clusteringalgo,
-        cluster_features=args.concat_features,
+        cluster_features=args.concatfeatures,
         print_interval=args.print,
         loss_weights=(not args.no_loss_weights),
         sample_weights=(not args.no_sample_weights),
@@ -568,7 +564,6 @@ def main():
 
         if args.labels is not None: # or "contig2bin" in args.post:
             from graphmb.amber_eval import amber_eval
-
             amber_metrics, bin_counts = amber_eval(
                 os.path.join(args.assembly, args.labels), args.outdir + f"/{args.outname}_{n}_best_contig2bin.tsv", ["graphmb"]
             )

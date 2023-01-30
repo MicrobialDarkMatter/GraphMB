@@ -29,21 +29,21 @@ def create_parser():
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
 
     # model specification
-    parser.add_argument("--model_name", type=str, help="One of the implemented models", default="sage_lstm")
+    parser.add_argument("--model_name", type=str, help="One of the implemented models", default="gcn")
     parser.add_argument(
         "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
     )
     parser.add_argument("--layers_vae", type=int, help="Number of layers of the VAE", default=2)
     parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=3)
     parser.add_argument("--hidden_gnn", type=int, help="Dimension of hidden layers of GNN", default=128)
-    parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of GNN", default=512)
+    parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of VAE", default=512)
     parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=32)
     parser.add_argument("--embsize_vae", "--zl", type=int, help="Output embedding dimension of VAE", default=32)
     parser.add_argument("--batchsize", type=int, help="batchsize to train the VAE", default=256)
     parser.add_argument("--batchtype", type=str, help="Batch type, nodes or edges", default="auto")
-    parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.5)
+    parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.1)
     parser.add_argument("--dropout_vae", type=float, help="dropout of the VAE", default=0.2)
-    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-3)
+    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-2)
     parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--gnn_alpha", type=float, help="Coeficient for GNN loss", default=0.1)
     parser.add_argument("--kld_alpha", type=float, help="Coeficient for KLD loss", default=200)
@@ -63,7 +63,7 @@ def create_parser():
         "--fanout", help="Fan out, number of positive neighbors sampled at each level", default="10,25"
     )
     # other training params
-    parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=100)
+    parser.add_argument("--epoch", type=int, help="Number of epochs to train model", default=200)
     parser.add_argument("--print", type=int, help="Print interval during training", default=10)
     parser.add_argument("--evalepochs", type=int, help="Epoch interval to run eval", default=20)
     parser.add_argument("--evalskip", type=int, help="Skip eval of these epochs", default=50)
@@ -71,6 +71,7 @@ def create_parser():
     parser.add_argument("--kmer", default=4)
     parser.add_argument("--rawfeatures", help="Use raw features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
+    parser.add_argument("--targetmetric", help="Metric to pick best epoch", default="hq")
     parser.add_argument(
         "--concatfeatures", help="Concat learned and original features before clustering", action="store_true"
     )

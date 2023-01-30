@@ -19,8 +19,6 @@ from graphmb.evaluate import (
 
 
 BACTERIA_MARKERS = "data/Bacteria.ms"
-
-
 kernel = np.load("data/kernel.npz")['arr_0']
 def count_kmers(seq, k, kmer_to_id, canonical_k):
     # Used in case kmers are used as input features
@@ -443,7 +441,7 @@ class AssemblyDataset:
         return contig_edge_links
     
     def print_circular_contigs(self):
-        """Print circular contigs and info
+        """Print circular contigs and info, based on flye
         """
         for contig_name in self.circular_contigs:
             print("found circular contig", contig_name,
@@ -454,7 +452,6 @@ class AssemblyDataset:
             for edge_id in contig_edges:
                 #edge_id = self.node_names.index("edge_" + edge)
                 edge_name = self.node_names[edge_id]
-                #breakpoint()
                 print("---", edge_id, edge_name, self.node_lengths[edge_id],
                       [round(d, 4) for d in self.node_depths[edge_id]],
                       self.node_to_label[edge_name],
@@ -533,10 +530,12 @@ class AssemblyDataset:
             self.node_to_label = {n: "NA" for n in self.node_names}
 
     def calculate_homophily(self):
+        """
+        Calculate percentage of edges that connect nodes with the same label
+        """
         positive_edges = 0
         edges_without_label = 0
         for u, v in zip(self.edges_src, self.edges_dst):
-            # breakpoint()
             if self.node_to_label.get(self.node_names[u], "NA") == "NA" or \
                self.node_to_label.get(self.node_names[v], "NA") == "NA":
                 edges_without_label += 1

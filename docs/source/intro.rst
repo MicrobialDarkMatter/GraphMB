@@ -22,6 +22,10 @@ Option 2 - From source::
 Option 3 - From anaconda::
     conda install -c andrelamurias graphmb
 
+Option 4 - From pip
+
+pip install graphmb
+
 
 Input files
 ***********

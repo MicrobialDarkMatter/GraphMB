@@ -19,11 +19,11 @@ sys.path.insert(0, os.path.abspath("../../src/"))
 # -- Project information -----------------------------------------------------
 
 project = "GraphMB"
-copyright = "2021, Andre Lamurias"
+copyright = "2022, Andre Lamurias"
 author = "Andre Lamurias"
 
 # The full version, including alpha/beta/rc tags
-release = "v0.1.2"
+release = "v0.2.0"
 
 
 # -- General configuration ---------------------------------------------------

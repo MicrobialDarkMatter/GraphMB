@@ -14,7 +14,8 @@ import numpy as np
 import copy
 import sklearn
 
-from graphmb.graph_functions import cluster_eval, set_seed
+from graphmb.utils import set_seed
+from graphmb.graphmb1 import cluster_eval
 
 # Based on this implemention: https://github.com/dmlc/dgl/blob/master/examples/pytorch/graphsage/train_sampling_unsupervised.py
 

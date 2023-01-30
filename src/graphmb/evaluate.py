@@ -380,6 +380,8 @@ def compute_clusters_and_stats(
         scores["precision_avg_bp"] = amber_metrics["precision_avg_bp"]
         scores["recall_avg_bp"] = amber_metrics["recall_avg_bp"]
         scores["f1_avg_bp"] = amber_metrics["f1_avg_bp"]
+        scores["amber_hq"] = bin_counts["> 90% completeness"][1]
+        scores["amber_mq"] = bin_counts["> 50% completeness"][0]
     else:
         # calculate edge metrics
         p, r, f1, ari = calculate_overall_prf(
