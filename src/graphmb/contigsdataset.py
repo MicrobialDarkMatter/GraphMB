@@ -21,7 +21,7 @@ from graphmb.evaluate import (
 BACTERIA_MARKERS = "data/Bacteria.ms"
 
 
-kernel = np.load("kernel.npz")['arr_0']
+kernel = np.load("src/kernel.npz")['arr_0']
 def count_kmers(seq, k, kmer_to_id, canonical_k):
     # Used in case kmers are used as input features
     # https://stackoverflow.com/q/22428020
