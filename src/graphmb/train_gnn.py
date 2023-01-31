@@ -15,7 +15,7 @@ from graphmb.utils import get_cluster_mask
 from graphmb.gnn_models import name_to_model
 
 
-def run_model_gnn(dataset, args, logger, nrun):
+def run_model_gnn(dataset, args, logger, nrun, target_metric):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -32,7 +32,6 @@ def run_model_gnn(dataset, args, logger, nrun):
     cluster_markers_only = args.quick
     use_edge_weights = True
     concat_features = True # bypass args, otherwise results are bad
-    target_metric = args.targetmetric
     
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
@@ -125,6 +124,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         best_score = 0
         best_epoch = 0
         batch_size = args.batchsize
+        scores_string = ""
         if batch_size == 0:
             batch_size = len(train_idx)
         all_cluster_labels = []
@@ -140,7 +140,6 @@ def run_model_gnn(dataset, args, logger, nrun):
                             #'GNN  LR': float(trainer.opt._decayed_lr(float)),
                             "pos": gnn_losses["pos"].numpy(),
                             "neg": gnn_losses["neg"].numpy()}
-            #log_to_tensorboard(summary_writer, epoch_losses, step)
             mlflow.log_metrics(epoch_losses, step=step)
             gnn_loss = epoch_losses["gnn"]
             diff_loss = epoch_losses["SCG"]
@@ -152,14 +151,13 @@ def run_model_gnn(dataset, args, logger, nrun):
                                      "Eval GNN loss": float(eval_total_loss),
                                      "Eval pos loss": float(eval_pos_loss),
                                      "Eval neg_loss": float(eval_neg_loss)}
-                #log_to_tensorboard(summary_writer, eval_epoch_losses, step)
                 mlflow.log_metrics(eval_epoch_losses, step=step)
             #else:
             #    eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0
 
-            #gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
-            gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
-            if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
+            gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
+            #gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
+            if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip and target_metric != "noeval":
                 gnn_input_features = features
                 node_new_features = th.gnn_model(gnn_input_features, None, training=False)
                 node_new_features = node_new_features.numpy()
@@ -178,7 +176,7 @@ def run_model_gnn(dataset, args, logger, nrun):
                     logger.info(str(stats))
                 mlflow.log_metrics(stats, step=step)
                 all_cluster_labels.append(cluster_labels)
-            scores_string = f"HQ={stats['hq']}  Best{target_metric}={round(best_score, 3)}  Best Epoch={best_epoch}"
+                scores_string = f"HQ={stats['hq']}  Best{target_metric}={round(best_score, 3)}  Best Epoch={best_epoch}"
             pbar_epoch.set_description(
                 f"[{args.outname} {nlayers_gnn}l] L={gnn_loss:.3f} D={diff_loss:.3f} {scores_string} GPU={gpu_mem_alloc:.1f}MB"
             )
@@ -187,13 +185,13 @@ def run_model_gnn(dataset, args, logger, nrun):
             losses["scg"].append(diff_loss)
             losses["total"].append(total_loss)
 
-        if best_embs is None:
+        if best_embs is None and target_metric != "noeval":
             best_embs = node_new_features
         gnn_model.set_weights(best_model)
-        node_new_features = th.gnn_model(gnn_input_features, None, training=False)
+        node_new_features = th.gnn_model(features, None, training=False)
         node_new_features = node_new_features.numpy()
         if concat_features:
-            node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
+            node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
             node_new_features, node_names, dataset,
             clustering=clustering, k=k, amber=(args.labels is not None and "amber" in args.labels),
@@ -202,9 +200,13 @@ def run_model_gnn(dataset, args, logger, nrun):
         all_cluster_labels.append(cluster_labels)
         stats["epoch"] = e
         scores.append(stats)
-        # get best stats:
-        target_scores = [s[target_metric] for s in scores]
-        best_idx = np.argmax(target_scores)
+        if target_metric != "noeval":
+            # get best stats:
+            target_scores = [s[target_metric] for s in scores]
+            best_idx = np.argmax(target_scores)
+        else:
+            best_embs = node_new_features
+            best_idx = -1
         mlflow.log_metrics(scores[best_idx], step=step+1)
     logger.info(f">>> best epoch all contigs: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
     logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")

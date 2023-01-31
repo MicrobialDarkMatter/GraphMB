@@ -20,10 +20,18 @@ graphmb.evaluate module
    :undoc-members:
    :show-inheritance:
 
-graphmb.graph\_functions module
+graphmb.utils module
 -------------------------------
 
-.. automodule:: graphmb.graph_functions
+.. automodule:: graphmb.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+graphmb.models module
+-------------------------------
+
+.. automodule:: graphmb.models
    :members:
    :undoc-members:
    :show-inheritance:

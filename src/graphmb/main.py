@@ -30,13 +30,13 @@ from graphmb.version import __version__
 def run_model(dataset, args, logger, nrun, target_metric):
     if args.model_name.endswith("_ae"):
         from graphmb import train_ccvae
-        return train_ccvae.run_model_vaegnn(dataset, args, logger, nrun, target_metric)
+        return train_ccvae.run_model_ccvae(dataset, args, logger, nrun, target_metric)
     elif args.model_name == "vae":
         from graphmb import train_vae
         return train_vae.run_model_vae(dataset, args, logger, nrun)
     elif args.model_name in ("gcn", "sage", "gat"):
         from graphmb import train_gnn
-        return train_gnn.run_model_gnn(dataset, args, logger, nrun)
+        return train_gnn.run_model_gnn(dataset, args, logger, nrun, target_metric)
 
 def draw(dataset, node_to_label, label_to_node, cluster_to_contig, outname, graph=None):
     # properties of all nodes
@@ -477,8 +477,10 @@ def main():
     target_metric = "f1"
     if args.markers is not None:
         target_metric = "hq"
-    elif "amber" in args.labels:
+    elif args.labels is not None and "amber" in args.labels:
         target_metric = "f1_avg_bp"
+    elif args.labels is None:
+        target_metric = "noeval"
 
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)

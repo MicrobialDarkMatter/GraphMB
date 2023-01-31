@@ -121,7 +121,8 @@ def prepare_data_for_gnn(
     return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
 
 def run_model_ccvae(dataset, args, logger, nrun, epochs=None, 
-                    plot=False, use_last_batch=False, use_gnn=False):
+                    plot=False, use_last_batch=False, use_gnn=False,
+                    target_metric="hq"):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -137,8 +138,6 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
     use_gnn = args.layers_gnn > 0 and use_gnn
     if not use_gnn:
         lr_gnn = lr_vae
-    target_metric = args.targetmetric
-
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
         
@@ -288,6 +287,8 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
         logger.info("**** epoch batch size doubles: {} ****".format(str(batch_steps)))
         gold_labels = np.array([dataset.labels.index(dataset.node_to_label[n]) for n in dataset.node_names])
         step = 0
+        scores_string = ""
+        
         for e in pbar_epoch:
             #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
             recon_loss = 0
@@ -315,7 +316,6 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
                 n_batches += 1 # add final batch
             if args.scg_alpha > 0:
                 scg_batch_size = len(neg_pair_idx)//n_batches
-                logging.info("*** scg batch size: {}".format(scg_batch_size))
             pbar_gnnbatch = tqdm(range(n_batches),
                                  disable=(args.quiet or batch_size == len(train_idx) or n_batches < 1000),
                                  position=1, ascii=' =')
@@ -359,7 +359,6 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
                             #"grad_norm": ae_losses["grad_norm"],
                             #"grad_norm_clip": ae_losses["grad_norm_clip"]}
             #print(float(gnn_trainer.opt._decayed_lr(float)))
-            log_to_tensorboard(summary_writer, epoch_metrics, step)
             mlflow.log_metrics(epoch_metrics, step=e)
             ##############################################################
 
@@ -369,7 +368,7 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
             gpu_mem_alloc = tf.config.experimental.get_memory_info('GPU:0')["peak"] / 1000000 if args.cuda else 0
             #gpu_mem_alloc = tf.config.experimental.get_memory_usage('GPU:0') / 1000000 if args.cuda else 0
             # eval checkpoint ##############################################################
-            if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip:
+            if (e + 1) % RESULT_EVERY == 0 and e > args.evalskip and target_metric != "noeval":
                 evalstarttime = datetime.datetime.now()
                
                 gnn_input_features = trainer.encoder(features)[0]
@@ -410,22 +409,28 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
             )
 
         #################################################################
-        if best_embs is None:
+        if best_embs is None and target_metric != "noeval":
             best_embs = node_new_features
-        
+        else:
+            node_new_features = trainer.encoder(features)[0]
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
-            best_embs, node_names, dataset, clustering=clustering, k=k,
+            node_new_features, node_names, dataset, clustering=clustering, k=k,
             amber=(args.labels is not None and "amber" in args.labels),
             cuda=args.cuda,
         )
+        
         all_cluster_labels.append(cluster_labels)
         stats["epoch"] = e
         scores.append(stats)
         # get best stats:
-        target_scores = [s[target_metric] for s in scores]
-        best_idx = np.argmax(target_scores)
+        if target_metric != "noeval":
+            # get best stats:
+            target_scores = [s[target_metric] for s in scores]
+            best_idx = np.argmax(target_scores)
+        else:
+            best_embs = node_new_features
+            best_idx = -1
         mlflow.log_metrics(scores[best_idx], step=e+1)
-
         logger.info(f">>> Last epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {stats} <<<")
         logger.info(f">>> best epoch: {RESULT_EVERY + (best_idx*RESULT_EVERY)} : {scores[best_idx]} <<<")
         with open(f"{args.outdir}/{args.outname}_{nrun}_best_contig2bin.tsv", "w") as f:

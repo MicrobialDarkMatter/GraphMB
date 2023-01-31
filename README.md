@@ -57,7 +57,8 @@ docker run -it andrelamurias/graphmb bash
 The only files required are the contigs in fasta format, and the assembly graph in GFA format. For optimal performance,
 the assembly graph should be generated with Flye 2.9, since it includes the number of reads mapping to each pair of
 contigs. Also, for better results, CheckM is run on each contig using the general Bacteria marker sets. This is optional
-though, you can just run the model for a number of epochs and pick the last model. 
+though, you can just run the model for a number of epochs and pick the last model. The marker genes are also used to
+improve model training through a constrained loss function.
 By default, it runs with with early stopping.
 
 In summary, you need to have a directory with these files (names can be changed with arguments):
