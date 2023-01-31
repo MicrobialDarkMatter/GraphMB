@@ -85,7 +85,7 @@ def getF1(prec, recall):
         return 2 * prec * recall / (prec + recall)
 
 
-def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, label_to_node, contig_sizes):
+def calculate_overall_prf(cluster_to_contig, contig_to_cluster, node_to_label, label_to_node):
     # calculate how many contigs are in the majority class of each cluster
     total_binned = 0
     # convert everything to ids

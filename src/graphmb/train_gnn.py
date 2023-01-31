@@ -9,7 +9,7 @@ import mlflow
 from graphmb.models import  TH
 from graphmb.utils import set_seed # , run_tsne, plot_embs, plot_edges_sim
 from graphmb.evaluate import calculate_overall_prf
-from graphmb.train_vaegnn import prepare_data_for_gnn, TensorboardLogger, log_to_tensorboard
+from graphmb.train_ccvae import prepare_data_for_gnn, TensorboardLogger, log_to_tensorboard
 from graphmb.visualize import plot_edges_sim
 from graphmb.evaluate import compute_clusters_and_stats, eval_epoch
 from graphmb.utils import get_cluster_mask
@@ -42,7 +42,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         summary_writer = tf.summary.create_file_writer(train_log_dir)
         
         tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
-        logger.addHandler(tb_handler)
+        #   logger.addHandler(tb_handler)
         tf.config.experimental_run_functions_eagerly(True)
 
         X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
@@ -108,7 +108,7 @@ def run_model_gnn(dataset, args, logger, nrun):
             ae_encoder=None,
             ae_decoder=None,
             latentdim=output_dim_gnn,
-            gnn_weight=float(args.gnn_alpha),
+            graph_weight=float(args.graph_alpha),
             ae_weight=float(args.ae_alpha),
             scg_weight=float(args.scg_alpha),
             num_negatives=args.negatives,
@@ -146,7 +146,7 @@ def run_model_gnn(dataset, args, logger, nrun):
                             #'GNN  LR': float(trainer.opt._decayed_lr(float)),
                             "pos": gnn_losses["pos"].numpy(),
                             "neg": gnn_losses["neg"].numpy()}
-            log_to_tensorboard(summary_writer, epoch_losses, step)
+            #log_to_tensorboard(summary_writer, epoch_losses, step)
             mlflow.log_metrics(epoch_losses, step=step)
             gnn_loss = epoch_losses["gnn"]
             diff_loss = epoch_losses["SCG"]
@@ -158,7 +158,7 @@ def run_model_gnn(dataset, args, logger, nrun):
                                      "Eval GNN loss": float(eval_total_loss),
                                      "Eval pos loss": float(eval_pos_loss),
                                      "Eval neg_loss": float(eval_neg_loss)}
-                log_to_tensorboard(summary_writer, eval_epoch_losses, step)
+                #log_to_tensorboard(summary_writer, eval_epoch_losses, step)
                 mlflow.log_metrics(eval_epoch_losses, step=step)
             #else:
             #    eval_loss, eval_mse1, eval_mse2, eval_kld = 0, 0, 0, 0

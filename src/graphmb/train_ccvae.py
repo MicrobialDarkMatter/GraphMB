@@ -140,7 +140,8 @@ def prepare_data_for_gnn(
     print("**** Num of edges:", adj.indices.shape[0])
     return X, adj, cluster_mask, dataset.neg_pairs_idx, pos_pair_idx
 
-def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=False):
+def run_model_ccvae(dataset, args, logger, nrun, epochs=None, 
+                    plot=False, use_last_batch=False, use_gnn=False):
     set_seed(args.seed)
     node_names = np.array(dataset.node_names)
     RESULT_EVERY = args.evalepochs
@@ -148,12 +149,14 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
     hidden_vae = args.hidden_vae
     output_dim_gnn = args.embsize_gnn
     output_dim_vae = args.embsize_vae
-    epochs = args.epoch
+    epochs = args.epoch if not epochs else epochs
     lr_vae = args.lr_vae
     lr_gnn = args.lr_gnn
     nlayers_gnn = args.layers_gnn
     gname = args.model_name
-    use_gnn = args.layers_gnn > 0
+    use_gnn = args.layers_gnn > 0 and use_gnn
+    if not use_gnn:
+        lr_gnn = lr_vae
     target_metric = args.targetmetric
 
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
@@ -168,7 +171,6 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
         cluster_markers_only = args.quick
         decay = 0.5 ** (2.0 / epochs)
         use_ae = True
-        args.rawfeatures = True
 
         # setup logging
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -178,19 +180,17 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
         logger.addHandler(tb_handler)
 
         X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
-            dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
+            dataset, use_edge_weights, cluster_markers_only, use_raw=True,
             binarize=args.binarize, remove_edges=args.noedges)
 
         if nrun == 0:
             print("logging to tensorboard")
             #tf.summary.trace_on(graph=True)
-            logger.info("******* Running model: {} **********".format(gname))
+            logger.info("******* Running model: CCVAE {}**********".format(gname if use_gnn else ""))
             logger.info("***** using edge weights: {} ******".format(use_edge_weights))
             logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
-            logger.info("***** threshold adj matrix: {} *****".format(args.binarize))
             logger.info("***** self edges only: {} *****".format(args.noedges))
-            logger.info("***** use gnn: {} *****".format(use_gnn))
-            logger.info("***** Using raw kmer+abund features: {}".format(args.rawfeatures))
+            logger.info("***** Using raw kmer+abund features: {}".format(True))
             logger.info("***** SCG neg pairs: {}".format(neg_pair_idx.shape))
             logger.info("***** input features dimension: {}".format(X[cluster_mask].shape))
         tf.config.run_functions_eagerly(True)
@@ -204,18 +204,6 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
                         cuda=args.cuda,
                     )
             #mlflow.log_metrics(stats, step=0)
-            if args.noise and hasattr(dataset, "true_adj_matrix"):
-                # eval edge acc if true adj matrix exists
-                # full adj matrix may be too big to compute, use only indices from true_adj
-                #breakpoint()
-                #row_embs = tf.gather(indices=dataset.true_adj_matrix.col, params=X)
-                #col_embs = tf.gather(indices=dataset.true_adj_matrix.row, params=X)
-                #positive_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1))
-                new_adj = tf.sigmoid(X @ X.transpose())
-                predicted_edges = set([tuple(v) for v in tf.where(new_adj>0.5).numpy()])
-                true_edges = set(zip(dataset.true_adj_matrix.col, dataset.true_adj_matrix.row))
-                correct_edges = predicted_edges & true_edges
-                print(len(correct_edges), len(true_edges), len(predicted_edges))
             logger.info(f">>> Pre train stats: {str(stats)}")
         else:
             stats = {"epoch":0, target_metric: 0, "hq": 0 }
@@ -236,7 +224,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
         X = X.astype(np.float32)
         features = tf.constant(X)
         input_dim_gnn = output_dim_vae #+ dataset.node_depths.shape[1]
-        if args.gnn_alpha > 0:
+        if args.graph_alpha > 0:
             clustering_dim = output_dim_gnn
         elif not args.concatfeatures:
             clustering_dim = output_dim_vae
@@ -279,20 +267,20 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
             decoder_input=args.decoder_input,
             classifier=classifier,
             latentdim=output_dim_gnn,
-            gnn_weight=float(args.gnn_alpha),
+            graph_weight=float(args.graph_alpha),
             ae_weight=float(args.ae_alpha),
             scg_weight=float(args.scg_alpha),
             num_negatives=args.negatives,
             kmers_dim=dataset.node_kmers.shape[1],
             abundance_dim=dataset.node_depths.shape[1],
             use_gnn=use_gnn,
-            use_noise=args.noise,
+            use_noise=args.noise, # not being used
             loglevel=args.loglevel,
             pretrainvae=args.vaepretrain
         )
 
         if args.batchtype == "auto":
-            if args.ae_alpha > 0 and args.gnn_alpha == 0 and args.scg_alpha == 0:
+            if args.ae_alpha > 0 and args.graph_alpha == 0 and args.scg_alpha == 0:
                 args.batchtype = "nodes"
             else:
                 args.batchtype = "edges"
@@ -357,7 +345,9 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
             if args.scg_alpha > 0:
                 scg_batch_size = len(neg_pair_idx)//n_batches
                 logging.info("*** scg batch size: {}".format(scg_batch_size))
-            pbar_gnnbatch = tqdm(range(n_batches), disable=(args.quiet or batch_size == len(train_idx) or n_batches < 1000), position=1, ascii=' =')
+            pbar_gnnbatch = tqdm(range(n_batches),
+                                 disable=(args.quiet or batch_size == len(train_idx) or n_batches < 1000),
+                                 position=1, ascii=' =')
             for b in pbar_gnnbatch:
                 if "edge" in args.batchtype:
                     nodes_batch, edges_batch = None, train_idx[b*batch_size:(b+1)*batch_size]
@@ -425,42 +415,7 @@ def run_model_vaegnn(dataset, args, logger, nrun, plot=False, use_last_batch=Fal
                         #node_new_features = gnn_input_features.numpy()
                 else:
                     node_new_features = gnn_input_features.numpy()
-                if args.noise:
-                    #mlflow.log_metrics({"avg positive noise": trainer.positive_noises.numpy().mean(),
-                    #                               "avg scg noise": trainer.scg_noises.numpy().mean()}, step=e)
-                    # get topk edge noises
-                    #breakpoint()
-                    #topk_indices = tf.math.top_k(tf.math.abs(trainer.positive_noises[:, 0]), k=10).indices
-                    sorted_noises = sorted(trainer.noise_dict.items(), key=lambda item: item[1])
-                    topk_indices = sorted_noises[-5:]
-                    bottomk_indices = sorted_noises[:5]
-                    #breakpoint()
-                    logger.debug("            src (label) dst (label) observed predicted noise")
-                    for pair, noise in topk_indices + bottomk_indices:
-                        logger.debug("{} ({}) {} ({}) 0 {:.4f} {}".format(dataset.node_names[pair[0]],
-                                     dataset.node_to_label[dataset.node_names[pair[0]]],
-                                     dataset.node_names[pair[1]], 
-                                     dataset.node_to_label[dataset.node_names[pair[1]]],
-                                     #gnn_model.adj.values[i].numpy(),
-                                     tf.reduce_sum(tf.math.multiply(tf.nn.l2_normalize(node_new_features[pair[0]]),
-                                                                    tf.nn.l2_normalize(node_new_features[pair[1]]))).numpy(),
-                                    noise))
 
-
-                if args.noise and hasattr(dataset, "true_adj_matrix"):
-                    # eval edge acc if true adj matrix exists
-                    # full adj matrix may be too big to compute, use only indices from true_adj
-                    breakpoint()
-                    #row_embs = tf.gather(indices=dataset.true_adj_matrix.col, params=node_new_features)
-                    #col_embs = tf.gather(indices=dataset.true_adj_matrix.row, params=node_new_features)
-                    #positive_pairwise = tf.sigmoid(tf.reduce_sum(tf.math.multiply(row_embs, col_embs), axis=1))
-                    new_adj = tf.sigmoid(node_new_features @ node_new_features.transpose())
-                    predicted_edges = set([tuple(v) for v in tf.where(new_adj>0.5).numpy()])
-                    true_edges = set(zip(dataset.true_adj_matrix.col, dataset.true_adj_matrix.row))
-                    correct_edges = predicted_edges & true_edges
-                    print(len(correct_edges), len(true_edges), len(predicted_edges))
-                    #correct_edges = dataset.true_adj_matrix.indices & 
-                    #pass
                     
                 weights = (trainer.encoder.get_weights(), trainer.gnn_model.get_weights())
                 best_score, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer,

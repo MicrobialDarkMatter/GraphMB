@@ -1,1 +1,2 @@
-include data/Bacteria.ms
+include src/graphmb/data/Bacteria.ms
+include src/graphmb/data/kernel.npz

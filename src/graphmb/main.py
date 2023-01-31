@@ -1,8 +1,4 @@
-import itertools
-import argparse
-import shutil
-import random
-import time
+
 import logging
 from datetime import datetime
 from collections import Counter
@@ -33,8 +29,8 @@ from graphmb.version import __version__
 
 def run_model(dataset, args, logger, nrun, target_metric):
     if args.model_name.endswith("_ae"):
-        from graphmb import train_vaegnn
-        return train_vaegnn.run_model_vaegnn(dataset, args, logger, nrun, target_metric)
+        from graphmb import train_ccvae
+        return train_ccvae.run_model_vaegnn(dataset, args, logger, nrun, target_metric)
     elif args.model_name == "vae":
         from graphmb import train_vae
         return train_vae.run_model_vae(dataset, args, logger, nrun)
@@ -391,6 +387,18 @@ def main():
 
     sys.excepthook = handle_exception
 
+    # setup tensorflow
+    if args.model_name != "sage_lstm":
+        if "torch" in sys.modules:
+            sys.modules.pop('torch')
+        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
+        import tensorflow as tf
+        #tf.get_logger().setLevel(logging.INFO)
+        clustering_device = "cpu" # avoid tf vs torch issues
+        logging.getLogger("tensorflow").setLevel(logging.INFO)
+        if not args.cuda:
+            tf.config.set_visible_devices([], "GPU")
+
     logger.info(f"Running GraphMB {__version__}")
     logger.debug(args)
     # setup cuda and cpu
@@ -439,6 +447,13 @@ def main():
         dataset.read_scgs()
     else:
         args.markers = None
+
+    # load precomputed contigs with same SCGs (diff genomes)
+    if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
+        dataset.neg_pairs_idx = np.load(f"{dataset.cache_dir}/all_different.npy")
+    elif args.markers is not None:
+        dataset.get_all_different_idx()
+        np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
     
     if os.path.exists(os.path.join(args.assembly, "assembly_info.txt")):
         logger.info("Reading assembly info file")
@@ -448,19 +463,6 @@ def main():
     if args.kclusters is None:
         args.kclusters = len(dataset.labels)
     args.kclusters = int(args.kclusters)
-
-    
-
-    # filter graph by components
-    # dataset.connected = [c for c in dataset.connected if len(c) >= args.mincomp]
-
-    # zscore Kmer features (kmer are already loaded from reading the dataset)
-    # dataset.nodes_kmer = torch.FloatTensor(stats.zscore(dataset.nodes_kmer, axis=0))
-
-    #vamb_emb_exists = os.path.exists(features_path)
-    #if not args.rawfeatures and (args.vamb or not vamb_emb_exists) and args.model_name != "vae":
-    #    vamb_outdir = os.path.join(args.outdir, "vamb_out{}/".format(args.vambdim))
-    #    dataset.run_vamb(vamb_outdir, args.cuda, args.vambdim)
 
     # reload labels from file anyway
     if args.labels is not None:
@@ -472,10 +474,30 @@ def main():
     
     dataset.print_stats()
 
+    target_metric = "f1"
+    if args.markers is not None:
+        target_metric = "hq"
+    elif "amber" in args.labels:
+        target_metric = "f1_avg_bp"
+
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
     if not args.rawfeatures and args.model_name != "vae":
-        dataset.read_features()
+        if not os.path.exists(dataset.featuresfile):
+            from graphmb import train_ccvae
+            logger.info("==============Running VAE model=====================")
+            old_args = copy.deepcopy(args)
+            args.graph_alpha = 0 # do not use edges 
+            vae_embs, _ = train_ccvae.run_model_ccvae(dataset, args, logger, 0,
+                                                      use_gnn=False, epochs=500)
+            logger.info("===================================================")
+            dataset.node_embs = np.array(vae_embs)
+            dataset.write_features_tsv()
+            args = old_args
+        else:
+            dataset.read_features()
+    
+    # Prepare for running multiple runs and aggregate scores
     metrics_per_run = []
     amber_metrics_per_run = []
     for n in range(args.nruns):
@@ -486,7 +508,7 @@ def main():
                 best_embs_dict = pickle.load(embsf)
                 best_train_embs = np.array([best_embs_dict[i] for i in dataset.node_names])
 
-        # DGL specific code
+        # DGL specific code - GraphMB1
         elif args.model_name == "sage_lstm":
             import torch
             from graphmb.dgl_dataset import DGLAssemblyDataset
@@ -506,13 +528,6 @@ def main():
             dgl_dataset.graph.ndata["feat"] = nodes_data
             # dataset.graph.ndata["len"] = torch.Tensor(dataset.nodes_len)
 
-            # All nodes have a self loop
-            # dataset.graph = dgl.remove_self_loop(dataset.graph)
-            # diff_edges = len(dataset.graph.edata["weight"])
-            # dataset.graph = dgl.add_self_loop(dataset.graph)
-
-            # max_weight = dataset.graph.edata["weight"].max().item()
-            # dataset.graph.edata["weight"][diff_edges:] = max_weight
             dgl_dataset.graph.edata["weight"] = dgl_dataset.graph.edata["weight"].float()
             graph = dgl_dataset[0]
             logger.info(graph)
@@ -529,26 +544,6 @@ def main():
         
         elif args.model_name in ("sage", "gcn", "gat", "vae", "vgae") or args.model_name.endswith("_ae") or \
              args.model_name.endswith("_decode") or args.model_name.endswith("_aug"):
-            if "torch" in sys.modules:
-                sys.modules.pop('torch')
-            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # FATAL
-            import tensorflow as tf
-            #tf.get_logger().setLevel(logging.INFO)
-            clustering_device = "cpu" # avoid tf vs torch issues
-            logging.getLogger("tensorflow").setLevel(logging.INFO)
-            if not args.cuda:
-                tf.config.set_visible_devices([], "GPU")
-            # load precomputed contigs with same SCGs (diff genomes)
-            if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
-                dataset.neg_pairs_idx = np.load(f"{dataset.cache_dir}/all_different.npy")
-            elif args.markers is not None:
-                dataset.get_all_different_idx()
-                np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
-            target_metric = "f1"
-            if args.markers is not None:
-                target_metric = "hq"
-            elif "amber" in args.labels:
-                target_metric = "f1_avg_bp"
             best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric=target_metric)
             tf.keras.backend.clear_session()
 

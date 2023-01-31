@@ -1,4 +1,6 @@
 from glob import escape
+#from importlib.resources import files #3.9 only
+from importlib_resources import files
 import itertools
 import random
 import os
@@ -18,8 +20,11 @@ from graphmb.evaluate import (
 )
 
 
-BACTERIA_MARKERS = "data/Bacteria.ms"
-kernel = np.load("data/kernel.npz")['arr_0']
+#BACTERIA_MARKERS = "data/Bacteria.ms"
+#kernel = np.load("data/kernel.npz")['arr_0']
+BACTERIA_MARKERS = files('graphmb.data').joinpath('Bacteria.ms')
+kernel = np.load(files('graphmb.data').joinpath('kernel.npz'))['arr_0']
+
 def count_kmers(seq, k, kmer_to_id, canonical_k):
     # Used in case kmers are used as input features
     # https://stackoverflow.com/q/22428020
@@ -638,7 +643,12 @@ class AssemblyDataset:
                 node_embs.get(n, np.random.uniform(10e-5, 1.0, len(node_embs[list(node_embs.keys())[0]]))) for n in self.node_names
             ]  # deal with missing embs
         self.node_embs = np.array(self.node_embs)
-        
+
+    def write_features_tsv(self):
+        self.logger.info("writing features to {}".format(self.featuresfile))
+        with open(self.featuresfile, "w") as ffile:
+            for i, emb in enumerate(self.node_embs):
+                ffile.write(f"{self.node_names[i]} {' '.join(map(str,emb.tolist()))}\n")
 
     def get_topk_neighbors(self, k, scg_only=False):
         """

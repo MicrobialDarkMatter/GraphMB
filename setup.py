@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 from setuptools.command.install import install
 import os
 import subprocess
@@ -26,10 +26,12 @@ setup(
         "tensorflow==2.11.0",
         "tqdm==4.61.2",
         "numpy==1.23.5",
-        "mlflow==2.1.1"
+        "mlflow==2.1.1",
+        "importlib_resources"
 
     ],
     entry_points={
         "console_scripts": ["graphmb=graphmb.main:main"],
     },
+    include_package_data=True,
 )
