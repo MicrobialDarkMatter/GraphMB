@@ -95,7 +95,7 @@ def create_parser():
                         default="marker_gene_stats.tsv")
     parser.add_argument("--post", help="Output options", default="writeembs_contig2bin")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
-    parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="")
+    parser.add_argument("--outname", "--outputname", help="Output (experiment) name", default="graphmb")
     parser.add_argument("--cuda", help="Use gpu", action="store_true")
     parser.add_argument("--noise", help="Use noise generator", action="store_true")
     parser.add_argument("--savemodel", help="Save best model to disk", action="store_true")
