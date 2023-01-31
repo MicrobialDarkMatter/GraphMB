@@ -19,7 +19,7 @@ setup(
         "wheel",
         "requests",
         "networkx==2.6.2",
-        "torch==1.12.1",
+        "torch==1.13.1",
         "scikit-learn==0.24.2",
         "tqdm==4.61.2",
         "pandas==1.3.5",

@@ -16,26 +16,6 @@ from graphmb.visualize import plot_edges_sim
 from graphmb.evaluate import compute_clusters_and_stats, eval_epoch
 from graphmb.utils import get_cluster_mask
 from graphmb.gnn_models import name_to_model
-    
-class TensorboardLogger(logging.StreamHandler):
-    def __init__(self, file_writer, runname=""):
-        logging.StreamHandler.__init__(self)
-        self.file_writer = file_writer
-        self.runname = runname
-        self.step = 0
-
-    def emit(self, msg):
-        with self.file_writer.as_default():
-            tf.summary.text(self.runname, msg.msg, step=self.step)
-        self.step += 1
-
-
-def log_to_tensorboard(writer, values, step):
-    """Write key-values to writer
-    """
-    for k, v in values.items():
-        with writer.as_default():
-            tf.summary.scalar(k, v, step=step)
 
 
 def normalize_adj_sparse(A):
@@ -169,23 +149,14 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
         
         use_edge_weights = True
         cluster_markers_only = args.quick
-        decay = 0.5 ** (2.0 / epochs)
         use_ae = True
 
-        # setup logging
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
-        summary_writer = tf.summary.create_file_writer(train_log_dir)
-        tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
-        logger.addHandler(tb_handler)
-
         X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
             dataset, use_edge_weights, cluster_markers_only, use_raw=True,
             binarize=args.binarize, remove_edges=args.noedges)
 
         if nrun == 0:
-            print("logging to tensorboard")
-            #tf.summary.trace_on(graph=True)
             logger.info("******* Running model: CCVAE {}**********".format(gname if use_gnn else ""))
             logger.info("***** using edge weights: {} ******".format(use_edge_weights))
             logger.info("***** cluster markers only: {} *****".format(cluster_markers_only))
@@ -418,10 +389,10 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
 
                     
                 weights = (trainer.encoder.get_weights(), trainer.gnn_model.get_weights())
-                best_score, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer,
-                                                                    node_new_features, cluster_mask, weights,
-                                                                    step, args, dataset, e, scores,
-                                                                    best_score, best_embs, best_epoch, best_model, target_metric)
+                eval_output = eval_epoch(node_new_features, cluster_mask, weights,
+                                         args, dataset, e, scores, best_score, best_embs,
+                                         best_epoch, best_model, target_metric)
+                best_score, best_embs, best_epoch, scores, best_model, cluster_labels = eval_output
                 stats = scores[-1]
                 all_cluster_labels.append(cluster_labels)
                 if args.quiet:

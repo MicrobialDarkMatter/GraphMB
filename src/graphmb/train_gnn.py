@@ -8,8 +8,7 @@ from tqdm import tqdm
 import mlflow
 from graphmb.models import  TH
 from graphmb.utils import set_seed # , run_tsne, plot_embs, plot_edges_sim
-from graphmb.evaluate import calculate_overall_prf
-from graphmb.train_ccvae import prepare_data_for_gnn, TensorboardLogger, log_to_tensorboard
+from graphmb.train_ccvae import prepare_data_for_gnn
 from graphmb.visualize import plot_edges_sim
 from graphmb.evaluate import compute_clusters_and_stats, eval_epoch
 from graphmb.utils import get_cluster_mask
@@ -38,18 +37,13 @@ def run_model_gnn(dataset, args, logger, nrun):
     with mlflow.start_run(run_name=args.assembly.split("/")[-1] + "-" + args.outname):
         mlflow.log_params(vars(args))
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = os.path.join(args.outdir, 'logs/' + args.outname + current_time + '/train')
-        summary_writer = tf.summary.create_file_writer(train_log_dir)
-        
-        tb_handler = TensorboardLogger(summary_writer, runname=args.outname + current_time)
-        #   logger.addHandler(tb_handler)
-        tf.config.experimental_run_functions_eagerly(True)
+        tf.config.run_functions_eagerly(True)
 
         X, adj, cluster_mask, neg_pair_idx, pos_pair_idx = prepare_data_for_gnn(
                 dataset, use_edge_weights, cluster_markers_only, use_raw=args.rawfeatures,
                 binarize=args.binarize, remove_edges=args.noedges)
         if nrun == 0:
-            print("logging to tensorboard")
+            print("logging to mlflow")
             logger.info("******* Running model: {} **********".format(gname))
             logger.info("***** using edge weights: {} ******".format(use_edge_weights))
             logger.info("***** using disconnected: {} ******".format(use_disconnected))
@@ -171,10 +165,11 @@ def run_model_gnn(dataset, args, logger, nrun):
                 node_new_features = node_new_features.numpy()
                 if concat_features:
                     node_new_features = tf.concat([gnn_input_features, node_new_features], axis=1).numpy()
-                best_score, best_embs, best_epoch, scores, best_model, cluster_labels = eval_epoch(logger, summary_writer, node_new_features,
-                                                                    cluster_mask, th.gnn_model.get_weights(), step, args, dataset, e, scores,
-                                                                    best_score, best_embs, best_epoch, best_model, target_metric=target_metric)
+                eval_output = eval_epoch(node_new_features, cluster_mask, th.gnn_model.get_weights(),
+                                         args, dataset, e, scores, best_score, best_embs, best_epoch,
+                                         best_model, target_metric=target_metric)
                 
+                best_score, best_embs, best_epoch, scores, best_model, cluster_labels = eval_output
                 stats = scores[-1]
                 if args.quiet:
                     logger.info(f"--- EPOCH {e:d} ---")
@@ -202,7 +197,7 @@ def run_model_gnn(dataset, args, logger, nrun):
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
             node_new_features, node_names, dataset,
             clustering=clustering, k=k, amber=(args.labels is not None and "amber" in args.labels),
-            #cuda=args.cuda,
+            cuda=args.cuda,
         )
         all_cluster_labels.append(cluster_labels)
         stats["epoch"] = e
