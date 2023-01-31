@@ -18,23 +18,20 @@ def create_parser():
     parser.add_argument("--assembly", type=str, help="Assembly base path", required=False)
     parser.add_argument("--assembly_name", type=str, help="File name with contigs", default="assembly.fasta")
     parser.add_argument("--graph_file", type=str, help="File name with graph", default="assembly_graph.gfa")
-    parser.add_argument(
-        "--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)", default=None
-    )
+    parser.add_argument("--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)",
+                        default=None)
     parser.add_argument("--depth", type=str, help="Depth file from jgi", default="assembly_depth.txt")
-    parser.add_argument(
-        "--features", type=str, help="Features file mapping contig name to features", default="features.tsv"
-    )
+    parser.add_argument("--features", type=str, help="Features file mapping contig name to features",
+                        default="features.tsv")
     parser.add_argument("--labels", type=str, help="File mapping contig to label", default=None)
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
 
     # model specification
     parser.add_argument("--model_name", type=str, help="One of the implemented models", default="gcn")
-    parser.add_argument(
-        "--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)", default="relu"
-    )
+    parser.add_argument("--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)",
+                        default="relu")
     parser.add_argument("--layers_vae", type=int, help="Number of layers of the VAE", default=2)
-    parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=3)
+    parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=1)
     parser.add_argument("--hidden_gnn", type=int, help="Dimension of hidden layers of GNN", default=128)
     parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of VAE", default=512)
     parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=32)
@@ -43,7 +40,7 @@ def create_parser():
     parser.add_argument("--batchtype", type=str, help="Batch type, nodes or edges", default="auto")
     parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.1)
     parser.add_argument("--dropout_vae", type=float, help="dropout of the VAE", default=0.2)
-    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-2)
+    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--graph_alpha", type=float, help="Coeficient for graph loss", default=1)
     parser.add_argument("--kld_alpha", type=float, help="Coeficient for KLD loss", default=200)
@@ -72,9 +69,8 @@ def create_parser():
     parser.add_argument("--rawfeatures", help="Use raw features", action="store_true")
     parser.add_argument("--clusteringloss", help="Train with clustering loss", action="store_true")
     parser.add_argument("--targetmetric", help="Metric to pick best epoch", default="hq")
-    parser.add_argument(
-        "--concatfeatures", help="Concat learned and original features before clustering", action="store_true"
-    )
+    parser.add_argument("--concatfeatures", help="Concat learned and original features before clustering",
+                        action="store_true")
     parser.add_argument("--no_loss_weights", action="store_false", help="Using edge weights for loss (positive only)")
     parser.add_argument("--no_sample_weights", action="store_false", help="Using edge weights to sample negatives")
     parser.add_argument(
