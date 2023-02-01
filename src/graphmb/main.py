@@ -28,7 +28,7 @@ from graphmb.graphmb1 import (cluster_embs,
 from graphmb.version import __version__
 
 def run_model(dataset, args, logger, nrun, target_metric):
-    if args.model_name.endswith("_ae"):
+    if args.model_name.endswith("_ccvae"):
         from graphmb import train_ccvae
         return train_ccvae.run_model_ccvae(dataset, args, logger, nrun, target_metric)
     elif args.model_name == "vae":
@@ -548,7 +548,7 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         
-        elif args.model_name in ("sage", "gcn", "gat", "vae", "vgae") or args.model_name.endswith("_ae") or \
+        elif args.model_name in ("sage", "gcn", "gat", "vae", "vgae") or args.model_name.endswith("_ccvae") or \
              args.model_name.endswith("_decode") or args.model_name.endswith("_aug"):
             best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric=target_metric)
             tf.keras.backend.clear_session()

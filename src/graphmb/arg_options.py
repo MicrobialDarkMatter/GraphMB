@@ -27,11 +27,13 @@ def create_parser():
     parser.add_argument("--embs", type=str, help="No train, load embs", default=None)
 
     # model specification
-    parser.add_argument("--model_name", type=str, help="One of the implemented models", default="gcn")
+    parser.add_argument("--model_name", type=str,
+                        help="One of the implemented models: gcn, gat, sage, sage_lstm, _ccvae variation",
+                        default="gcn")
     parser.add_argument("--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)",
                         default="relu")
     parser.add_argument("--layers_vae", type=int, help="Number of layers of the VAE", default=2)
-    parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=1)
+    parser.add_argument("--layers_gnn", type=int, help="Number of layers of the GNN", default=3)
     parser.add_argument("--hidden_gnn", type=int, help="Dimension of hidden layers of GNN", default=128)
     parser.add_argument("--hidden_vae", type=int, help="Dimension of hidden layers of VAE", default=512)
     parser.add_argument("--embsize_gnn", "--zg", type=int, help="Output embedding dimension of GNN", default=32)
@@ -40,13 +42,13 @@ def create_parser():
     parser.add_argument("--batchtype", type=str, help="Batch type, nodes or edges", default="auto")
     parser.add_argument("--dropout_gnn", type=float, help="dropout of the GNN", default=0.1)
     parser.add_argument("--dropout_vae", type=float, help="dropout of the VAE", default=0.2)
-    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-3)
+    parser.add_argument("--lr_gnn", type=float, help="learning rate", default=1e-2)
     parser.add_argument("--lr_vae", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--graph_alpha", type=float, help="Coeficient for graph loss", default=1)
     parser.add_argument("--kld_alpha", type=float, help="Coeficient for KLD loss", default=200)
     parser.add_argument("--ae_alpha", type=float, help="Coeficient for AE loss", default=1)
     parser.add_argument("--scg_alpha", type=float, help="Coeficient for SCG loss", default=1)
-    parser.add_argument("--clusteringalgo", help="clustering algorithm", default="vamb")
+    parser.add_argument("--clusteringalgo", help="clustering algorithm: vamb, kmeans", default="vamb")
     parser.add_argument("--kclusters", help="Number of clusters (only for some clustering methods)", default=None)
     # GraphSAGE params
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="lstm")
@@ -111,5 +113,4 @@ def create_parser():
     parser.add_argument("--read_cache", help="Do not check assembly files, read cached files only", action="store_true")
     parser.add_argument("--version", "-v", help="Print version and exit", action="store_true")
     parser.add_argument("--loglevel", "-l", help="Log level", default="info")
-    parser.add_argument('--configfile', type=open, action=LoadFromFile)
     return parser
