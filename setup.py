@@ -21,10 +21,8 @@ setup(
         "requests",
         "networkx==2.6.2",
         "torch==1.13.1",
-        "pandas==1.3.5",
         "tensorflow==2.11.0",
         "tqdm==4.61.2",
-        "numpy==1.23.5",
         "mlflow==2.1.1",
         "importlib_resources"
 
