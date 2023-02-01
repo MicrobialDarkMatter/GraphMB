@@ -454,6 +454,9 @@ def main():
     elif args.markers is not None:
         dataset.get_all_different_idx()
         np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
+    else:
+        dataset.neg_pairs_idx = np.array([])
+        args.scg_alpha = 0
     
     if os.path.exists(os.path.join(args.assembly, "assembly_info.txt")):
         logger.info("Reading assembly info file")

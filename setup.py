@@ -13,6 +13,7 @@ setup(
     name="graphmb",
     version=main_ns["__version__"],
     packages=["graphmb"],
+    python_requires=">=3.8"
     package_dir={"": "src"},
     setup_requires=["setuptools~=58.0", "wheel", "sphinx-rtd-theme", "twine"],
     install_requires=[

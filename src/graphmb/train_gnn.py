@@ -185,11 +185,11 @@ def run_model_gnn(dataset, args, logger, nrun, target_metric):
             losses["scg"].append(diff_loss)
             losses["total"].append(total_loss)
 
-        if best_embs is None and target_metric != "noeval":
-            best_embs = node_new_features
         gnn_model.set_weights(best_model)
         node_new_features = th.gnn_model(features, None, training=False)
         node_new_features = node_new_features.numpy()
+        if best_embs is None or target_metric != "noeval":
+            best_embs = node_new_features
         if concat_features:
             node_new_features = tf.concat([features, node_new_features], axis=1).numpy()
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
