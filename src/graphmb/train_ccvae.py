@@ -413,6 +413,8 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
             best_embs = node_new_features
         else:
             node_new_features = trainer.encoder(features)[0]
+        if tf.is_tensor(node_new_features):
+            node_new_features = node_new_features.numpy()
         cluster_labels, stats, _, _ = compute_clusters_and_stats(
             node_new_features, node_names, dataset, clustering=clustering, k=k,
             amber=(args.labels is not None and "amber" in args.labels),

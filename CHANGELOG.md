@@ -4,7 +4,12 @@ All notable changes to this project will be documented in this file.
  
 The format is based on [this sample changelog](https://gist.github.com/juampynr/4c18214a8eb554084e21d6e288a18a2c).
  
-## [0.2.0] - 2023-02-dd
+## [0.2.0] - 2023-02-02
+
+### Fixed
+- Correct wheel file
+
+## [0.2.0] - 2023-02-01
  
  - Changelog
 ### Added

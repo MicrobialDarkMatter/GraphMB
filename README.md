@@ -5,7 +5,6 @@
 GraphMB is a Metagenomic Binner developed for long-read assemblies, that takes advantage of graph machine learning 
 algorithms and the assembly graph generated during assembly. It has been tested on (meta)flye assemblies.
 
-*** NEW September 2022 *** 
 Our peer-reviewed paper: 
 > Andre Lamurias, Mantas Sereika, Mads Albertsen, Katja Hose, Thomas Dyhre Nielsen, Metagenomic binning with assembly graph embeddings, Bioinformatics, 2022;, btac557, https://doi.org/10.1093/bioinformatics/btac557
 
@@ -28,7 +27,7 @@ pip install graphmb
 
 ### Option 2 - From wheel
 ```bash
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.5/graphmb-0.1.5-py3-none-any.whl
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.5/graphmb-0.2.1-py3-none-any.whl
 ```
 
 ### Option 3 - From source
@@ -47,10 +46,17 @@ docker pull andrelamurias/graphmb
 
 Then you can run GraphMB on a container. The image includes the Strong100 dataset. 
 If you want to use other datasets, use the -v option to mount the path to your data.
+
 ```bash
 docker run -it andrelamurias/graphmb bash
 ```
 
+### Option 5 - From conda
+```bash
+conda create -n graphmb -c conda-forge make cmake libgcc python=3.7 pip tensorflow
+conda activate graphmb
+pip install graphmb
+```
 
 ## Input files
 

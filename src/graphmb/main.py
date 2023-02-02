@@ -495,7 +495,8 @@ def main():
             args.graph_alpha = 0 # do not use edges 
             args.outname = "ccvae"
             vae_embs, _ = train_ccvae.run_model_ccvae(dataset, args, logger, 0,
-                                                      use_gnn=False, epochs=500)
+                                                      use_gnn=False, epochs=500,
+                                                      target_metric=target_metric)
             logger.info("===================================================")
             dataset.node_embs = np.array(vae_embs)
             dataset.write_features_tsv()
