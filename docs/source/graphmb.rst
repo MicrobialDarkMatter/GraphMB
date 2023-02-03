@@ -36,6 +36,30 @@ graphmb.models module
    :undoc-members:
    :show-inheritance:
 
+graphmb.gnn_models module  
+-------------------------------
+
+.. automodule:: graphmb.gnn_models
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+graphmb.train_ccvae module
+-------------------------------
+
+.. automodule:: graphmb.train_ccvae
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+graphmb.train_gnn module
+-------------------------------
+
+.. automodule:: graphmb.train_gnn
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 graphmb.graphsage\_unsupervised module
 --------------------------------------
 

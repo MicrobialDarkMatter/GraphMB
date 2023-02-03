@@ -12,6 +12,7 @@ Welcome to GraphMB's documentation!
 
    intro
    examples
+   development
    graphmb
 
 

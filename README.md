@@ -27,7 +27,7 @@ pip install graphmb
 
 ### Option 2 - From wheel
 ```bash
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.5/graphmb-0.2.1-py3-none-any.whl
+pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.5/graphmb-0.2.2-py3-none-any.whl
 ```
 
 ### Option 3 - From source
