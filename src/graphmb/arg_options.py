@@ -53,7 +53,7 @@ def create_parser():
     # GraphSAGE params
     parser.add_argument("--aggtype", help="Aggregation type for GraphSAGE (mean, pool, lstm, gcn)", default="lstm")
     parser.add_argument("--decoder_input", help="What to use for input to the decoder", default="vae")
-    parser.add_argument("--vaepretrain", help="How many epochs to pretrain VAE", default=0, type=int)
+    parser.add_argument("--vaepretrain", help="How many epochs to pretrain VAE", default=500, type=int)
     parser.add_argument("--ae_only", help="Do not use GNN (ae model must be used and decoder input must be ae", action="store_true")
     parser.add_argument("--negatives", help="Number of negatives to train GraphSAGE", default=10, type=int)
     parser.add_argument("--quick", help="Reduce number of nodes to run quicker", action="store_true")

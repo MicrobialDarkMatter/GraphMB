@@ -487,15 +487,15 @@ def main():
 
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
-    if not args.rawfeatures and args.model_name != "vae":
-        if not os.path.exists(dataset.featuresfile):
+    if (not args.rawfeatures and args.model_name != "vae") or args.reload:
+        if not os.path.exists(dataset.featuresfile) or args.reload:
             from graphmb import train_ccvae
             logger.info("==============Running VAE model=====================")
             old_args = copy.deepcopy(args)
             args.graph_alpha = 0 # do not use edges 
             args.outname = "ccvae"
             vae_embs, _ = train_ccvae.run_model_ccvae(dataset, args, logger, 0,
-                                                      use_gnn=False, epochs=500,
+                                                      use_gnn=False, epochs=args.vaepretrain,
                                                       target_metric=target_metric)
             logger.info("===================================================")
             dataset.node_embs = np.array(vae_embs)

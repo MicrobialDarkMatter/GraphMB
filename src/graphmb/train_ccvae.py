@@ -246,7 +246,7 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
             use_gnn=use_gnn,
             use_noise=args.noise, # not being used
             loglevel=args.loglevel,
-            pretrainvae=args.vaepretrain
+            pretrainvae=0
         )
 
         if args.batchtype == "auto":
@@ -293,8 +293,6 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
             #vae_epoch_losses = {"kld_loss": [], "vae_loss": [], "kmer_loss": [], "ab_loss": []}
             recon_loss = 0
             trainer.epoch = e
-            #if args.vaepretrain - 1 == e:
-            #    trainer.opt = Adam(learning_rate=lr_gnn/10, epsilon=1e-8)
             # train VAE in batches
             if e in batch_steps:
                 print(f'Increasing {args.batchtype} batch size from {batch_size:d} to {batch_size*2:d}')
@@ -374,7 +372,7 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
                 gnn_input_features = trainer.encoder(features)[0]
                 #trainer.features = gnn_input_features
                 logger.debug("encoder output " + str(gnn_input_features[0][:5].numpy()))
-                if use_gnn: # and e > args.vaepretrain:
+                if use_gnn:
                     node_new_features = trainer.gnn_model(gnn_input_features, None, training=False)
                     
                     if args.concatfeatures:
