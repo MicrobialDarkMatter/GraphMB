@@ -21,9 +21,9 @@ setup(
         "requests",
         "networkx==2.6.2",
         "torch==1.13.1",
-        "tensorflow==2.11.0",
+        "tensorflow==2.11.1",
         "tqdm==4.61.2",
-        "mlflow==2.1.1",
+        "mlflow==2.2.1",
         "importlib_resources"
 
     ],

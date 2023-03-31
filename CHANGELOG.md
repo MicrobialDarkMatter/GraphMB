@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
  
 The format is based on [this sample changelog](https://gist.github.com/juampynr/4c18214a8eb554084e21d6e288a18a2c).
  
+## [0.2.4] - 2023-03-31
+- Update Tensorflow and MLflow versions
+
 
 ## [0.2.3] - 2023-02-03
 
