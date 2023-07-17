@@ -443,9 +443,10 @@ def main():
     
     if args.markers.startswith("gtdb"):
         dataset.read_gtdbtk_files()
-    elif args.markers != "":
+    elif args.markers != "" and os.path.exists(os.path.join(args.assembly, args.markers)):
         dataset.read_scgs()
     else:
+        logger.info(f"Not using SCG file: {args.markers} (not found)")
         args.markers = None
 
     # load precomputed contigs with same SCGs (diff genomes)

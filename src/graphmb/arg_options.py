@@ -93,7 +93,8 @@ def create_parser():
     parser.add_argument("--read_embs", help="Read embeddings from file", action="store_true")
     parser.add_argument("--reload", help="Reload data", action="store_true")
 
-    parser.add_argument("--markers", type=str, help="File with precomputed checkm results to eval",
+    parser.add_argument("--markers", type=str, help="""File with precomputed checkm results to eval.
+                                                    If not found, it will assume it does not exist.""",
                         default="marker_gene_stats.tsv")
     parser.add_argument("--post", help="Output options", default="writeembs_contig2bin")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")
