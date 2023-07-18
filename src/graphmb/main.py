@@ -31,9 +31,10 @@ def run_model(dataset, args, logger, nrun, target_metric):
     if args.model_name.endswith("_ccvae"):
         from graphmb import train_ccvae
         return train_ccvae.run_model_ccvae(dataset, args, logger, nrun, target_metric)
-    elif args.model_name == "vae":
-        from graphmb import train_vae
-        return train_vae.run_model_vae(dataset, args, logger, nrun)
+    # TODO: this should be equivalent to running ccvae with both alpha params set to 0
+    #elif args.model_name == "vae":
+    #    from graphmb import train_vae
+    #    return train_vae.run_model_vae(dataset, args, logger, nrun)
     elif args.model_name in ("gcn", "sage", "gat"):
         from graphmb import train_gnn
         return train_gnn.run_model_gnn(dataset, args, logger, nrun, target_metric)
@@ -552,7 +553,7 @@ def main():
         
         elif args.model_name in ("sage", "gcn", "gat", "vae", "vgae") or args.model_name.endswith("_ccvae") or \
              args.model_name.endswith("_decode") or args.model_name.endswith("_aug"):
-            best_train_embs, metrics = run_model(dataset, args, logger, nrun=n, target_metric=target_metric)
+            best_train_embs, metrics, contig_labels = run_model(dataset, args, logger, nrun=n, target_metric=target_metric)
             tf.keras.backend.clear_session()
 
         run_post_processing(
@@ -565,6 +566,12 @@ def main():
             dataset.node_to_label,
             seed=args.seed,
         )
+        breakpoint()
+        if args.writebins:
+            cluster_to_contig = {k: [] for k in set(contig_labels)}
+            for contig, label in enumerate(contig_labels):
+                cluster_to_contig[label].append(dataset.node_names[contig])
+            write_bins(args, dataset, cluster_to_contig, logger)
 
         if args.labels is not None: # or "contig2bin" in args.post:
             from graphmb.amber_eval import amber_eval

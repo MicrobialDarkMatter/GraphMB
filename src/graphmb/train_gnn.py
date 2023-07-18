@@ -216,5 +216,5 @@ def run_model_gnn(dataset, args, logger, nrun, target_metric):
             f.write(f"{node_names[i]}\t{all_cluster_labels[best_idx][i]}\n")
     #plot edges vs final embs
     #plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, f"{args.outdir}/{args.outname}_posttrain_")
-    return best_embs, scores[best_idx]
+    return best_embs, scores[best_idx], all_cluster_labels[best_idx]
 

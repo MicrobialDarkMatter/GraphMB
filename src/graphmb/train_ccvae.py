@@ -442,4 +442,4 @@ def run_model_ccvae(dataset, args, logger, nrun, epochs=None,
         #plot_edges_sim(best_vae_embs, dataset.adj_matrix, id_to_scg, "vae_")
         if plot:
             plot_edges_sim(best_embs, dataset.adj_matrix, id_to_scg, "posttrain_")
-        return best_embs, scores[best_idx]
+        return best_embs, scores[best_idx], all_cluster_labels[best_idx]
