@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
  
 The format is based on [this sample changelog](https://gist.github.com/juampynr/4c18214a8eb554084e21d6e288a18a2c).
  
+## [0.2.5] - 2023-07-18
+- Update MLflow version
+- Fix data dir missing from src/graphmb
+- Add option to write bins to fasta files (--writebins)
+
 ## [0.2.4] - 2023-03-31
 - Update Tensorflow and MLflow versions
 

@@ -23,7 +23,7 @@ setup(
         "torch==1.13.1",
         "tensorflow==2.11.1",
         "tqdm==4.61.2",
-        "mlflow==2.2.1",
+        "mlflow==2.3.1",
         "importlib_resources"
 
     ],
