@@ -496,7 +496,7 @@ def main():
             old_args = copy.deepcopy(args)
             args.graph_alpha = 0 # do not use edges 
             args.outname = "ccvae"
-            vae_embs, _ = train_ccvae.run_model_ccvae(dataset, args, logger, 0,
+            vae_embs, _, _ = train_ccvae.run_model_ccvae(dataset, args, logger, 0,
                                                       use_gnn=False, epochs=args.vaepretrain,
                                                       target_metric=target_metric)
             logger.info("===================================================")
@@ -566,7 +566,6 @@ def main():
             dataset.node_to_label,
             seed=args.seed,
         )
-        breakpoint()
         if args.writebins:
             cluster_to_contig = {k: [] for k in set(contig_labels)}
             for contig, label in enumerate(contig_labels):
