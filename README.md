@@ -79,8 +79,8 @@ Otherwise, it will assume that the files are inside the directory.
 You can get an example of these files [here](https://drive.google.com/drive/folders/1m6uTgTPUghk_q9GxfX1UNEOfn8jnIdt5?usp=sharing).
 Download from this link and extract to data/strong100.
 The datasets used in our experiments are available [here](https://zenodo.org/record/6122610)
-These datasets include the VAE embeddings obtained with Vamb, which are automatically used by GraphMB.
-If you want to re-run Vamb, use the `--vamb` option.
+These datasets include the VAE embeddings obtained with VAMB, which are automatically used by GraphMB.
+If you want to regenerate these embeddings, use [this fork of VAMB](https://github.com/andrelamurias/vamb).
 ## How to run
 If you have your assembly in some directory, with the files mentioned above:
 
