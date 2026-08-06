@@ -15,7 +15,7 @@ class LoadFromFile (argparse.Action):
 def create_parser():
     parser = argparse.ArgumentParser(description="Train graph embedding model")
     # input files
-    parser.add_argument("--assembly", type=str, help="Assembly base path", required=False)
+    parser.add_argument("--assembly", type=str, help="Assembly base path", required=True)
     parser.add_argument("--assembly_name", type=str, help="File name with contigs", default="assembly.fasta")
     parser.add_argument("--graph_file", type=str, help="File name with graph", default="assembly_graph.gfa")
     parser.add_argument("--edge_threshold", type=float, help="Remove edges with weight lower than this (keep only >=)",
