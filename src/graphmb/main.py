@@ -28,11 +28,19 @@ from graphmb.graphmb1 import (cluster_embs,
 from graphmb.version import __version__
 
 def run_model(dataset, args, logger, nrun, target_metric):
-    if args.model_name.endswith("_ccvae"):
+    if not os.path.exists(os.path.join(args.assembly, args.graph_file)): # No graph
+        args.layers_gnn = 0  # Disable GNN layers
+        args.graph_alpha = 0  # No graph loss
+        args.ae_only = True   # Train only VAE
         from graphmb import train_ccvae
-        return train_ccvae.run_model_ccvae(dataset, args, logger, nrun, target_metric)
+        return train_ccvae.run_model_ccvae(dataset, args, logger, nrun,
+                                                      use_gnn=False, epochs=args.epoch,
+                                                      target_metric=target_metric)
+    elif args.model_name.endswith("_ccvae"):
+        from graphmb import train_ccvae
+        return train_ccvae.run_model_ccvae(dataset, args, logger, nrun, epochs=args.epoch,target_metric=target_metric)
     # TODO: this should be equivalent to running ccvae with both alpha params set to 0
-    #elif args.model_name == "vae":
+    # elif args.model_name == "vae":
     #    from graphmb import train_vae
     #    return train_vae.run_model_vae(dataset, args, logger, nrun)
     elif args.model_name in ("gcn", "sage", "gat"):
@@ -317,8 +325,12 @@ def run_post_processing(final_embs, args, logger, dataset, device, label_to_node
             logger.info("### Writing contig2bin to {}/{}".format(args.outdir, args.outname))
             with open(args.outdir + f"/{args.outname}_best_contig2bin.tsv", "w") as f:
                 f.write("@Version:0.9.0\n@SampleID:SAMPLEID\n@@SEQUENCEID\tBINID\n")
-                for c in best_contig_to_bin:
-                    f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
+                for contig, bin_id in best_contig_to_bin.items():
+                    # Check if this bin meets the minbin threshold
+                    if cluster_sizes[bin_id] >= args.minbin:
+                        f.write(f"{str(contig)}\t{str(bin_id)}\n")
+            #     for c in best_contig_to_bin:
+            #         f.write(f"{str(c)}\t{str(best_contig_to_bin[c])}\n")
 
     # plot tsne embs
     if "tsne" in args.post:
@@ -434,7 +446,7 @@ def main():
         contignodes=args.contignodes
     )
     if args.read_cache or (dataset.check_cache(use_graph) and not args.reload):
-        logger.info("Reading cache from".format(args.outdir))
+        logger.info("Reading cache from {}".format(args.outdir))
         dataset.read_cache(use_graph)
     else:
         check_dirs(args, use_features=False)
@@ -454,7 +466,7 @@ def main():
     if os.path.exists(f"{dataset.cache_dir}/all_different.npy"):
         dataset.neg_pairs_idx = np.load(f"{dataset.cache_dir}/all_different.npy")
     elif args.markers is not None:
-        dataset.get_all_different_idx()
+        dataset.get_all_different_idx(args.min_common_scg, args.max_common_scg)
         np.save(f"{dataset.cache_dir}/all_different.npy", dataset.neg_pairs_idx)
     else:
         dataset.neg_pairs_idx = np.array([])
@@ -489,7 +501,7 @@ def main():
 
     # graph transformations
     # Filter edges according to weight (could be from read overlap count or depth sim)
-    if (not args.rawfeatures and args.model_name != "vae") or args.reload:
+    if (not args.rawfeatures and os.path.exists(os.path.join(args.assembly, args.graph_file))) or args.reload:
         if not os.path.exists(dataset.featuresfile) or args.reload:
             from graphmb import train_ccvae
             logger.info("==============Running VAE model=====================")
@@ -551,7 +563,7 @@ def main():
                 best_train_embs = graph.ndata["feat"]
                 last_train_embs = graph.ndata["feat"]
         
-        elif args.model_name in ("sage", "gcn", "gat", "vae", "vgae") or args.model_name.endswith("_ccvae") or \
+        elif args.model_name in ("sage", "gcn", "gat", "vgae") or args.model_name.endswith("_ccvae") or \
              args.model_name.endswith("_decode") or args.model_name.endswith("_aug"):
             best_train_embs, metrics, contig_labels = run_model(dataset, args, logger, nrun=n, target_metric=target_metric)
             tf.keras.backend.clear_session()
@@ -601,8 +613,8 @@ def main():
             values = [m[mname] for m in amber_metrics_per_run]
             logger.info("### amber eval {}: {:.4f} {:.4f} ###".format(mname, np.mean(values), np.std(values)))
     total_time = datetime.now() - now
-    print("Total run time: {}".format(total_time))
-    print("Seconds per run: {:.2f}".format(total_time.total_seconds() / args.nruns))
+    logger.info("Total run time: {}".format(total_time))
+    logger.info("Seconds per run: {:.2f}".format(total_time.total_seconds() / args.nruns))
 
 if __name__ == "__main__":
     main()

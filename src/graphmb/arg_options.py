@@ -29,7 +29,7 @@ def create_parser():
     # model specification
     parser.add_argument("--model_name", type=str,
                         help="One of the implemented models: gcn, gat, sage, sage_lstm, _ccvae variation",
-                        default="gcn")
+                        default="gcn_ccvae")
     parser.add_argument("--activation", type=str, help="Activation function to use(relu, prelu, sigmoid, tanh)",
                         default="relu")
     parser.add_argument("--layers_vae", type=int, help="Number of layers of the VAE", default=2)
@@ -96,6 +96,8 @@ def create_parser():
     parser.add_argument("--markers", type=str, help="""File with precomputed checkm results to eval.
                                                     If not found, it will assume it does not exist.""",
                         default="marker_gene_stats.tsv")
+    parser.add_argument("--min_common_scg", type=int, help="Minimum number of common SCGs between two contigs", default=1)
+    parser.add_argument("--max_common_scg", type=int, help="Maximum number of common SCGs between two contigs", default=100000)
     parser.add_argument("--post", help="Output options", default="writeembs_contig2bin")
     parser.add_argument("--writebins", help="Write bins to fasta files", action="store_true")
     parser.add_argument("--skip_preclustering", help="Use precomputed checkm results to eval", action="store_true")

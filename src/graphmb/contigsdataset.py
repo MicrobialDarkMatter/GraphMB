@@ -34,6 +34,8 @@ def count_kmers(seq, k, kmer_to_id, canonical_k):
     kmers = [kmer_to_id[k] for k in kmers]
     kmer_counts = Counter(kmers)
     counts = np.array([kmer_counts[k] for k in range(canonical_k)])
+    if counts.sum() == 0:
+        return np.dot(counts, kernel)
     counts = counts / counts.sum()
     counts += -(1/(4**k))
     counts = np.dot(counts, kernel)
@@ -57,7 +59,7 @@ def get_kmer_to_id(kmer, combine_revcomp=False):
 def process_node_name(name: str, assembly_type: str="flye") -> str:
     contig_name = name.strip().split(" ")[0]
     #if assembly_type == "spades":
-    contig_name = "_".join(contig_name.split("_")[:2])
+    # contig_name = "_".join(contig_name.split("_")[:2])
     return contig_name
 
 
@@ -160,52 +162,58 @@ class AssemblyDataset:
         # self.read_scgs()
 
     def print_stats(self):
-        print("==============================")
-        print("DATASET STATS:")
+        self.logger.info("==============================")
+        self.logger.info("DATASET STATS:")
         # get:
         #   number of sequences
         #   number of contigs
         #   length of contigs (sum and average and N50)
         #   coverage samples from jgi file
         #   assembly_graph.file exists, number of edges, number of paths
-        print("number of sequences: {}".format(len(self.node_names)))
-        print("assembly length: {} Gb".format(round(sum(self.node_lengths) / 1000000000, 3)))
-        print("assembly N50: {} Mb".format(round(self.calculate_n50()/1000000, 3)))
-        print("assembly average length (Mb): {} max: {} min: {}".format(round(np.mean(self.node_lengths)/1000000, 3),
+        self.logger.info("number of sequences: {}".format(len(self.node_names)))
+        self.logger.info("assembly length: {} Gb".format(round(sum(self.node_lengths) / 1000000000, 3)))
+        self.logger.info("assembly N50: {} Mb".format(round(self.calculate_n50()/1000000, 3)))
+        self.logger.info("assembly average length (Mb): {} max: {} min: {}".format(round(np.mean(self.node_lengths)/1000000, 3),
                                                                    round(np.max(self.node_lengths)/1000000, 3),
                                                                    round(np.min(self.node_lengths)/1000000, 3)))
-        print("coverage samples: {}".format(len(self.node_depths[0])))
+        #self.logger.info("coverage samples: {}".format(len(self.node_depths[0])))
+        if isinstance(self.node_depths[0], np.float64):
+            coverage_samples = 1
+        else:
+            coverage_samples = len(self.node_depths[0])
+        self.logger.info("coverage samples: {}".format(coverage_samples))
+
         if os.path.exists(os.path.join(self.data_dir, self.graphfile)) or \
             len(self.edges_src) > 0:
-            print("Graph file found and read")
-            print("graph edges: {}".format(len(self.edges_src)))
-            print("contig paths: {}".format(len(self.graph_paths)))
+            self.logger.info("Graph file found and read")
+            self.logger.info("graph edges: {}".format(len(self.edges_src)))
+            self.logger.info("contig paths: {}".format(len(self.graph_paths)))
         else:
-            print("No assembly graph loaded")
+            self.logger.info("No assembly graph loaded")
         #   contigs with markers on marker_gene_stats
         #   stats with SCGs (max/min # of contigs, etc)
 
         if len(self.contig_markers) > 0:
-            print("total ref markers sets: {}".format(len(self.ref_marker_sets)))
-            print("total ref markers: {}".format(len(self.markers)))
+            self.logger.info("total ref markers sets: {}".format(len(self.ref_marker_sets)))
+            self.logger.info("total ref markers: {}".format(len(self.markers)))
             n_of_markers = [len(x) for x in self.contig_markers.values() if len(x) > 0]
-            print("contigs with one or more markers: {}/{}".format(len(n_of_markers),
+            self.logger.info("contigs with one or more markers: {}/{}".format(len(n_of_markers),
                                                                     len(self.node_names)))
             
-            print("max SCGs on one contig: {}, average(excluding 0): {}".format(max(n_of_markers),
+            self.logger.info("max SCGs on one contig: {}, average(excluding 0): {}".format(max(n_of_markers),
                                                             round(np.mean(n_of_markers), 3)))
             self.estimate_n_genomes()
-            print("SCG contig count min: {} contigs".format(min(self.scg_counts.values())))
+            self.logger.info("SCG contig count min: {} contigs".format(min(self.scg_counts.values())))
             self.get_edges_with_same_scgs()
         else:
-            print("No SCG markers")
+            self.logger.info("No SCG markers")
         # labels
         if self.labelsfile is not None or len(self.labels) > 1:
-            print("number of GS labels: {}".format(len(self.labels)))
+            self.logger.info("number of GS labels: {}".format(len(self.labels)))
             nodes_not_na = [n for n in self.node_names if n in self.node_to_label and \
                                                      self.node_to_label[n] != "NA"]
-            print("nodes with labels: {}".format(len(nodes_not_na)))
-        print("==============================")
+            self.logger.info("nodes with labels: {}".format(len(nodes_not_na)))
+        self.logger.info("==============================")
                                                           
     def calculate_n50(self):
         # https://eaton-lab.org/slides/genomics/answers/nb-4.1-numpy.html
@@ -289,6 +297,8 @@ class AssemblyDataset:
                             kmers = count_kmers(
                                 self.node_seqs[contig_name], self.kmer, self.kmer_to_ids, self.canonical_k
                             )
+                            if np.all(np.isnan(kmers)):
+                                print(self.node_seqs[contig_name])
                             node_kmers[contig_name] = kmers
                     contig_name = process_node_name(line[1:], self.assembly_type)
                     self.node_names.append(contig_name)
@@ -332,8 +342,12 @@ class AssemblyDataset:
                     if src_node_name in skipped_contigs or dst_node_name in skipped_contigs:
                         # skipped_edges.add((contig_names.index(values[1]), contig_names.index(values[3])))
                         continue
-                    src_index = self.node_names.index(src_node_name)
-                    dst_index = self.node_names.index(dst_node_name)
+                    try:
+                        src_index = self.node_names.index(src_node_name)
+                        dst_index = self.node_names.index(dst_node_name)
+                    except ValueError:
+                        continue
+
                     self.edges_src.append(src_index)
                     self.edges_dst.append(dst_index)
                     if len(values) > 6:
@@ -492,7 +506,7 @@ class AssemblyDataset:
             else:
                 self.node_depths = stats.zscore(self.node_depths, axis=0)
         else:
-            self.node_depths = np.ones(len(self.node_names), dtype=np.float)
+            self.node_depths = np.ones(len(self.node_names), dtype=np.float64)
 
     def read_labels(self):
         # logging.info("loading labels from {}".format(args.labels))
@@ -567,27 +581,64 @@ class AssemblyDataset:
             self.contig_markers = {}
             self.run_checkm()
 
-    def get_all_different_idx(self):
+    # def get_all_different_idx(self):
+    #     """
+    #     Returns a 2d numpy array where each row
+    #     corresponds to a pairs of node idx whose
+    #     feature must be different as they correspond
+    #     to the same contig (check jargon). This
+    #     should encourage the HQ value to be higher.
+    #     """
+    #     node_names_to_idx = {node_name: i for i, node_name in enumerate(self.node_names)}
+    #     pair_idx = set()
+    #     for n1 in self.contig_markers:
+    #         for gene1 in self.contig_markers[n1]:
+    #             for n2 in self.contig_markers:
+    #                 if n1 != n2 and gene1 in self.contig_markers[n2]:
+    #                     if n1 not in node_names_to_idx or n2 not in node_names_to_idx:
+    #                         continue
+    #                     p1 = (node_names_to_idx[n1], node_names_to_idx[n2])
+    #                     p2 = (node_names_to_idx[n2], node_names_to_idx[n1])
+    #                     if (p1 not in pair_idx) and (p2 not in pair_idx):
+    #                         pair_idx.add(p1)
+    #     pair_idx = np.unique(np.array(list(pair_idx)), axis=0)
+    #     print("Number of diff cluster pairs:", len(pair_idx))
+    #     self.neg_pairs_idx = pair_idx
+
+    def get_all_different_idx(self, min_common_genes, max_common_genes):
         """
-        Returns a 2d numpy array where each row
-        corresponds to a pairs of node idx whose
-        feature must be different as they correspond
-        to the same contig (check jargon). This
-        should encourage the HQ value to be higher.
+        Finds and stores pairs of node indices whose features should be different
+        because they belong to different contigs but share at least `min_common_genes` gene markers.
+        
+        Args:
+            min_common_genes (int): Minimum number of gene markers that must be shared
+                                    between nodes from different contigs to be considered.
+            max_common_genes (int): Maximum number of gene markers that must be shared
+                                    between nodes from different contigs to be considered. 
         """
+        max_common_genes = max(min_common_genes, max_common_genes)
         node_names_to_idx = {node_name: i for i, node_name in enumerate(self.node_names)}
         pair_idx = set()
+
         for n1 in self.contig_markers:
-            for gene1 in self.contig_markers[n1]:
-                for n2 in self.contig_markers:
-                    if n1 != n2 and gene1 in self.contig_markers[n2]:
-                        p1 = (node_names_to_idx[n1], node_names_to_idx[n2])
-                        p2 = (node_names_to_idx[n2], node_names_to_idx[n1])
-                        if (p1 not in pair_idx) and (p2 not in pair_idx):
-                            pair_idx.add(p1)
+            genes1 = set(self.contig_markers[n1])
+            for n2 in self.contig_markers:
+                if n1 >= n2:  # Avoid redundant pairs (and self-pairs)
+                    continue
+
+                genes2 = set(self.contig_markers[n2])
+                common_genes = genes1 & genes2
+
+                if min_common_genes <= len(common_genes) <= max_common_genes:
+                    if n1 not in node_names_to_idx or n2 not in node_names_to_idx:
+                        continue
+                    i1, i2 = node_names_to_idx[n1], node_names_to_idx[n2]
+                    pair_idx.add((i1, i2))
+
         pair_idx = np.unique(np.array(list(pair_idx)), axis=0)
-        print("Number of diff cluster pairs:", len(pair_idx))
+        print(f"Number of diff cluster pairs (min {min_common_genes} shared genes):", len(pair_idx))
         self.neg_pairs_idx = pair_idx
+        
 
     def run_vamb(self, vamb_outdir, cuda, vambdim):
         from vamb.vamb_run import run as run_vamb
@@ -675,7 +726,7 @@ class AssemblyDataset:
 
         #print(self.scg_counts)
         quartiles = np.percentile(list(self.scg_counts.values()), [25, 50, 75])
-        print("candidate k0s", sorted(set([k for k in self.scg_counts.values() if k >= quartiles[2]])))
+        self.logger.info(f"candidate k0s: {sorted(set([k for k in self.scg_counts.values() if k >= quartiles[2]]))}")
         return max(self.scg_counts.values())
         
        
@@ -781,7 +832,7 @@ class AssemblyDataset:
                     #remove edge
                     scg_counter[overlap] += 1
                     edge_ids_with_same_scgs.append(x)
-        print("edges with overlapping scgs (max=20):", scg_counter.most_common(20))
+        self.logger.info(f"edges with overlapping scgs (max=20): {scg_counter.most_common(20)}")
         return edge_ids_with_same_scgs
 
     def generate_edges_based_on_labels(self, noise=0):

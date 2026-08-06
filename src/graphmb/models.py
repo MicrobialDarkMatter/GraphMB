@@ -1,4 +1,8 @@
-from os import uname
+from os import uname #only works on linux
+#for windows:
+# import platform
+# uname = platform.uname() 
+
 import tensorflow as tf
 
 from tensorflow.keras.optimizers import Adam, SGD
@@ -345,6 +349,7 @@ class TH:
 
     @tf.function
     def nodedist(self, u, v):
+
         #breakpoint()
         #return tf.reduce_sum((tf.expand_dims(x, 0) - tf.expand_dims(y, 1)**2), axis=-1)
         u = tf.nn.l2_normalize(u, axis=1)

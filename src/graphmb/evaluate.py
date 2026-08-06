@@ -365,7 +365,7 @@ def compute_clusters_and_stats(
             scores["unresolved_mags"] = unresolved_mags
             scores["unresolved_contigs"] = len(unresolved_contigs)
             unresolved_contigs_with_scgs = np.array([n for i,n in enumerate(node_names) \
-                if labels[i] not in positive_clusters and len(dataset.contig_markers[n]) > 0])
+                if labels[i] not in positive_clusters and (n in dataset.contig_markers) and len(dataset.contig_markers[n]) > 0])
             scores["unresolved_contigs_with_scgs"] = len(unresolved_contigs_with_scgs)
         # print(hq, mq, "incompete but non cont:", non_comp, "cont but complete:", all_cont)
         positive_pairs = None

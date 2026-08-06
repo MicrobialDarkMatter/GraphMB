@@ -35,6 +35,9 @@ def prepare_data_for_gnn(
 ):
 
     if use_raw: # use raw features instead of precomputed embeddings
+        # dataset.node_depths = np.ones(np.shape(dataset.node_kmers), dtype=np.float64)
+        if dataset.node_depths.ndim == 1:
+            dataset.node_depths = dataset.node_depths.reshape(-1, 1)
         node_raw = np.hstack((dataset.node_depths, dataset.node_kmers))
         # features are already normalized
         #node_raw = (node_raw - node_raw.mean(axis=0, keepdims=True)) / node_raw.std(axis=0, keepdims=True)
@@ -50,7 +53,12 @@ def prepare_data_for_gnn(
     cluster_mask = get_cluster_mask(cluster_markers_only, dataset)
     #connected_marker_nodes = set(range(len(dataset.node_names)))
     
+    if dataset.adj_matrix is None:
+        print("Warning: No adjacency matrix found. Initializing an empty graph.")
+        N = len(dataset.node_names)  # Get number of nodes
+        dataset.adj_matrix = coo_matrix(([], ([], [])), shape=(N, N))
     adj_matrix = dataset.adj_matrix.copy()
+
     edge_weights = dataset.edge_weights.copy()
     if binarize:
         # both dataset.adj_matrix and dataset.edge_weights
@@ -88,7 +96,13 @@ def prepare_data_for_gnn(
         #edge_features = (dataset.edge_weights - dataset.edge_weights.min()) / (
         #    dataset.edge_weights.max() - dataset.edge_weights.min()
         #)
-        edge_features = edge_weights / edge_weights.max()
+        edge_weights = np.array(edge_weights)  # Convert to NumPy array
+        if edge_weights.size == 0:  # Handle empty graph case
+            edge_features = np.array([])  # Empty feature array
+        else:
+            edge_features = edge_weights / edge_weights.max()
+        # edge_features = edge_weights / edge_weights.max()
+
         # multiply normalized values by edge weights
         old_rows, old_cols = adj_matrix.row, adj_matrix.col
         old_idx_to_edge_idx = {(r, c): i for i, (r, c) in enumerate(zip(old_rows, old_cols))}
