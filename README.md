@@ -20,17 +20,12 @@ Can be found here: https://graphmb.readthedocs.io/en/latest/
 
 ## Installation
 
-### NEW - Option 1 - From pypi
+### Option 1 - From pypi
 ```bash
 pip install graphmb
 ```
 
-### Option 2 - From wheel
-```bash
-pip install https://github.com/AndreLamurias/GraphMB/releases/download/v0.1.5/graphmb-0.2.2-py3-none-any.whl
-```
-
-### Option 3 - From source
+### Option 2 - From source
 Clone this repository, and then:
 ```bash
 cd GraphMB
@@ -38,7 +33,7 @@ python -m venv venv; source venv/bin/activate # optional
 pip install .
 ```
 
-### Option 4 - Docker
+### Option 3 - Docker
 Either build the docker image with the Dockerfile or pull from dockerhub:
 ```bash
 docker pull andrelamurias/graphmb
@@ -51,11 +46,9 @@ If you want to use other datasets, use the -v option to mount the path to your d
 docker run -it andrelamurias/graphmb bash
 ```
 
-### Option 5 - From conda
+### Option 4 - From conda
 ```bash
-conda create -n graphmb -c conda-forge make cmake libgcc python=3.7 pip tensorflow
-conda activate graphmb
-pip install graphmb
+conda install -c bioconda graphmb
 ```
 
 ## Input files

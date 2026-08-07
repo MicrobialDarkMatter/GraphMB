@@ -22,8 +22,8 @@ setup(
         "networkx==2.6.2",
         "torch==1.13.1",
         "tensorflow==2.11.1",
-        "tqdm==4.61.2",
-        "mlflow==2.6.0",
+        "tqdm==4.66.3",
+        "mlflow==2.8.1",
         "importlib_resources"
 
     ],
